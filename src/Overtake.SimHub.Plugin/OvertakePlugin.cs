@@ -334,6 +334,7 @@ namespace Overtake.SimHub.Plugin
         {
             try
             {
+                System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
                 using (var client = new WebClient())
                 {
                     client.Headers[HttpRequestHeader.UserAgent] = "OvertakeTelemetry/" + PluginVersion;
