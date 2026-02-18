@@ -1,13 +1,13 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
 
 [assembly: AssemblyTitle("Overtake.SimHub.Plugin")]
-[assembly: AssemblyDescription("SimHub plugin for F1 25 UDP telemetry — Overtake Telemetry")]
+[assembly: AssemblyDescription("SimHub plugin for F1 25 UDP telemetry â€” Overtake Telemetry")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Overtake")]
 [assembly: AssemblyProduct("Overtake Telemetry")]
-[assembly: AssemblyCopyright("Copyright © Overtake 2026")]
+[assembly: AssemblyCopyright("Copyright Â© Overtake 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -18,5 +18,5 @@ using System.Windows;
     ResourceDictionaryLocation.SourceAssembly
 )]
 
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
