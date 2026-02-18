@@ -126,6 +126,7 @@ if ($vjContent.version -ne $Version) {
 # ── Step 4: Git commit + tag ──
 Write-Host ""
 Write-Host "[4/$totalSteps] Git commit + tag..." -ForegroundColor Yellow
+$ErrorActionPreference = "Continue"
 $gitStatus = & git -C $repoRoot status --porcelain 2>&1
 if ($gitStatus) {
     & git -C $repoRoot add -A 2>&1 | Out-Null
@@ -142,6 +143,7 @@ if (-not $tagExists) {
 } else {
     Write-Host "  Tag v$Version already exists" -ForegroundColor DarkYellow
 }
+$ErrorActionPreference = "Stop"
 
 if ($NoPush -and $NoInstall) {
     # Done early
@@ -157,11 +159,15 @@ $step = 5
 if (-not $NoPush) {
     Write-Host ""
     Write-Host "[$step/$totalSteps] Pushing to GitHub..." -ForegroundColor Yellow
-    $pushOutput = & git -C $repoRoot push origin main --tags 2>&1
+    $ErrorActionPreference = "Continue"
+    & git -C $repoRoot push origin main --tags 2>&1 | ForEach-Object {
+        $line = $_.ToString().Trim()
+        if ($line) { Write-Host "  $line" -ForegroundColor DarkGray }
+    }
     $pushExit = $LASTEXITCODE
-    if ($pushOutput) { $pushOutput | ForEach-Object { Write-Host "  $_" } }
+    $ErrorActionPreference = "Stop"
     if ($pushExit -ne 0) {
-        Write-Host "  Push failed (exit $pushExit). You can push manually: git push origin main --tags" -ForegroundColor DarkYellow
+        Write-Host "  Push may have failed (exit $pushExit). Verify: git push origin main --tags" -ForegroundColor DarkYellow
     } else {
         Write-Host "  Pushed to origin/main + tag v$Version" -ForegroundColor Green
     }
