@@ -316,15 +316,19 @@ namespace Overtake.SimHub.Plugin
 
         private string BuildExportFilename()
         {
+            // Use track name from the LATEST session (by LastPacketMs) to avoid stale data
             string trackName = "Unknown";
+            long latestTs = 0;
             foreach (var sess in _store.Sessions.Values)
             {
-                if (sess.TrackId.HasValue)
+                if (sess.TrackId.HasValue && sess.LastPacketMs >= latestTs)
                 {
                     string tn;
                     if (Lookups.Tracks.TryGetValue((int)sess.TrackId.Value, out tn))
+                    {
                         trackName = tn;
-                    break;
+                        latestTs = sess.LastPacketMs;
+                    }
                 }
             }
 

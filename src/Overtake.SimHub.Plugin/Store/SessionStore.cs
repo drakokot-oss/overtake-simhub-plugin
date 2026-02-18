@@ -36,6 +36,8 @@ namespace Overtake.SimHub.Plugin.Store
         public int DiagLdTimeZero;
         public int DiagLdAlreadyExists;
         public int DiagLdSanityFail;
+        public int DiagLdEarlyRegister;
+        public int DiagShEarlyRegister;
         public int DiagParticipantsReceived;
         public int DiagParticipantsNumActive;
         public int DiagPlayerCarIdx = -1;
@@ -90,6 +92,18 @@ namespace Overtake.SimHub.Plugin.Store
         }
 
         /// <summary>
+        /// Register a placeholder driver when data arrives before the Participants packet.
+        /// Returns the DriverRun if registration succeeded, null if the slot is empty.
+        /// </summary>
+        private DriverRun EarlyRegisterDriver(string sid, SessionRun sess, int carIdx)
+        {
+            if (carIdx < 0 || carIdx >= 22) return null;
+            string placeholder = "Player_" + carIdx;
+            sess.TagsByCarIdx[carIdx] = placeholder;
+            return EnsureDriver(sid, carIdx);
+        }
+
+        /// <summary>
         /// Main entry point: ingests a parsed packet into the accumulated state.
         /// Called from OvertakePlugin.DataUpdate (SimHub main thread, ~60Hz).
         /// </summary>
@@ -126,8 +140,8 @@ namespace Overtake.SimHub.Plugin.Store
             var sess = Sessions[sid];
             sess.LastPacketMs = nowMs;
 
-            // Track player car index
-            if (header.PlayerCarIndex >= 0)
+            // Track player car index (255 = invalid/spectator)
+            if (header.PlayerCarIndex < 255)
                 sess.PlayerCarIndex = header.PlayerCarIndex;
 
             // 1) Session
@@ -216,20 +230,25 @@ namespace Overtake.SimHub.Plugin.Store
             DiagParticipantsNumActive = p.NumActiveCars;
             DiagPlayerCarIdx = playerCarIndex;
 
-            // Ensure the player's car index is included even if numActiveCars excluded it
-            if (playerCarIndex >= 0 && !tags.ContainsKey(playerCarIndex))
+            // Include ALL valid overflow entries (cars beyond numActiveCars that have real data)
+            if (p.OverflowEntries != null)
             {
-                if (p.OverflowEntries != null && p.OverflowEntries.ContainsKey(playerCarIndex))
+                foreach (var ovKvp in p.OverflowEntries)
                 {
-                    DiagPlayerRecoveredFromOverflow++;
-                    var pEntry = p.OverflowEntries[playerCarIndex];
-                    tags[playerCarIndex] = pEntry.Name;
+                    int ovIdx = ovKvp.Key;
+                    var ovEntry = ovKvp.Value;
+                    if (tags.ContainsKey(ovIdx)) continue;
+                    tags[ovIdx] = ovEntry.Name;
+                    if (ovIdx == playerCarIndex) DiagPlayerRecoveredFromOverflow++;
                     if (entries != null)
                     {
-                        var expanded = new ParticipantEntry[System.Math.Max(entries.Length, playerCarIndex + 1)];
-                        System.Array.Copy(entries, expanded, entries.Length);
-                        expanded[playerCarIndex] = pEntry;
-                        entries = expanded;
+                        if (ovIdx >= entries.Length)
+                        {
+                            var expanded = new ParticipantEntry[ovIdx + 1];
+                            System.Array.Copy(entries, expanded, entries.Length);
+                            entries = expanded;
+                        }
+                        entries[ovIdx] = ovEntry;
                     }
                 }
             }
@@ -257,7 +276,7 @@ namespace Overtake.SimHub.Plugin.Store
 
             // Resolve player's gamer tag to real driver name via DriverId
             // Runs after cross-session resolution so generic names get resolved first
-            if (playerCarIndex >= 0 && tags.ContainsKey(playerCarIndex))
+            if (playerCarIndex >= 0 && playerCarIndex < 255 && tags.ContainsKey(playerCarIndex))
             {
                 var playerEntry = (entries != null && playerCarIndex < entries.Length) ? entries[playerCarIndex] : null;
                 if (playerEntry != null && !playerEntry.AiControlled && playerEntry.DriverId != 255)
@@ -307,12 +326,13 @@ namespace Overtake.SimHub.Plugin.Store
                 }
             }
 
-            sess.TagsByCarIdx = new Dictionary<int, string>(tags);
+            // Merge tags: add/update from current packet but keep previously known drivers
+            foreach (var kvp in tags)
+                sess.TagsByCarIdx[kvp.Key] = kvp.Value;
 
-            // Store team info
+            // Merge team info: add/update but don't remove previously known teams
             if (entries != null)
             {
-                sess.TeamByCarIdx.Clear();
                 for (int i = 0; i < entries.Length; i++)
                 {
                     if (entries[i] != null)
@@ -419,17 +439,27 @@ namespace Overtake.SimHub.Plugin.Store
             }
             else if (code == "COLL")
             {
-                foreach (int vidx in new[] { evt.Vehicle1Idx, evt.Vehicle2Idx })
+                int v1 = evt.Vehicle1Idx;
+                int v2 = evt.Vehicle2Idx;
+                var d1 = EnsureDriver(sid, v1);
+                if (d1 != null && d1.PenaltySnapshots.Count < 100)
                 {
-                    var d = EnsureDriver(sid, vidx);
-                    if (d != null && d.PenaltySnapshots.Count < 100)
+                    d1.PenaltySnapshots.Add(new PenaltySnapshot
                     {
-                        d.PenaltySnapshots.Add(new PenaltySnapshot
-                        {
-                            TsMs = nowMs,
-                            EventCode = "COLL",
-                        });
-                    }
+                        TsMs = nowMs,
+                        EventCode = "COLL",
+                        OtherVehicleIdx = v2,
+                    });
+                }
+                var d2 = EnsureDriver(sid, v2);
+                if (d2 != null && d2.PenaltySnapshots.Count < 100)
+                {
+                    d2.PenaltySnapshots.Add(new PenaltySnapshot
+                    {
+                        TsMs = nowMs,
+                        EventCode = "COLL",
+                        OtherVehicleIdx = v1,
+                    });
                 }
             }
         }
@@ -439,7 +469,15 @@ namespace Overtake.SimHub.Plugin.Store
             DiagShReceived++;
             int carIdx = sh.CarIdx;
             var d = EnsureDriver(sid, carIdx);
-            if (d == null) { DiagShNoDriver++; return; }
+            if (d == null)
+            {
+                if (sh.NumLaps > 0)
+                {
+                    d = EarlyRegisterDriver(sid, sess, carIdx);
+                    if (d != null) DiagShEarlyRegister++;
+                }
+                if (d == null) { DiagShNoDriver++; return; }
+            }
 
             var laps = sh.Laps;
             DiagShLapsParsed += (laps != null) ? laps.Length : 0;
@@ -560,7 +598,18 @@ namespace Overtake.SimHub.Plugin.Store
                 var row = rows[i];
                 int carIdx = row.CarIdx;
                 var d = EnsureDriver(sid, carIdx);
-                if (d == null) { DiagLdNoDriver++; continue; }
+                if (d == null)
+                {
+                    if (row.CarPosition > 0 || row.CurrentLapNum > 0)
+                    {
+                        d = EarlyRegisterDriver(sid, sess, carIdx);
+                        if (d != null) DiagLdEarlyRegister++;
+                    }
+                    if (d == null) { DiagLdNoDriver++; continue; }
+                }
+
+                if (row.GridPosition > 0)
+                    d.GridPosition = row.GridPosition;
 
                 // Pit stops: track increments
                 int numPit = row.NumPitStops;

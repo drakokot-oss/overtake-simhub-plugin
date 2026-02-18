@@ -114,6 +114,9 @@ namespace Overtake.SimHub.Plugin.Store
         // Qualifying: last non-zero lastLapTimeInMS
         public int LastSeenLapTimeMs;
 
+        // Grid position (from LapData packet 2)
+        public byte GridPosition;
+
         // Warnings tracking (from LapData packet 2)
         public int LastTotalWarnings;
         public int LastCornerCuttingWarnings;
