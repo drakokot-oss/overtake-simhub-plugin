@@ -1,0 +1,87 @@
+=============================================
+  OVERTAKE TELEMETRY - Plugin para SimHub
+  racehub.overtakef1.com
+=============================================
+
+
+  INSTALACAO (Primeira vez)
+  -------------------------
+
+  1. Tenha o SimHub instalado no seu PC
+     (baixe em simhub.gg se ainda nao tiver)
+
+  2. Coloque os 2 arquivos abaixo na MESMA pasta:
+     - Install-OvertakeTelemetry.bat
+     - Overtake.SimHub.Plugin.dll
+
+  3. Clique duas vezes em "Install-OvertakeTelemetry.bat"
+
+  4. Uma janela aparecera pedindo confirmacao.
+     Clique SIM para instalar.
+
+  5. Pronto! Abra o SimHub e procure
+     "Overtake Telemetry" no menu da esquerda.
+
+
+  CONFIGURACAO (Obrigatoria)
+  --------------------------
+
+  Apos instalar, voce precisa configurar:
+
+  PASSO 1 - No F1 25 (Jogo):
+    Configuracoes > Telemetria:
+    - UDP Telemetry = Ligado
+    - UDP IP = 127.0.0.1
+    - UDP Port = 20778
+    - UDP Format = 2025
+
+  PASSO 2 - No SimHub:
+    Inicio > Codemasters F1 25 > Game config...
+    - Coloque UDP Port = 20777
+
+  Para CONSOLE (PS5 / Xbox):
+    Igual ao passo acima, mas no Passo 1 use o
+    IP do seu PC em vez de 127.0.0.1
+    (descubra digitando "ipconfig" no CMD do PC)
+    O console e o PC devem estar na mesma rede.
+
+
+  ATUALIZANDO O PLUGIN
+  --------------------
+
+  Quando houver uma versao nova, o plugin vai
+  mostrar "Update available" dentro do SimHub.
+
+  Para atualizar:
+  1. Baixe a nova versao em
+     racehub.overtakef1.com/downloads
+  2. Execute o instalador novamente (mesmo processo)
+     Ele substitui a versao antiga automaticamente.
+
+
+  COMO FUNCIONA
+  -------------
+
+  O plugin captura dados de telemetria do F1 25
+  durante suas sessoes de corrida e gera um
+  arquivo JSON com todos os resultados, tempos
+  de volta, penalidades e estatisticas.
+
+  Faca o upload do JSON em racehub.overtakef1.com
+  para obter classificacoes e estatisticas
+  instantaneas para sua liga.
+
+  O plugin retransmite todos os dados para o
+  SimHub, entao seus dashboards e overlays
+  continuam funcionando normalmente.
+
+
+  SUPORTE
+  -------
+
+  racehub.overtakef1.com
+  racehub.overtakef1.com/guide
+
+=============================================
+  Overtake - A Plataforma de Ligas de F1 25
+=============================================

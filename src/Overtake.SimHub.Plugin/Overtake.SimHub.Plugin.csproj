@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Overtake.SimHub.Plugin</RootNamespace>
+    <AssemblyName>Overtake.SimHub.Plugin</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <SimHubInstallPath Condition=" '$(SimHubInstallPath)' == '' ">$(SIMHUB_INSTALL_PATH)</SimHubInstallPath>
+    <SimHubInstallPath Condition=" '$(SimHubInstallPath)' == '' ">C:\Program Files (x86)\SimHub\</SimHubInstallPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Net" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="GameReaderCommon">
+      <HintPath>$(SimHubInstallPath)GameReaderCommon.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SimHub.Plugins">
+      <HintPath>$(SimHubInstallPath)SimHub.Plugins.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SimHub.Logging">
+      <HintPath>$(SimHubInstallPath)SimHub.Logging.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="log4net">
+      <HintPath>$(SimHubInstallPath)log4net.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="MahApps.Metro">
+      <HintPath>$(SimHubInstallPath)MahApps.Metro.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="MahApps.Metro.IconPacks.Material">
+      <HintPath>$(SimHubInstallPath)MahApps.Metro.IconPacks.Material.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="WoteverCommon">
+      <HintPath>$(SimHubInstallPath)WoteverCommon.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="OvertakePlugin.cs" />
+    <Compile Include="OvertakeSettings.cs" />
+    <Compile Include="UdpReceiver.cs" />
+    <Compile Include="Packets\PacketHeader.cs" />
+    <Compile Include="Packets\SessionData.cs" />
+    <Compile Include="Packets\LapDataEntry.cs" />
+    <Compile Include="Packets\EventData.cs" />
+    <Compile Include="Packets\ParticipantsData.cs" />
+    <Compile Include="Packets\FinalClassificationData.cs" />
+    <Compile Include="Packets\CarDamageEntry.cs" />
+    <Compile Include="Packets\SessionHistoryData.cs" />
+    <Compile Include="Parsers\PacketParser.cs" />
+    <Compile Include="Store\DriverRun.cs" />
+    <Compile Include="Store\SessionRun.cs" />
+    <Compile Include="Store\SessionStore.cs" />
+    <Compile Include="Finalizer\Lookups.cs" />
+    <Compile Include="Finalizer\LeagueFinalizer.cs" />
+    <Compile Include="UI\SettingsControl.xaml.cs">
+      <DependentUpon>SettingsControl.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Include="UI\SettingsControl.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\overtake-icon.png" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent>XCOPY /Y /R "$(TargetDir)$(TargetName)*" "$(SimHubInstallPath)"</PostBuildEvent>
+  </PropertyGroup>
+</Project>
