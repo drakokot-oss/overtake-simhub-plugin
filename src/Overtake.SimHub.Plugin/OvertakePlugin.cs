@@ -371,11 +371,16 @@ namespace Overtake.SimHub.Plugin
             }
         }
 
+        /// <summary>
+        /// Only auto-export after the main Race ends, so the JSON contains
+        /// all accumulated sessions (Qualifying, Sprint, etc.) in one file.
+        /// Sprint-only lobbies can use the manual Export button.
+        /// </summary>
         private static bool IsTerminalSession(byte id)
         {
             string name;
             if (Finalizer.Lookups.SessionType.TryGetValue(id, out name))
-                return name == "Race" || name == "Race2" || name == "Sprint";
+                return name == "Race";
             return false;
         }
 
