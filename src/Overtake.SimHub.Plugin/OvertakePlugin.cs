@@ -30,6 +30,7 @@ namespace Overtake.SimHub.Plugin
         private UdpReceiver _receiver;
         private long _displayedPackets;
         private string _sessionType = "";
+        private byte _currentSessionTypeId;
         private SessionStore _store;
         private string _lastExportPath = "";
         private string _lastAutoExportMsg = "";
@@ -115,14 +116,18 @@ namespace Overtake.SimHub.Plugin
                 if (parsed == null) continue;
 
                 if (parsed.Session != null)
+                {
                     _sessionType = SessionTypeName(parsed.Session.SessionType);
+                    _currentSessionTypeId = parsed.Session.SessionType;
+                }
 
                 _store.Ingest(parsed);
 
                 if (parsed.Event != null && parsed.Event.Code == "SEND")
                 {
-                    _sessionEndDetected = true;
                     _sessionEnded = true;
+                    if (IsTerminalSession(_currentSessionTypeId))
+                        _sessionEndDetected = true;
                 }
                 if (parsed.Event != null && parsed.Event.Code == "SSTA")
                     _sessionEnded = false;
@@ -296,10 +301,17 @@ namespace Overtake.SimHub.Plugin
 
         private int ActiveDriverCount()
         {
-            int count = 0;
+            Store.SessionRun latest = null;
+            long latestTs = 0;
             foreach (var sess in _store.Sessions.Values)
-                count += sess.Drivers.Count;
-            return count;
+            {
+                if (sess.LastPacketMs >= latestTs)
+                {
+                    latestTs = sess.LastPacketMs;
+                    latest = sess;
+                }
+            }
+            return latest != null ? latest.Drivers.Count : 0;
         }
 
         private string BuildExportFilename()
@@ -357,6 +369,14 @@ namespace Overtake.SimHub.Plugin
                 global::SimHub.Logging.Current.Info(
                     string.Format("[Overtake] Update check skipped: {0}", ex.Message));
             }
+        }
+
+        private static bool IsTerminalSession(byte id)
+        {
+            string name;
+            if (Finalizer.Lookups.SessionType.TryGetValue(id, out name))
+                return name == "Race" || name == "Race2" || name == "Sprint";
+            return false;
         }
 
         private static string SessionTypeName(byte id)

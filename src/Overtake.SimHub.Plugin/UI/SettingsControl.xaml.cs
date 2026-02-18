@@ -146,19 +146,29 @@ namespace Overtake.SimHub.Plugin.UI
             if (store != null)
             {
                 sessionCount = store.Sessions.Count;
+                Store.SessionRun latestSession = null;
+                long latestTs = 0;
                 foreach (var sess in store.Sessions.Values)
                 {
-                    driverCount += sess.Drivers.Count;
-                    if (sess.SessionType.HasValue && string.IsNullOrEmpty(sessionType))
+                    if (sess.LastPacketMs >= latestTs)
+                    {
+                        latestTs = sess.LastPacketMs;
+                        latestSession = sess;
+                    }
+                }
+                if (latestSession != null)
+                {
+                    driverCount = latestSession.Drivers.Count;
+                    if (latestSession.SessionType.HasValue)
                     {
                         string stName;
-                        if (Finalizer.Lookups.SessionType.TryGetValue(sess.SessionType.Value, out stName))
+                        if (Finalizer.Lookups.SessionType.TryGetValue(latestSession.SessionType.Value, out stName))
                             sessionType = stName;
                     }
-                    if (sess.TrackId.HasValue && string.IsNullOrEmpty(trackName))
+                    if (latestSession.TrackId.HasValue)
                     {
                         string trName;
-                        if (Finalizer.Lookups.Tracks.TryGetValue(sess.TrackId.Value, out trName))
+                        if (Finalizer.Lookups.Tracks.TryGetValue(latestSession.TrackId.Value, out trName))
                             trackName = trName;
                     }
                 }
