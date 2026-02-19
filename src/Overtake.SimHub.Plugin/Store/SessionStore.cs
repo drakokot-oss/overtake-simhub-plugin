@@ -93,12 +93,13 @@ namespace Overtake.SimHub.Plugin.Store
 
         /// <summary>
         /// Register a placeholder driver when data arrives before the Participants packet.
+        /// Uses "Car_X" prefix so it's distinct from the game's "Player" dedup naming.
         /// Returns the DriverRun if registration succeeded, null if the slot is empty.
         /// </summary>
         private DriverRun EarlyRegisterDriver(string sid, SessionRun sess, int carIdx)
         {
             if (carIdx < 0 || carIdx >= 22) return null;
-            string placeholder = "Player_" + carIdx;
+            string placeholder = "Car_" + carIdx;
             sess.TagsByCarIdx[carIdx] = placeholder;
             return EnsureDriver(sid, carIdx);
         }

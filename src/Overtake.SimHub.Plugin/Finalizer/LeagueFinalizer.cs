@@ -14,6 +14,25 @@ namespace Overtake.SimHub.Plugin.Finalizer
     public static class LeagueFinalizer
     {
         private static readonly Regex GhostCarRe = new Regex(@"^Car\d+$");
+        private static readonly Regex EarlyRegRe = new Regex(@"^Car_\d+$");
+
+        /// <summary>
+        /// Determines if an entry is a phantom/empty car slot that should be excluded.
+        /// Team 255 = invalid team, Driver_X/Car_X with 0 laps = empty slot.
+        /// </summary>
+        private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess)
+        {
+            ParticipantEntry teamInfo;
+            sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
+            bool invalidTeam = teamInfo == null || teamInfo.TeamId == 255;
+            if (teamInfo != null && teamInfo.TeamId == 255 && dr.Laps.Count == 0)
+                return true;
+            if (tag.StartsWith("Driver_") && dr.Laps.Count == 0 && invalidTeam)
+                return true;
+            if (EarlyRegRe.IsMatch(tag) && dr.Laps.Count == 0 && invalidTeam)
+                return true;
+            return false;
+        }
 
         public static Dictionary<string, object> Finalize(SessionStore store)
         {
@@ -31,10 +50,14 @@ namespace Overtake.SimHub.Plugin.Finalizer
             var seenTags = new HashSet<string>();
             foreach (var sess in store.Sessions.Values)
             {
-                foreach (var tag in sess.TagsByCarIdx.Values)
+                foreach (var kvp in sess.TagsByCarIdx)
                 {
-                    if (!string.IsNullOrEmpty(tag) && seenTags.Add(tag))
-                        allParticipants.Add(tag);
+                    string tag = kvp.Value;
+                    if (string.IsNullOrEmpty(tag) || !seenTags.Add(tag)) continue;
+                    DriverRun dr;
+                    sess.Drivers.TryGetValue(tag, out dr);
+                    if (dr != null && IsPhantomEntry(tag, dr, sess)) continue;
+                    allParticipants.Add(tag);
                 }
             }
 
@@ -201,6 +224,9 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (!seenResultTags.Add(tag)) continue;
                     if (!sess.Drivers.ContainsKey(tag)) continue;
 
+                    var drCheck = sess.Drivers[tag];
+                    if (IsPhantomEntry(tag, drCheck, sess)) continue;
+
                     int bestMs;
                     bestByTag.TryGetValue(tag, out bestMs);
                     if (bestMs == 0 && row.BestLapTimeMs > 0)
@@ -317,12 +343,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
             for (int i = 0; i < resultsOut.Count; i++)
                 resultsOut[i]["position"] = i + 1;
 
-            // Build drivers payload
+            // Build drivers payload (filter out phantom/empty car slots)
             var driversOut = new Dictionary<string, object>();
             foreach (var dkvp in sess.Drivers)
             {
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
+                if (IsPhantomEntry(tag, dr, sess)) continue;
                 driversOut[tag] = FinalizeDriver(tag, dr, sess, idxToTag, globalTeamByTag);
             }
 
@@ -680,6 +707,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
             {
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
+                if (IsPhantomEntry(tag, dr, sess)) continue;
+
                 int nLaps = dr.Laps.Count;
                 int totalMs = 0;
                 foreach (var lap in dr.Laps) totalMs += lap.LapTimeMs;
@@ -744,6 +773,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
             {
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
+                if (IsPhantomEntry(tag, dr, sess)) continue;
+
                 int bestMs;
                 bestByTag.TryGetValue(tag, out bestMs);
 

@@ -88,7 +88,7 @@ namespace Overtake.SimHub.Plugin.Packets
 
             var entries = new ParticipantEntry[numActive];
             var tagsByIdx = new Dictionary<int, string>();
-            var seenTags = new Dictionary<string, int>();
+            var nameCount = new Dictionary<string, int>();
 
             for (int i = 0; i < numActive; i++)
             {
@@ -98,53 +98,31 @@ namespace Overtake.SimHub.Plugin.Packets
 
                 var entry = ParseEntry(data, start, i);
                 entry.Name = ParseName(data, start, i);
+                entries[i] = entry;
 
-                string tag = entry.Name;
-                if (seenTags.ContainsKey(tag))
+                string baseName = entry.Name;
+                int count;
+                nameCount.TryGetValue(baseName, out count);
+                nameCount[baseName] = count + 1;
+            }
+
+            // Build tags: use race number for disambiguation of duplicate names
+            for (int i = 0; i < numActive; i++)
+            {
+                if (entries[i] == null) continue;
+                string baseName = entries[i].Name;
+                int count;
+                nameCount.TryGetValue(baseName, out count);
+                if (count > 1)
                 {
-                    seenTags[tag]++;
-                    tag = string.Format("{0}_{1}", entry.Name, i);
+                    int rn = entries[i].RaceNumber;
+                    tagsByIdx[i] = rn > 0
+                        ? string.Format("{0} #{1}", baseName, rn)
+                        : string.Format("{0}_{1}", baseName, i);
                 }
                 else
                 {
-                    seenTags[tag] = 1;
-                }
-
-                tagsByIdx[i] = tag;
-                entries[i] = entry;
-            }
-
-            // Rename first occurrence of duplicates
-            var baseCounts = new Dictionary<string, List<int>>();
-            foreach (var kvp in tagsByIdx)
-            {
-                string baseTag = kvp.Value;
-                int underscorePos = baseTag.LastIndexOf('_');
-                if (underscorePos > 0)
-                {
-                    string suffix = baseTag.Substring(underscorePos + 1);
-                    int dummy;
-                    if (int.TryParse(suffix, out dummy))
-                        baseTag = baseTag.Substring(0, underscorePos);
-                }
-
-                List<int> list;
-                if (!baseCounts.TryGetValue(baseTag, out list))
-                {
-                    list = new List<int>();
-                    baseCounts[baseTag] = list;
-                }
-                list.Add(kvp.Key);
-            }
-            foreach (var kvp in baseCounts)
-            {
-                if (kvp.Value.Count > 1)
-                {
-                    foreach (int carIdx in kvp.Value)
-                    {
-                        if (tagsByIdx[carIdx] == kvp.Key)
-                            tagsByIdx[carIdx] = string.Format("{0}_{1}", kvp.Key, carIdx);
-                    }
+                    tagsByIdx[i] = baseName;
                 }
             }
 
@@ -157,9 +135,24 @@ namespace Overtake.SimHub.Plugin.Packets
                     break;
                 var entry = ParseEntry(data, start, i);
                 entry.Name = ParseName(data, start, i);
-                // Only keep entries that look meaningful (non-zero team or non-generic name)
+                if (entry.TeamId == 255 && entry.Name.StartsWith("Driver_")) continue;
                 if (entry.TeamId > 0 || (!entry.Name.StartsWith("Driver_") && !string.IsNullOrWhiteSpace(entry.Name)))
+                {
+                    // Dedup overflow names against existing tags
+                    string tag = entry.Name;
+                    int dupCount;
+                    nameCount.TryGetValue(tag, out dupCount);
+                    nameCount[tag] = dupCount + 1;
+                    if (dupCount > 0)
+                    {
+                        int rn = entry.RaceNumber;
+                        tag = rn > 0
+                            ? string.Format("{0} #{1}", entry.Name, rn)
+                            : string.Format("{0}_{1}", entry.Name, i);
+                    }
+                    tagsByIdx[i] = tag;
                     overflow[i] = entry;
+                }
             }
 
             return new ParticipantsData
