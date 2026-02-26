@@ -41,7 +41,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Step 1: Build
-Write-Host "[1/3] Building Release..." -ForegroundColor Yellow
+Write-Host "[1/4] Building Release..." -ForegroundColor Yellow
 $msbuild = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe"
 if (-not (Test-Path $msbuild)) {
     Write-Host "ERROR: MSBuild not found at $msbuild" -ForegroundColor Red
@@ -77,7 +77,7 @@ Write-Host "  DLL: $dllName ($([math]::Round($dllSize/1024, 1)) KB)" -Foreground
 # Step 2: Tests
 if (-not $SkipTests) {
     Write-Host ""
-    Write-Host "[2/3] Running tests..." -ForegroundColor Yellow
+    Write-Host "[2/4] Running tests..." -ForegroundColor Yellow
 
     $test1 = & powershell -ExecutionPolicy Bypass -File "$PSScriptRoot\Test-SessionStore.ps1" -DllPath $dllPath 2>&1
     $t1Exit = $LASTEXITCODE
@@ -100,12 +100,59 @@ if (-not $SkipTests) {
     Write-Host "  Finalizer:    $t2Summary" -ForegroundColor Green
 } else {
     Write-Host ""
-    Write-Host "[2/3] Tests skipped" -ForegroundColor DarkYellow
+    Write-Host "[2/4] Tests skipped" -ForegroundColor DarkYellow
 }
 
-# Step 3: Package
+# Step 3: Build Inno Setup installer
 Write-Host ""
-Write-Host "[3/3] Packaging .simhubplugin..." -ForegroundColor Yellow
+Write-Host "[3/4] Building installer (Inno Setup)..." -ForegroundColor Yellow
+
+$issDir = "$repoRoot\dist\v1.1.12"
+$issFile = Get-ChildItem "$repoRoot\dist" -Filter "installer.iss" -Recurse | Select-Object -First 1
+if ($issFile) {
+    $issDir = $issFile.DirectoryName
+    $issPath = $issFile.FullName
+} else {
+    $issPath = "$issDir\installer.iss"
+}
+
+$isccPaths = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+$iscc = $null
+foreach ($p in $isccPaths) {
+    if (Test-Path $p) { $iscc = $p; break }
+}
+
+$installerExe = $null
+if ($iscc -and (Test-Path $issPath)) {
+    $filesDir = "$issDir\files"
+    New-Item -ItemType Directory -Force -Path $filesDir | Out-Null
+    Copy-Item $dllPath "$filesDir\$dllName" -Force
+
+    $issContent = Get-Content $issPath -Raw
+    $semVer = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dllPath).FileVersion -replace '\.0$', ''
+    $issContent = $issContent -replace '#define MyAppVersion ".*?"', "#define MyAppVersion `"$semVer`""
+    Set-Content -Path $issPath -Value $issContent -Encoding UTF8 -NoNewline
+
+    & $iscc $issPath 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    $installerExe = Get-ChildItem $issDir -Filter "*.exe" | Where-Object { $_.Name -match "Setup" } | Select-Object -First 1
+    if ($installerExe) {
+        $instSize = [math]::Round($installerExe.Length / 1024, 1)
+        Write-Host "  Installer: $($installerExe.Name) ($instSize KB)" -ForegroundColor Green
+        Copy-Item $installerExe.FullName "$OutputDir\$($installerExe.Name)" -Force
+    } else {
+        Write-Host "  [WARN] Installer EXE not found after ISCC" -ForegroundColor DarkYellow
+    }
+} else {
+    if (-not $iscc) { Write-Host "  [SKIP] Inno Setup not found" -ForegroundColor DarkYellow }
+    if (-not (Test-Path $issPath)) { Write-Host "  [SKIP] installer.iss not found at $issPath" -ForegroundColor DarkYellow }
+}
+
+# Step 4: Package
+Write-Host ""
+Write-Host "[4/4] Packaging .simhubplugin..." -ForegroundColor Yellow
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
@@ -147,13 +194,16 @@ if (-not (Test-Path $batPath)) {
 
 # Auto-generate version.json for update checker
 $semVer = $version -replace '\.0$', ''
-$versionJson = @{
-    version  = $semVer
-    download = "https://racehub.overtakef1.com/downloads"
-    released = (Get-Date -Format "yyyy-MM-dd")
-} | ConvertTo-Json
+$installerName = if ($installerExe) { $installerExe.Name } else { "Overtake.SimHub.Plugin-v$semVer-Setup.exe" }
+$versionJsonObj = [ordered]@{
+    version      = $semVer
+    released     = (Get-Date -Format "yyyy-MM-dd")
+    download     = "https://racehub.overtakef1.com/downloads"
+    installerUrl = "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v$semVer/$installerName"
+    releaseNotes = ""
+}
 $versionJsonPath = "$repoRoot\version.json"
-Set-Content -Path $versionJsonPath -Value $versionJson -Encoding UTF8
+Set-Content -Path $versionJsonPath -Value ($versionJsonObj | ConvertTo-Json) -Encoding UTF8
 Write-Host "  version.json: v$semVer" -ForegroundColor Gray
 
 # Create distribution ZIP for website download
@@ -184,10 +234,10 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  BUILD COMPLETE  (v$semVer)" -ForegroundColor Green
 Write-Host "  $pluginPath" -ForegroundColor White
+if ($installerExe) {
+    Write-Host "  $($installerExe.Name)" -ForegroundColor White
+}
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "For racehub.overtakef1.com/downloads:" -ForegroundColor White
-Write-Host "  Upload: $distZipName" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Users download the ZIP, extract, and double-click the .bat" -ForegroundColor Gray
+Write-Host "Next: run .\Release.ps1 to push + create GitHub Release" -ForegroundColor Cyan
 Write-Host ""

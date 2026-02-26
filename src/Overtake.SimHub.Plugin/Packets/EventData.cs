@@ -37,6 +37,9 @@ namespace Overtake.SimHub.Plugin.Packets
         public byte FastestLapVehicleIdx;
         public float FastestLapTimeSec;
 
+        // DTSV / SGSV (drive-through or stop-go served)
+        public byte ServedVehicleIdx;
+
         // SCAR
         public byte SafetyCarType;
         public byte SafetyCarEventType;
@@ -90,6 +93,10 @@ namespace Overtake.SimHub.Plugin.Packets
             {
                 evt.FastestLapVehicleIdx = data[d];
                 evt.FastestLapTimeSec = BitConverter.ToSingle(data, d + 1);
+            }
+            else if ((code == "DTSV" || code == "SGSV") && data.Length >= d + 1)
+            {
+                evt.ServedVehicleIdx = data[d];
             }
             else if (code == "SCAR" && data.Length >= d + 2)
             {

@@ -39,8 +39,11 @@ namespace Overtake.SimHub.Plugin.Store
         public int? LatestTrackTempC;
         public int? LatestAirTempC;
 
-        // Player
+        // Player / Spectator
         public int PlayerCarIndex = -1;
+        public int IsSpectating;
+        public int GamePaused;
+        public int SpectatorCarIndex = 255;
 
         // Timing
         public long LastPacketMs;
@@ -49,5 +52,8 @@ namespace Overtake.SimHub.Plugin.Store
         // SC counters (filtered from events)
         public int NumSafetyCarDeployments;
         public int NumVSCDeployments;
+
+        // Peak numActiveCars seen across all Participants packets (spectator mode fluctuates)
+        public int MaxNumActiveCars;
     }
 }

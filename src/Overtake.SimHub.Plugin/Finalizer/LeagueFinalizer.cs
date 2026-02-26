@@ -14,24 +14,196 @@ namespace Overtake.SimHub.Plugin.Finalizer
     public static class LeagueFinalizer
     {
         private static readonly Regex GhostCarRe = new Regex(@"^Car\d+$");
+        private static readonly Regex DriverPlaceholderRe = new Regex(@"^Driver_\d+$");
         private static readonly Regex EarlyRegRe = new Regex(@"^Car_\d+$");
 
         /// <summary>
-        /// Determines if an entry is a phantom/empty car slot that should be excluded.
-        /// Team 255 = invalid team, Driver_X/Car_X with 0 laps = empty slot.
+        /// Determines if an entry is a phantom that should be excluded.
+        /// Post-dedup: placeholder tag matching is no longer needed because
+        /// DeduplicateDrivers already merged duplicate Car_X/Driver_X entries
+        /// into their canonical counterparts. Only filter AI with 0 laps.
         /// </summary>
         private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess)
         {
+            if (string.IsNullOrEmpty(tag))
+                return true;
+
             ParticipantEntry teamInfo;
             sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
-            bool invalidTeam = teamInfo == null || teamInfo.TeamId == 255;
-            if (teamInfo != null && teamInfo.TeamId == 255 && dr.Laps.Count == 0)
+
+            if (teamInfo != null && teamInfo.AiControlled && dr.Laps.Count == 0)
                 return true;
-            if (tag.StartsWith("Driver_") && dr.Laps.Count == 0 && invalidTeam)
+
+            // Generic placeholder tags with 0 laps are empty FC slots
+            if (dr.Laps.Count == 0 && IsGenericTag(tag))
                 return true;
-            if (EarlyRegRe.IsMatch(tag) && dr.Laps.Count == 0 && invalidTeam)
-                return true;
+
             return false;
+        }
+
+        private static bool IsGenericTag(string tag)
+        {
+            return EarlyRegRe.IsMatch(tag) || GhostCarRe.IsMatch(tag)
+                || DriverPlaceholderRe.IsMatch(tag) || tag.StartsWith("Player");
+        }
+
+        /// <summary>
+        /// Returns tag priority: 1 = real gamertag, 2 = Player #XX, 3 = placeholder (Car_X, Driver_X, CarN).
+        /// Lower is better.
+        /// </summary>
+        private static int TagPriority(string tag)
+        {
+            if (string.IsNullOrEmpty(tag)) return 99;
+            if (DriverPlaceholderRe.IsMatch(tag) || EarlyRegRe.IsMatch(tag) || GhostCarRe.IsMatch(tag))
+                return 3;
+            if (tag.StartsWith("Player #") || tag.StartsWith("Player_"))
+                return 2;
+            return 1;
+        }
+
+        /// <summary>
+        /// Deduplicates drivers by physical car identity (teamId, raceNumber).
+        /// The F1 25 game in spectator mode sends the same car under multiple names
+        /// in different Participants packets. This groups them and keeps a single
+        /// canonical entry per physical car.
+        /// </summary>
+        private static void DeduplicateDrivers(SessionRun sess)
+        {
+            var physGroups = new Dictionary<string, List<string>>();
+
+            foreach (var dkvp in sess.Drivers)
+            {
+                string tag = dkvp.Key;
+                DriverRun dr = dkvp.Value;
+
+                ParticipantEntry teamInfo;
+                sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
+                if (teamInfo == null) continue;
+
+                string physKey = teamInfo.TeamId + "_" + teamInfo.RaceNumber;
+                List<string> group;
+                if (!physGroups.TryGetValue(physKey, out group))
+                {
+                    group = new List<string>();
+                    physGroups[physKey] = group;
+                }
+                group.Add(tag);
+            }
+
+            var tagsToRemove = new List<string>();
+
+            foreach (var gkvp in physGroups)
+            {
+                var group = gkvp.Value;
+                if (group.Count <= 1) continue;
+
+                // Pick canonical: lowest priority number wins; tiebreak = more laps
+                string canonicalTag = group[0];
+                DriverRun canonicalDr = sess.Drivers[canonicalTag];
+                int canonicalPri = TagPriority(canonicalTag);
+
+                for (int i = 1; i < group.Count; i++)
+                {
+                    string tag = group[i];
+                    DriverRun dr = sess.Drivers[tag];
+                    int pri = TagPriority(tag);
+
+                    bool replace = false;
+                    if (pri < canonicalPri)
+                        replace = true;
+                    else if (pri == canonicalPri && dr.Laps.Count > canonicalDr.Laps.Count)
+                        replace = true;
+
+                    if (replace)
+                    {
+                        canonicalTag = tag;
+                        canonicalDr = dr;
+                        canonicalPri = pri;
+                    }
+                }
+
+                // Merge non-canonical entries into canonical, then remove them
+                foreach (var tag in group)
+                {
+                    if (tag == canonicalTag) continue;
+                    var dupDr = sess.Drivers[tag];
+
+                    // Laps: keep set with more entries (data is byte-identical for duplicates)
+                    if (dupDr.Laps.Count > canonicalDr.Laps.Count)
+                    {
+                        canonicalDr.Laps = dupDr.Laps;
+                        canonicalDr.LastRecordedLapNumber = dupDr.LastRecordedLapNumber;
+                    }
+
+                    // TyreStints, TyreWearPerLap, DamagePerLap: keep from entry with more data
+                    if (dupDr.TyreStints.Count > canonicalDr.TyreStints.Count)
+                        canonicalDr.TyreStints = dupDr.TyreStints;
+                    if (dupDr.TyreWearPerLap.Count > canonicalDr.TyreWearPerLap.Count)
+                        canonicalDr.TyreWearPerLap = dupDr.TyreWearPerLap;
+                    if (dupDr.DamagePerLap.Count > canonicalDr.DamagePerLap.Count)
+                        canonicalDr.DamagePerLap = dupDr.DamagePerLap;
+
+                    // PenaltySnapshots: union without duplicates (by tsMs + penaltyType)
+                    foreach (var ps in dupDr.PenaltySnapshots)
+                    {
+                        bool exists = false;
+                        foreach (var eps in canonicalDr.PenaltySnapshots)
+                        {
+                            if (eps.TsMs == ps.TsMs && eps.PenaltyType == ps.PenaltyType
+                                && eps.EventCode == ps.EventCode)
+                            { exists = true; break; }
+                        }
+                        if (!exists) canonicalDr.PenaltySnapshots.Add(ps);
+                    }
+
+                    // PitStops: union without duplicates (by tsMs)
+                    foreach (var pit in dupDr.PitStops)
+                    {
+                        bool exists = false;
+                        foreach (var epit in canonicalDr.PitStops)
+                        {
+                            if (epit.TsMs == pit.TsMs) { exists = true; break; }
+                        }
+                        if (!exists) canonicalDr.PitStops.Add(pit);
+                    }
+
+                    // Best: keep the one with lower bestLapTimeMs
+                    if (dupDr.Best.ContainsKey("bestLapTimeMs") && dupDr.Best["bestLapTimeMs"] != null)
+                    {
+                        int dupBest;
+                        if (int.TryParse(dupDr.Best["bestLapTimeMs"].ToString(), out dupBest) && dupBest > 0)
+                        {
+                            bool canonicalHasBest = canonicalDr.Best.ContainsKey("bestLapTimeMs")
+                                && canonicalDr.Best["bestLapTimeMs"] != null;
+                            int canBest = 0;
+                            if (canonicalHasBest)
+                                int.TryParse(canonicalDr.Best["bestLapTimeMs"].ToString(), out canBest);
+                            if (canBest <= 0 || dupBest < canBest)
+                                canonicalDr.Best = dupDr.Best;
+                        }
+                    }
+
+                    // Keep better LastSeenLapTimeMs
+                    if (dupDr.LastSeenLapTimeMs > 0 &&
+                        (canonicalDr.LastSeenLapTimeMs <= 0 || dupDr.LastSeenLapTimeMs < canonicalDr.LastSeenLapTimeMs))
+                        canonicalDr.LastSeenLapTimeMs = dupDr.LastSeenLapTimeMs;
+
+                    tagsToRemove.Add(tag);
+                }
+            }
+
+            // Remove deduplicated entries
+            foreach (var tag in tagsToRemove)
+            {
+                sess.Drivers.Remove(tag);
+                var idxToRemove = new List<int>();
+                foreach (var kvp in sess.TagsByCarIdx)
+                {
+                    if (kvp.Value == tag) idxToRemove.Add(kvp.Key);
+                }
+                foreach (var idx in idxToRemove)
+                    sess.TagsByCarIdx.Remove(idx);
+            }
         }
 
         public static Dictionary<string, object> Finalize(SessionStore store)
@@ -46,20 +218,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "source", new Dictionary<string, object>() },
             };
 
+            // Participants will be rebuilt from session outputs so they match actual drivers shown
             var allParticipants = new List<string>();
-            var seenTags = new HashSet<string>();
-            foreach (var sess in store.Sessions.Values)
-            {
-                foreach (var kvp in sess.TagsByCarIdx)
-                {
-                    string tag = kvp.Value;
-                    if (string.IsNullOrEmpty(tag) || !seenTags.Add(tag)) continue;
-                    DriverRun dr;
-                    sess.Drivers.TryGetValue(tag, out dr);
-                    if (dr != null && IsPhantomEntry(tag, dr, sess)) continue;
-                    allParticipants.Add(tag);
-                }
-            }
 
             // Session dedup: keep only the last session of each sessionType
             var sessionList = new List<KeyValuePair<string, SessionRun>>(
@@ -109,8 +269,36 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 if (sess.SessionType.HasValue && seenSt.Add(sess.SessionType.Value))
                     sessionTypeNames.Add(((Dictionary<string, object>)Lookups.Label(Lookups.SessionType, sess.SessionType, "SessionType"))["name"].ToString());
 
-                sessionsOut.Add(FinalizeSession(sid, sess, sessionsOut, globalTeamByTag));
+                sessionsOut.Add(FinalizeSession(sid, sess, store, sessionsOut, globalTeamByTag));
             }
+
+            // Rebuild participants from session outputs (drivers + results) so count matches actual data
+            var participantsSet = new HashSet<string>();
+            foreach (var sessObj in sessionsOut)
+            {
+                var sessDict = sessObj as Dictionary<string, object>;
+                if (sessDict == null) continue;
+                var drivers = sessDict.ContainsKey("drivers") ? sessDict["drivers"] as Dictionary<string, object> : null;
+                if (drivers != null)
+                {
+                    foreach (var k in drivers.Keys)
+                        if (!string.IsNullOrEmpty(k)) participantsSet.Add(k);
+                }
+                var results = sessDict.ContainsKey("results") ? sessDict["results"] as List<object> : null;
+                if (results != null)
+                {
+                    foreach (var r in results)
+                    {
+                        var rd = r as Dictionary<string, object>;
+                        if (rd != null && rd.ContainsKey("tag"))
+                        {
+                            var tag = rd["tag"] as string;
+                            if (!string.IsNullOrEmpty(tag)) participantsSet.Add(tag);
+                        }
+                    }
+                }
+            }
+            allParticipants = participantsSet.OrderBy(s => s).ToList();
 
             capture["sessionTypesInCapture"] = sessionTypeNames;
 
@@ -127,10 +315,43 @@ namespace Overtake.SimHub.Plugin.Finalizer
             foreach (var pc in store.PacketCounts)
                 pktCounts[pc.Key.ToString()] = pc.Value;
 
+            // Integrity: drivers without team, spectator mode
+            var driversWithoutTeam = new List<string>();
+            bool anySpectator = store.Sessions.Values.Any(s => s.IsSpectating != 0);
+            foreach (var sessObj in sessionsOut)
+            {
+                var sessDict = sessObj as Dictionary<string, object>;
+                if (sessDict == null) continue;
+                var drivers = sessDict.ContainsKey("drivers") ? sessDict["drivers"] as Dictionary<string, object> : null;
+                if (drivers == null) continue;
+                foreach (var dkvp in drivers)
+                {
+                    var d = dkvp.Value as Dictionary<string, object>;
+                    if (d == null) continue;
+                    object tidObj;
+                    if (!d.TryGetValue("teamId", out tidObj) || tidObj == null)
+                    {
+                        driversWithoutTeam.Add(dkvp.Key);
+                    }
+                    else
+                    {
+                        int tid;
+                        if (int.TryParse(tidObj.ToString(), out tid) && tid == 255)
+                            driversWithoutTeam.Add(dkvp.Key);
+                    }
+                }
+            }
+
             result["_debug"] = new Dictionary<string, object>
             {
                 { "packetIdCounts", pktCounts },
                 { "notes", store.Notes },
+                { "integrity", new Dictionary<string, object>
+                    {
+                        { "driversWithoutTeam", driversWithoutTeam },
+                        { "isSpectating", anySpectator },
+                    }
+                },
                 { "diagnostics", new Dictionary<string, object>
                     {
                         { "sessionHistory", new Dictionary<string, object>
@@ -160,6 +381,19 @@ namespace Overtake.SimHub.Plugin.Finalizer
                                 { "playerRecoveredFromOverflow", store.DiagPlayerRecoveredFromOverflow },
                             }
                         },
+                        { "finalClassification", new Dictionary<string, object>
+                            {
+                                { "totalProcessed", store.DiagFcTotal },
+                                { "newRegistered", store.DiagFcRegistered },
+                            }
+                        },
+                        { "lobbyInfo", new Dictionary<string, object>
+                            {
+                                { "received", store.DiagLobbyInfoReceived },
+                                { "numPlayers", store.DiagLobbyInfoPlayers },
+                                { "tagsMapped", store.LobbyNumPlayers },
+                            }
+                        },
                     }
                 },
             };
@@ -168,9 +402,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
         }
 
         private static Dictionary<string, object> FinalizeSession(
-            string sid, SessionRun sess, List<object> previousSessions,
+            string sid, SessionRun sess, SessionStore store, List<object> previousSessions,
             Dictionary<string, ParticipantEntry> globalTeamByTag = null)
         {
+            // Deduplicate drivers by physical car identity before building any results
+            DeduplicateDrivers(sess);
+
             // Build carIdx->tag lookup
             var idxToTag = new Dictionary<int, string>(sess.TagsByCarIdx);
             if (sess.FinalClassification != null && sess.FinalClassification.Classification != null)
@@ -210,12 +447,14 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             // Build results from FinalClassification
             var resultsOut = new List<Dictionary<string, object>>();
+            int numActiveCars = sess.MaxNumActiveCars;
             if (sess.FinalClassification != null && sess.FinalClassification.Classification != null)
             {
                 var seenResultTags = new HashSet<string>();
                 foreach (var row in sess.FinalClassification.Classification)
                 {
                     if (row == null || row.Position <= 0) continue;
+                    if (numActiveCars > 0 && row.Position > numActiveCars) continue;
                     string tag;
                     if (!sess.TagsByCarIdx.TryGetValue(row.CarIdx, out tag))
                         tag = string.Format("Car{0}", row.CarIdx);
@@ -224,8 +463,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (!seenResultTags.Add(tag)) continue;
                     if (!sess.Drivers.ContainsKey(tag)) continue;
 
-                    var drCheck = sess.Drivers[tag];
-                    if (IsPhantomEntry(tag, drCheck, sess)) continue;
+                    // Filter phantom FC entries: generic placeholder tags with 0 laps
+                    if (row.NumLaps == 0 && (EarlyRegRe.IsMatch(tag) || GhostCarRe.IsMatch(tag)
+                        || DriverPlaceholderRe.IsMatch(tag) || tag.StartsWith("Player")))
+                        continue;
 
                     int bestMs;
                     bestByTag.TryGetValue(tag, out bestMs);
@@ -262,6 +503,59 @@ namespace Overtake.SimHub.Plugin.Finalizer
                         { "pitStops", (int)row.NumPitStops },
                         { "status", statusStr },
                         { "numPenalties", (int)row.NumPenalties },
+                    });
+                }
+            }
+
+            // Fallback: drivers in sess.Drivers that have real data (team info, laps)
+            // but were not captured by any FC packet. This happens in spectator mode
+            // when the FC numCars undercounts the actual classified field.
+            if (resultsOut.Count > 0)
+            {
+                var resultTags = new HashSet<string>();
+                foreach (var res in resultsOut)
+                    resultTags.Add(res["tag"] as string ?? "");
+
+                int maxPos = 0;
+                foreach (var res in resultsOut)
+                {
+                    int pos = (int)res["position"];
+                    if (pos > maxPos) maxPos = pos;
+                }
+
+                foreach (var dkvp in sess.Drivers)
+                {
+                    string tag = dkvp.Key;
+                    if (resultTags.Contains(tag)) continue;
+                    DriverRun dr = dkvp.Value;
+                    if (IsPhantomEntry(tag, dr, sess)) continue;
+
+                    ParticipantEntry teamInfo;
+                    sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
+                    if (teamInfo == null && globalTeamByTag != null)
+                        globalTeamByTag.TryGetValue(tag, out teamInfo);
+                    string teamName = ResolveTeamName(teamInfo);
+
+                    int bestMs;
+                    bestByTag.TryGetValue(tag, out bestMs);
+
+                    maxPos++;
+                    resultsOut.Add(new Dictionary<string, object>
+                    {
+                        { "position", maxPos },
+                        { "tag", tag },
+                        { "teamId", teamInfo != null ? (object)(int)teamInfo.TeamId : null },
+                        { "teamName", teamName },
+                        { "grid", dr.GridPosition > 0 ? (object)dr.GridPosition : null },
+                        { "numLaps", dr.Laps.Count },
+                        { "bestLapTimeMs", bestMs > 0 ? (object)bestMs : null },
+                        { "bestLapTime", bestMs > 0 ? MsToStr(bestMs) : "" },
+                        { "totalTimeMs", null },
+                        { "totalTime", "" },
+                        { "penaltiesTimeSec", 0 },
+                        { "pitStops", dr.PitStops.Count },
+                        { "status", "DidNotFinish" },
+                        { "numPenalties", 0 },
                     });
                 }
             }
@@ -343,14 +637,30 @@ namespace Overtake.SimHub.Plugin.Finalizer
             for (int i = 0; i < resultsOut.Count; i++)
                 resultsOut[i]["position"] = i + 1;
 
-            // Build drivers payload (filter out phantom/empty car slots)
+            // Build drivers payload
             var driversOut = new Dictionary<string, object>();
-            foreach (var dkvp in sess.Drivers)
+            // When we have FC-derived results (race), use those as source of truth — includes all classified drivers
+            // (DNF, DSQ, etc.) and respects numActiveCars; avoids excluding real pilots with Car_X tags.
+            if (resultsOut.Count > 0)
             {
-                string tag = dkvp.Key;
-                DriverRun dr = dkvp.Value;
-                if (IsPhantomEntry(tag, dr, sess)) continue;
-                driversOut[tag] = FinalizeDriver(tag, dr, sess, idxToTag, globalTeamByTag);
+                foreach (var res in resultsOut)
+                {
+                    string tag = res["tag"] as string;
+                    if (string.IsNullOrEmpty(tag)) continue;
+                    DriverRun dr;
+                    if (!sess.Drivers.TryGetValue(tag, out dr)) continue;
+                    driversOut[tag] = FinalizeDriver(tag, dr, sess, idxToTag, globalTeamByTag);
+                }
+            }
+            else
+            {
+                foreach (var dkvp in sess.Drivers)
+                {
+                    string tag = dkvp.Key;
+                    DriverRun dr = dkvp.Value;
+                    if (IsPhantomEntry(tag, dr, sess)) continue;
+                    driversOut[tag] = FinalizeDriver(tag, dr, sess, idxToTag, globalTeamByTag);
+                }
             }
 
             // Events
@@ -399,6 +709,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "sessionEndedAtMs", sess.SessionEndedAtMs },
                 { "safetyCar", safetyOut },
                 { "networkGame", sess.NetworkGame == 1 },
+                { "isSpectating", sess.IsSpectating != 0 },
                 { "awards", awards },
                 { "results", resultsOut },
                 { "drivers", driversOut },
@@ -430,19 +741,24 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 });
             }
 
-            // Tyre stints (filter out invalid entries with endLap=255)
+            // Tyre stints (endLap=255 = current/last stint per F1 spec; include it)
             var tyreOut = new List<object>();
             foreach (var ts in dr.TyreStints)
             {
-                object endLapObj;
-                int endLap = ts.TryGetValue("endLap", out endLapObj) && endLapObj != null ? Convert.ToInt32(endLapObj) : 0;
-                if (endLap >= 255) continue;
+                object endLapObj, taObj, tvObj;
+                int rawEndLap = ts.TryGetValue("endLap", out endLapObj) && endLapObj != null ? Convert.ToInt32(endLapObj) : 0;
+                ts.TryGetValue("tyreActual", out taObj);
+                ts.TryGetValue("tyreVisual", out tvObj);
+                int taId = taObj != null ? Convert.ToInt32(taObj) : -1;
+                int tvId = tvObj != null ? Convert.ToInt32(tvObj) : -1;
+                // Skip only truly empty: no tyre data
+                if (taId <= 0 && tvId <= 0)
+                    continue;
 
-                object ta, tv;
-                ts.TryGetValue("tyreActual", out ta);
-                ts.TryGetValue("tyreVisual", out tv);
-                int taId = ta != null ? Convert.ToInt32(ta) : -1;
-                int tvId = tv != null ? Convert.ToInt32(tv) : -1;
+                // F1 25 endLap is 0-indexed; convert to 1-indexed for output.
+                // endLap=255 is sentinel "until end of race" — keep as-is.
+                int endLap = (rawEndLap >= 0 && rawEndLap < 255) ? rawEndLap + 1 : rawEndLap;
+
                 tyreOut.Add(new Dictionary<string, object>
                 {
                     { "endLap", endLap },
@@ -453,9 +769,15 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 });
             }
 
-            // Penalties vs collisions
+            // Penalties vs collisions vs served markers
             var penTl = new List<object>();
             var collTl = new List<object>();
+            bool hasDtsvOrSgsv = false;
+            foreach (var ps in dr.PenaltySnapshots)
+            {
+                if (ps.EventCode == "DTSV" || ps.EventCode == "SGSV")
+                { hasDtsvOrSgsv = true; break; }
+            }
             foreach (var ps in dr.PenaltySnapshots)
             {
                 if (ps.EventCode == "COLL")
@@ -470,6 +792,9 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     collTl.Add(collEntry);
                     continue;
                 }
+                if (ps.EventCode == "DTSV" || ps.EventCode == "SGSV")
+                    continue;
+
                 var entry = new Dictionary<string, object> { { "tsMs", ps.TsMs } };
                 if (ps.PenaltyType.HasValue)
                 {
@@ -478,6 +803,21 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     int pt = ps.PenaltyType.Value;
                     entry["category"] = pt == 5 ? "warning" : pt == 6 ? "disqualification"
                         : pt == 16 ? "retired" : (pt == 0 || pt == 1 || pt == 4) ? "penalty" : "other";
+
+                    // Determine status: unserved conversion, reminder, served (via DTSV/SGSV), or issued
+                    int inf = ps.InfringementType.HasValue ? ps.InfringementType.Value : -1;
+                    if (inf == 45 || inf == 46)
+                        entry["status"] = "unserved";
+                    else if (pt == 3)
+                        entry["status"] = "reminder";
+                    else if (hasDtsvOrSgsv && (pt == 0 || pt == 1))
+                        entry["status"] = "served";
+                    else
+                        entry["status"] = "issued";
+                }
+                else
+                {
+                    entry["status"] = "issued";
                 }
                 if (ps.InfringementType.HasValue)
                 {
@@ -519,6 +859,70 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     { "lapNumber", tw.LapNumber },
                     { "rl", tw.RL }, { "rr", tw.RR }, { "fl", tw.FL }, { "fr", tw.FR }, { "avg", tw.Avg },
                 });
+            }
+
+            // Last-lap wear fix: session often ends before we get the final lap transition
+            // in spectator mode. Target the last COMPLETED lap (from laps data), not the
+            // in-progress lap (lastCurrentLapNum), which would be one ahead.
+            int maxLapFromLaps = sortedLaps.Count > 0 ? sortedLaps[sortedLaps.Count - 1].LapNumber : 0;
+            int targetLap = maxLapFromLaps > 0 ? maxLapFromLaps : ((dr.LastCurrentLapNum ?? 0) > 0 ? (dr.LastCurrentLapNum.Value - 1) : 0);
+            if (targetLap > 0)
+            {
+                bool hasTargetLap = false;
+                foreach (var tw in twSorted)
+                    if (tw.LapNumber == targetLap) { hasTargetLap = true; break; }
+                if (!hasTargetLap && dr.LatestTyreWear != null)
+                {
+                    var tw = dr.LatestTyreWear;
+                    float avg = (float)Math.Round((tw.RL + tw.RR + tw.FL + tw.FR) / 4.0f, 1);
+                    twOut.Add(new Dictionary<string, object>
+                    {
+                        { "lapNumber", targetLap },
+                        { "rl", tw.RL }, { "rr", tw.RR }, { "fl", tw.FL }, { "fr", tw.FR }, { "avg", avg },
+                    });
+                }
+                else if (!hasTargetLap && twSorted.Count > 0)
+                {
+                    var last = twSorted[twSorted.Count - 1];
+                    twOut.Add(new Dictionary<string, object>
+                    {
+                        { "lapNumber", targetLap },
+                        { "rl", last.RL }, { "rr", last.RR }, { "fl", last.FL }, { "fr", last.FR }, { "avg", last.Avg },
+                    });
+                }
+            }
+
+            // Assign tyre compound to each wear entry by cross-referencing stints.
+            // endLap in tyreOut is now 1-indexed (converted above); endLap=255 = "until end".
+            if (tyreOut.Count > 0)
+            {
+                foreach (var twEntry in twOut)
+                {
+                    var twDict = twEntry as Dictionary<string, object>;
+                    if (twDict == null) continue;
+                    int lapNum = Convert.ToInt32(twDict["lapNumber"]);
+
+                    Dictionary<string, object> matchingStint = null;
+                    foreach (var stintObj in tyreOut)
+                    {
+                        var stint = stintObj as Dictionary<string, object>;
+                        if (stint == null) continue;
+                        int endLap = Convert.ToInt32(stint["endLap"]);
+                        if (endLap == 255 || lapNum <= endLap)
+                        {
+                            matchingStint = stint;
+                            break;
+                        }
+                    }
+
+                    if (matchingStint != null)
+                    {
+                        twDict["tyreCompoundId"] = matchingStint.ContainsKey("tyreActualId") ? matchingStint["tyreActualId"] : null;
+                        twDict["tyreCompound"] = matchingStint.ContainsKey("tyreActual") ? matchingStint["tyreActual"] : null;
+                        twDict["tyreVisualId"] = matchingStint.ContainsKey("tyreVisualId") ? matchingStint["tyreVisualId"] : null;
+                        twDict["tyreVisual"] = matchingStint.ContainsKey("tyreVisual") ? matchingStint["tyreVisual"] : null;
+                    }
+                }
             }
 
             // Damage per lap (sorted) + wing repairs

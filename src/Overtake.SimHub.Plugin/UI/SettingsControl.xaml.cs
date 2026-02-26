@@ -20,6 +20,7 @@ namespace Overtake.SimHub.Plugin.UI
         private static readonly SolidColorBrush RedBrush = new SolidColorBrush(Color.FromRgb(0xF4, 0x43, 0x36));
         private static readonly SolidColorBrush BlueBrush = new SolidColorBrush(Color.FromRgb(0x21, 0x96, 0xF3));
         private static readonly SolidColorBrush DimBrush = new SolidColorBrush(Color.FromRgb(0x7B, 0x8C, 0xA3));
+        private long _lastExportClickMs;
 
         public SettingsControl()
         {
@@ -95,6 +96,11 @@ namespace Overtake.SimHub.Plugin.UI
         {
             if (_plugin == null) return;
 
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (nowMs - _lastExportClickMs < 5000)
+                return;
+            _lastExportClickMs = nowMs;
+
             string outputDir = ResolveOutputFolder();
             string result = _plugin.ExportLeagueJson(outputDir);
 
@@ -158,7 +164,14 @@ namespace Overtake.SimHub.Plugin.UI
                 }
                 if (latestSession != null)
                 {
-                    driverCount = latestSession.Drivers.Count;
+                    foreach (var dkvp in latestSession.Drivers)
+                    {
+                        Packets.ParticipantEntry ti;
+                        latestSession.TeamByCarIdx.TryGetValue(dkvp.Value.CarIdx, out ti);
+                        if (ti != null && ti.TeamId == 255) continue;
+                        if (dkvp.Key.StartsWith("Driver_") || dkvp.Key.StartsWith("Car_")) continue;
+                        driverCount++;
+                    }
                     if (latestSession.SessionType.HasValue)
                     {
                         string stName;
@@ -250,9 +263,22 @@ namespace Overtake.SimHub.Plugin.UI
             }
 
             // Update notification
-            if (_plugin.UpdateAvailable && LblUpdateAvailable.Visibility != Visibility.Visible)
+            if (_plugin.UpdateAvailable && UpdateBanner.Visibility != Visibility.Visible)
             {
-                LblUpdateAvailable.Visibility = Visibility.Visible;
+                UpdateBanner.Visibility = Visibility.Visible;
+                LblUpdateVersion.Text = string.Format(
+                    "v{0}  \u2192  v{1}", OvertakePlugin.PluginVersion, _plugin.LatestVersion);
+                if (!string.IsNullOrEmpty(_plugin.LatestReleaseNotes))
+                {
+                    LblReleaseNotes.Text = _plugin.LatestReleaseNotes
+                        .Replace("### Fixed\r\n", "").Replace("### Fixed\n", "")
+                        .Replace("### Added\r\n", "").Replace("### Added\n", "")
+                        .Replace("### Changed\r\n", "").Replace("### Changed\n", "")
+                        .Trim();
+                    if (LblReleaseNotes.Text.Length > 200)
+                        LblReleaseNotes.Text = LblReleaseNotes.Text.Substring(0, 200) + "...";
+                    LblReleaseNotes.Visibility = Visibility.Visible;
+                }
                 if (!string.IsNullOrEmpty(_plugin.UpdateDownloadUrl))
                 {
                     try { LnkUpdate.NavigateUri = new Uri(_plugin.UpdateDownloadUrl); }

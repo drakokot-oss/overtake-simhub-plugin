@@ -32,6 +32,9 @@ namespace Overtake.SimHub.Plugin.Packets
         public ushort SessionDuration;
         public byte SafetyCarStatus;
         public byte NetworkGame;
+        public byte GamePaused;
+        public byte IsSpectating;
+        public byte SpectatorCarIndex;
         public byte NumWeatherForecastSamples;
         public WeatherForecastSample[] WeatherForecast;
         public byte NumSafetyCarPeriods;
@@ -59,6 +62,9 @@ namespace Overtake.SimHub.Plugin.Packets
                 SessionDuration = BitConverter.ToUInt16(data, p + 11),
                 SafetyCarStatus = data[p + 124],
                 NetworkGame = data[p + 125],
+                GamePaused = (data.Length > p + 14) ? data[p + 14] : (byte)0,
+                IsSpectating = (data.Length > p + 15) ? data[p + 15] : (byte)0,
+                SpectatorCarIndex = (data.Length > p + 16) ? data[p + 16] : (byte)255,
             };
 
             if (data.Length > p + 127)

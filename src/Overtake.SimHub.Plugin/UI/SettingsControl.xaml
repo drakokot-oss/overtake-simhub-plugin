@@ -40,16 +40,30 @@
                         </TextBlock>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" VerticalAlignment="Top" Margin="10,0,0,0">
+                    <StackPanel Grid.Column="1" VerticalAlignment="Top" Margin="10,0,0,0"
+                                HorizontalAlignment="Right">
                         <TextBlock x:Name="LblVersion" Text="v1.0.0"
-                                   Foreground="#3D4F6B" FontSize="11" />
-                        <TextBlock x:Name="LblUpdateAvailable" Visibility="Collapsed"
-                                   Foreground="#FFD54F" FontSize="10" Margin="0,2,0,0">
-                            <Hyperlink x:Name="LnkUpdate" Foreground="#FFD54F"
-                                       RequestNavigate="Hyperlink_RequestNavigate">
-                                Update available
-                            </Hyperlink>
-                        </TextBlock>
+                                   Foreground="#3D4F6B" FontSize="11"
+                                   HorizontalAlignment="Right" />
+                        <Border x:Name="UpdateBanner" Visibility="Collapsed"
+                                Background="#2D2A10" CornerRadius="6" Padding="10,8"
+                                Margin="0,6,0,0" MaxWidth="260">
+                            <StackPanel>
+                                <TextBlock x:Name="LblUpdateVersion"
+                                           Foreground="#FFD54F" FontSize="11" FontWeight="SemiBold"
+                                           Text="Nova versao disponivel" />
+                                <TextBlock x:Name="LblReleaseNotes"
+                                           Foreground="#B0A870" FontSize="10"
+                                           TextWrapping="Wrap" Margin="0,4,0,6"
+                                           Visibility="Collapsed" />
+                                <TextBlock FontSize="10">
+                                    <Hyperlink x:Name="LnkUpdate" Foreground="#FFD54F"
+                                               RequestNavigate="Hyperlink_RequestNavigate">
+                                        Baixar atualizacao
+                                    </Hyperlink>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Grid>
             </Border>

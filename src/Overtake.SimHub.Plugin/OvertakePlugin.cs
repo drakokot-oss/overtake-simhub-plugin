@@ -36,8 +36,14 @@ namespace Overtake.SimHub.Plugin
         private string _lastAutoExportMsg = "";
         private bool _sessionEndDetected;
         private bool _sessionEnded;
+        private bool _raceFinalClassificationReceived;
+        private bool _autoExportArmed; // Once armed, SSTA cannot cancel the pending export
+        private long _raceSendAtMs;
+        private long _raceFcFirstMs;
+        private const long FC_EXPORT_DELAY_MS = 45000;
         private string _latestVersion = "";
         private string _updateDownloadUrl = "";
+        private string _latestReleaseNotes = "";
 
         public PluginManager PluginManager { get; set; }
 
@@ -123,19 +129,69 @@ namespace Overtake.SimHub.Plugin
 
                 _store.Ingest(parsed);
 
+                // FinalClassification for Race = tyreStints + pit stops. Export only after it arrives.
+                if (parsed.FinalClassification != null)
+                {
+                    foreach (var sess in _store.Sessions.Values)
+                    {
+                        if (sess.SessionType.HasValue && IsTerminalSession((byte)sess.SessionType.Value)
+                            && sess.FinalClassification != null)
+                        {
+                            if (!_raceFinalClassificationReceived)
+                            {
+                                _raceFinalClassificationReceived = true;
+                                _raceFcFirstMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                            }
+                            break;
+                        }
+                    }
+                }
+
                 if (parsed.Event != null && parsed.Event.Code == "SEND")
                 {
                     _sessionEnded = true;
                     if (IsTerminalSession(_currentSessionTypeId))
+                    {
                         _sessionEndDetected = true;
+                        _raceSendAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                        // Arm export immediately if FC delay already satisfied.
+                        // This prevents a subsequent SSTA (next session) from
+                        // resetting flags before the export check runs.
+                        long sendNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        if (_raceFinalClassificationReceived && _raceFcFirstMs > 0
+                            && (sendNow - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS)
+                        {
+                            _autoExportArmed = true;
+                        }
+                    }
                 }
                 if (parsed.Event != null && parsed.Event.Code == "SSTA")
+                {
                     _sessionEnded = false;
+                    if (!_autoExportArmed)
+                    {
+                        _raceFinalClassificationReceived = false;
+                        _raceSendAtMs = 0;
+                        _raceFcFirstMs = 0;
+                    }
+                }
             }
 
-            if (_sessionEndDetected && _settings.AutoExportJson && _store.Sessions.Count > 0)
+            // Auto-export check: runs after all queued packets are processed.
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            bool fcStable = _sessionEndDetected && _raceFinalClassificationReceived
+                && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
+            bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
+            bool shouldExport = (_autoExportArmed || (_sessionEndDetected && (fcStable || fallbackElapsed)))
+                && _settings.AutoExportJson && _store.Sessions.Count > 0;
+            if (shouldExport)
             {
                 _sessionEndDetected = false;
+                _raceFinalClassificationReceived = false;
+                _raceSendAtMs = 0;
+                _raceFcFirstMs = 0;
+                _autoExportArmed = false;
                 TryAutoExport();
             }
         }
@@ -203,6 +259,11 @@ namespace Overtake.SimHub.Plugin
         internal string UpdateDownloadUrl
         {
             get { return _updateDownloadUrl; }
+        }
+
+        internal string LatestReleaseNotes
+        {
+            get { return _latestReleaseNotes; }
         }
 
         internal bool UpdateAvailable
@@ -311,7 +372,17 @@ namespace Overtake.SimHub.Plugin
                     latest = sess;
                 }
             }
-            return latest != null ? latest.Drivers.Count : 0;
+            if (latest == null) return 0;
+            int count = 0;
+            foreach (var kvp in latest.Drivers)
+            {
+                Packets.ParticipantEntry teamInfo;
+                latest.TeamByCarIdx.TryGetValue(kvp.Value.CarIdx, out teamInfo);
+                if (teamInfo != null && teamInfo.TeamId == 255) continue;
+                if (kvp.Key.StartsWith("Driver_") || kvp.Key.StartsWith("Car_")) continue;
+                count++;
+            }
+            return count;
         }
 
         private string BuildExportFilename()
@@ -363,6 +434,9 @@ namespace Overtake.SimHub.Plugin
                     object url;
                     if (data.TryGetValue("download", out url) && url != null)
                         _updateDownloadUrl = url.ToString();
+                    object notes;
+                    if (data.TryGetValue("releaseNotes", out notes) && notes != null)
+                        _latestReleaseNotes = notes.ToString();
                     if (UpdateAvailable)
                         global::SimHub.Logging.Current.Info(
                             string.Format("[Overtake] Update available: v{0} -> v{1}", PluginVersion, _latestVersion));

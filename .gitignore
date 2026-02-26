@@ -24,12 +24,19 @@ bld/
 ## Rider
 .idea/
 
-## Dist build artifacts (keep source files like .bat, .txt)
+## Dist build artifacts
 dist/*.dll
 dist/*.zip
 dist/*.simhubplugin
 dist/_staging/
 dist/_dist_staging/
+dist/**/files/
+dist/**/*.exe
+dist/**/*.zip
+
+## Stray build artifacts at root
+*.zip
+!*.iss
 
 ## OS
 Thumbs.db

@@ -117,6 +117,9 @@ namespace Overtake.SimHub.Plugin.Store
         // Grid position (from LapData packet 2)
         public byte GridPosition;
 
+        // Car position in race (1=leader, 2=2nd...) — for FinalClassification row mapping
+        public byte CarPosition;
+
         // Warnings tracking (from LapData packet 2)
         public int LastTotalWarnings;
         public int LastCornerCuttingWarnings;

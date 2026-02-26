@@ -22,6 +22,11 @@ namespace Overtake.SimHub.Plugin.Packets
     /// Packet ID 4: Participants.
     /// Payload: 1 byte numActiveCars + 22 entries of 57 bytes each.
     /// Name field: 32 bytes at offset 7 within each entry (null-terminated, UTF-8/Latin-1).
+    ///
+    /// ALL 22 entries are always parsed for team data (teamId, raceNumber, etc.)
+    /// because this data is reliable even in overflow positions. However, only entries
+    /// within [0..numActiveCars-1] have reliable NAME data in spectator mode.
+    /// TagsByCarIdx is populated only for active entries (names).
     /// </summary>
     public class ParticipantsData
     {
@@ -32,12 +37,10 @@ namespace Overtake.SimHub.Plugin.Packets
         private const int MaxCars = 22;
 
         public byte NumActiveCars;
+        /// <summary>Always 22 entries (some may be null if packet is short).</summary>
         public ParticipantEntry[] Entries;
+        /// <summary>Tags for ACTIVE entries only [0..NumActiveCars-1].</summary>
         public Dictionary<int, string> TagsByCarIdx;
-        /// <summary>
-        /// Entries parsed beyond numActiveCars (player recovery).
-        /// </summary>
-        public Dictionary<int, ParticipantEntry> OverflowEntries;
 
         private static ParticipantEntry ParseEntry(byte[] data, int start, int i)
         {
@@ -86,11 +89,12 @@ namespace Overtake.SimHub.Plugin.Packets
             byte numActive = data[p];
             int baseOff = p + 1;
 
-            var entries = new ParticipantEntry[numActive];
+            var entries = new ParticipantEntry[MaxCars];
             var tagsByIdx = new Dictionary<int, string>();
             var nameCount = new Dictionary<string, int>();
 
-            for (int i = 0; i < numActive; i++)
+            // Parse ALL 22 entries for team data; names only tracked for active
+            for (int i = 0; i < MaxCars; i++)
             {
                 int start = baseOff + i * Stride;
                 if (start + Stride > data.Length)
@@ -100,13 +104,16 @@ namespace Overtake.SimHub.Plugin.Packets
                 entry.Name = ParseName(data, start, i);
                 entries[i] = entry;
 
-                string baseName = entry.Name;
-                int count;
-                nameCount.TryGetValue(baseName, out count);
-                nameCount[baseName] = count + 1;
+                if (i < numActive)
+                {
+                    string baseName = entry.Name;
+                    int count;
+                    nameCount.TryGetValue(baseName, out count);
+                    nameCount[baseName] = count + 1;
+                }
             }
 
-            // Build tags: use race number for disambiguation of duplicate names
+            // Build tags for ACTIVE entries only (name data is unreliable in overflow)
             for (int i = 0; i < numActive; i++)
             {
                 if (entries[i] == null) continue;
@@ -126,41 +133,11 @@ namespace Overtake.SimHub.Plugin.Packets
                 }
             }
 
-            // Parse overflow entries (beyond numActive) for player recovery
-            var overflow = new Dictionary<int, ParticipantEntry>();
-            for (int i = numActive; i < MaxCars; i++)
-            {
-                int start = baseOff + i * Stride;
-                if (start + Stride > data.Length)
-                    break;
-                var entry = ParseEntry(data, start, i);
-                entry.Name = ParseName(data, start, i);
-                if (entry.TeamId == 255 && entry.Name.StartsWith("Driver_")) continue;
-                if (entry.TeamId > 0 || (!entry.Name.StartsWith("Driver_") && !string.IsNullOrWhiteSpace(entry.Name)))
-                {
-                    // Dedup overflow names against existing tags
-                    string tag = entry.Name;
-                    int dupCount;
-                    nameCount.TryGetValue(tag, out dupCount);
-                    nameCount[tag] = dupCount + 1;
-                    if (dupCount > 0)
-                    {
-                        int rn = entry.RaceNumber;
-                        tag = rn > 0
-                            ? string.Format("{0} #{1}", entry.Name, rn)
-                            : string.Format("{0}_{1}", entry.Name, i);
-                    }
-                    tagsByIdx[i] = tag;
-                    overflow[i] = entry;
-                }
-            }
-
             return new ParticipantsData
             {
                 NumActiveCars = numActive,
                 Entries = entries,
                 TagsByCarIdx = tagsByIdx,
-                OverflowEntries = overflow,
             };
         }
     }

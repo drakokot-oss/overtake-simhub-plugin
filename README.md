@@ -42,6 +42,8 @@ The game must be configured to send UDP telemetry:
 
 ## Usage
 
+**Narradores e comentaristas:** Veja o [SPECTATOR-GUIDE](docs/SPECTATOR-GUIDE.md) para boas práticas em modo espectador.
+
 1. Open SimHub → left menu → **Overtake Telemetry**
 2. The **Live Telemetry** section shows:
    - Listener status, packets received

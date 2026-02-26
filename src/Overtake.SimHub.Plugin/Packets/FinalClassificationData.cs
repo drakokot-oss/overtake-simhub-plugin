@@ -17,15 +17,22 @@ namespace Overtake.SimHub.Plugin.Packets
         public byte PenaltiesTimeSec;
         public byte NumPenalties;
         public byte NumTyreStints;
+        public byte[] TyreStintsActual;
+        public byte[] TyreStintsVisual;
+        public byte[] TyreStintsEndLaps;
     }
 
     /// <summary>
     /// Packet ID 8: Final Classification.
-    /// Payload: 1 byte numCars, then 46 bytes per car.
+    /// Payload: 1 byte numCars, then 22 x 46 bytes (fixed array).
     /// Per-car layout: 7B + I(4) + d(8) + 3B + 8B*3 = 46 bytes.
+    /// The buffer always contains 22 entries (indexed by carIdx).
+    /// numCars is the game's reported count, but in spectator mode it may
+    /// undercount. We always parse all 22 slots so no classified car is lost.
     /// </summary>
     public class FinalClassificationData
     {
+        public const int MaxCars = 22;
         private const int RowSize = 46;
 
         public byte NumCars;
@@ -40,15 +47,13 @@ namespace Overtake.SimHub.Plugin.Packets
             byte numCars = data[p];
             int off = p + 1;
 
-            int count = Math.Min(numCars, (byte)22);
-            var rows = new FinalClassificationEntry[count];
+            var rows = new FinalClassificationEntry[MaxCars];
 
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < MaxCars; i++)
             {
                 if (off + RowSize > data.Length)
                     break;
 
-                // 7 x uint8
                 byte position = data[off + 0];
                 byte numLaps = data[off + 1];
                 byte gridPos = data[off + 2];
@@ -57,18 +62,22 @@ namespace Overtake.SimHub.Plugin.Packets
                 byte resultStatus = data[off + 5];
                 byte resultReason = data[off + 6];
 
-                // uint32 bestLapTimeInMS
                 uint bestLapTime = BitConverter.ToUInt32(data, off + 7);
-
-                // double totalRaceTime
                 double totalRaceTime = BitConverter.ToDouble(data, off + 11);
 
-                // 3 x uint8
                 byte penaltiesTime = data[off + 19];
                 byte numPenalties = data[off + 20];
                 byte numTyreStints = data[off + 21];
 
-                // remaining 24 bytes: tyreStintsActual[8] + tyreStintsVisual[8] + tyreStintsEndLaps[8]
+                var stintsActual = new byte[8];
+                var stintsVisual = new byte[8];
+                var stintsEndLaps = new byte[8];
+                if (off + 22 + 24 <= data.Length)
+                {
+                    Array.Copy(data, off + 22, stintsActual, 0, 8);
+                    Array.Copy(data, off + 30, stintsVisual, 0, 8);
+                    Array.Copy(data, off + 38, stintsEndLaps, 0, 8);
+                }
 
                 rows[i] = new FinalClassificationEntry
                 {
@@ -85,6 +94,9 @@ namespace Overtake.SimHub.Plugin.Packets
                     PenaltiesTimeSec = penaltiesTime,
                     NumPenalties = numPenalties,
                     NumTyreStints = numTyreStints,
+                    TyreStintsActual = stintsActual,
+                    TyreStintsVisual = stintsVisual,
+                    TyreStintsEndLaps = stintsEndLaps,
                 };
 
                 off += RowSize;

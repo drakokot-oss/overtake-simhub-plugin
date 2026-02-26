@@ -83,6 +83,7 @@
     <Compile Include="Packets\FinalClassificationData.cs" />
     <Compile Include="Packets\CarDamageEntry.cs" />
     <Compile Include="Packets\SessionHistoryData.cs" />
+    <Compile Include="Packets\LobbyInfoData.cs" />
     <Compile Include="Parsers\PacketParser.cs" />
     <Compile Include="Store\DriverRun.cs" />
     <Compile Include="Store\SessionRun.cs" />
