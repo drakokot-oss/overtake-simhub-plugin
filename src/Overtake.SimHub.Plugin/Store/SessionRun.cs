@@ -55,5 +55,36 @@ namespace Overtake.SimHub.Plugin.Store
 
         // Peak numActiveCars seen across all Participants packets (spectator mode fluctuates)
         public int MaxNumActiveCars;
+
+        // Lobby settings (captured once from first Session packet with data)
+        public bool LobbySettingsCaptured;
+        public byte ForecastAccuracy;
+        public byte SteeringAssist;
+        public byte BrakingAssist;
+        public byte GearboxAssist;
+        public byte PitAssist;
+        public byte PitReleaseAssist;
+        public byte ERSAssist;
+        public byte DRSAssist;
+        public byte DynamicRacingLine;
+        public byte DynamicRacingLineType;
+        public byte RuleSet;
+        public byte RaceStarts;
+        public byte RecoveryMode;
+        public byte FlashbackLimit;
+        public byte EqualCarPerformance;
+        public byte SurfaceType;
+        public byte LowFuelMode;
+        public byte TyreTemperature;
+        public byte PitLaneTyreSim;
+        public byte CarDamage;
+        public byte CarDamageRate;
+        public byte Collisions;
+        public byte CollisionsOffForFirstLapOnly;
+        public byte CornerCuttingStringency;
+        public byte ParcFermeRules;
+        public byte FormationLap;
+        public byte SafetyCarSetting;
+        public byte RedFlagsSetting;
     }
 }

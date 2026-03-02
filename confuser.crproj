@@ -1,0 +1,15 @@
+<project outputDir="{outputDir}" baseDir="{baseDir}" xmlns="http://confuser.codeplex.com">
+  <rule pattern="true" preset="normal" inherit="false">
+    <!-- String encryption: hides XOR key parts and all string literals -->
+    <protection id="constants" />
+    <!-- Control flow obfuscation: makes decompilation unreadable -->
+    <protection id="ctrl flow" />
+    <!-- Rename all internal symbols -->
+    <protection id="rename">
+      <argument name="mode" value="sequential" />
+    </protection>
+    <!-- Anti-tamper: detects DLL modification -->
+    <protection id="anti tamper" />
+  </rule>
+  <module path="{dllPath}" />
+</project>

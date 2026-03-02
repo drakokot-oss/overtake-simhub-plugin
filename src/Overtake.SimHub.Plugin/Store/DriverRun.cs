@@ -124,6 +124,11 @@ namespace Overtake.SimHub.Plugin.Store
         public int LastTotalWarnings;
         public int LastCornerCuttingWarnings;
 
+        // Per-driver assists (from CarStatus packet 7)
+        public byte TractionControl;
+        public byte AntiLockBrakes;
+        public bool AssistsCaptured;
+
         public void Reset()
         {
             Laps.Clear();

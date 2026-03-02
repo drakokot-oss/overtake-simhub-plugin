@@ -14,6 +14,7 @@ using Overtake.SimHub.Plugin.Finalizer;
 using Overtake.SimHub.Plugin.Packets;
 using Overtake.SimHub.Plugin.Parsers;
 using Overtake.SimHub.Plugin.Store;
+using Overtake.SimHub.Plugin.Security;
 using Overtake.SimHub.Plugin.UI;
 
 namespace Overtake.SimHub.Plugin
@@ -40,7 +41,7 @@ namespace Overtake.SimHub.Plugin
         private bool _autoExportArmed; // Once armed, SSTA cannot cancel the pending export
         private long _raceSendAtMs;
         private long _raceFcFirstMs;
-        private const long FC_EXPORT_DELAY_MS = 45000;
+        private const long FC_EXPORT_DELAY_MS = 5000;
         private string _latestVersion = "";
         private string _updateDownloadUrl = "";
         private string _latestReleaseNotes = "";
@@ -155,12 +156,10 @@ namespace Overtake.SimHub.Plugin
                         _sessionEndDetected = true;
                         _raceSendAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                        // Arm export immediately if FC delay already satisfied.
-                        // This prevents a subsequent SSTA (next session) from
-                        // resetting flags before the export check runs.
-                        long sendNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                        if (_raceFinalClassificationReceived && _raceFcFirstMs > 0
-                            && (sendNow - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS)
+                        // Arm export as soon as Race SEND arrives with FC data.
+                        // In online multiplayer SSTA (next session) arrives within
+                        // seconds of SEND, so we must arm before it resets flags.
+                        if (_raceFinalClassificationReceived)
                         {
                             _autoExportArmed = true;
                         }
@@ -179,11 +178,15 @@ namespace Overtake.SimHub.Plugin
             }
 
             // Auto-export check: runs after all queued packets are processed.
+            // Armed path: wait FC_EXPORT_DELAY_MS (5s) after SEND for last packets to flush.
+            // Fallback: 60s after SEND if arming didn't happen (e.g. FC arrived late).
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            bool armedReady = _autoExportArmed && _raceSendAtMs > 0
+                && (nowMs - _raceSendAtMs) >= FC_EXPORT_DELAY_MS;
             bool fcStable = _sessionEndDetected && _raceFinalClassificationReceived
                 && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
             bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
-            bool shouldExport = (_autoExportArmed || (_sessionEndDetected && (fcStable || fallbackElapsed)))
+            bool shouldExport = (armedReady || (_sessionEndDetected && (fcStable || fallbackElapsed)))
                 && _settings.AutoExportJson && _store.Sessions.Count > 0;
             if (shouldExport)
             {
@@ -317,12 +320,17 @@ namespace Overtake.SimHub.Plugin
                 string json = serializer.Serialize(payload);
 
                 string filename = BuildExportFilename();
-                string path = Path.Combine(outputDir, filename);
-                File.WriteAllText(path, json, System.Text.Encoding.UTF8);
+                string otkPath = Path.Combine(outputDir, filename);
 
-                _lastExportPath = path;
-                global::SimHub.Logging.Current.Info(string.Format("[Overtake] Exported league JSON to {0}", path));
-                return path;
+                OtkWriter.WriteOtk(json, otkPath);
+
+                // Also write plain JSON alongside for local debugging
+                string jsonPath = Path.ChangeExtension(otkPath, ".json");
+                File.WriteAllText(jsonPath, json, System.Text.Encoding.UTF8);
+
+                _lastExportPath = otkPath;
+                global::SimHub.Logging.Current.Info(string.Format("[Overtake] Exported .otk to {0}", otkPath));
+                return otkPath;
             }
             catch (Exception ex)
             {
@@ -414,7 +422,7 @@ namespace Overtake.SimHub.Plugin
                 uid = Guid.NewGuid().ToString("N").Substring(0, 8);
             string shortCode = uid.Length > 6 ? uid.Substring(uid.Length - 6) : uid;
 
-            return string.Format("{0}_{1}_{2}.json", trackName, dateTime, shortCode);
+            return string.Format("{0}_{1}_{2}.otk", trackName, dateTime, shortCode);
         }
 
         private void CheckForUpdates()

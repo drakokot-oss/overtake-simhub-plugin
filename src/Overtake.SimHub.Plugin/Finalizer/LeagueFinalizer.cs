@@ -16,6 +16,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
         private static readonly Regex GhostCarRe = new Regex(@"^Car\d+$");
         private static readonly Regex DriverPlaceholderRe = new Regex(@"^Driver_\d+$");
         private static readonly Regex EarlyRegRe = new Regex(@"^Car_\d+$");
+        private static readonly Regex PlayerGenericRe = new Regex(@"^(Player[_ #]\d+|Player)$");
 
         /// <summary>
         /// Determines if an entry is a phantom that should be excluded.
@@ -31,11 +32,15 @@ namespace Overtake.SimHub.Plugin.Finalizer
             ParticipantEntry teamInfo;
             sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
 
-            if (teamInfo != null && teamInfo.AiControlled && dr.Laps.Count == 0)
+            // Entries with valid team data are REAL cars, keep them even if generic/0 laps
+            bool hasRealTeam = teamInfo != null && teamInfo.TeamId != 255;
+
+            // Only filter AI placeholders with 0 laps that have no real team context
+            if (teamInfo != null && teamInfo.AiControlled && dr.Laps.Count == 0 && !hasRealTeam)
                 return true;
 
-            // Generic placeholder tags with 0 laps are empty FC slots
-            if (dr.Laps.Count == 0 && IsGenericTag(tag))
+            // Empty FC slots: generic tag, 0 laps, AND no team data
+            if (dr.Laps.Count == 0 && IsGenericTag(tag) && !hasRealTeam)
                 return true;
 
             return false;
@@ -44,7 +49,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
         private static bool IsGenericTag(string tag)
         {
             return EarlyRegRe.IsMatch(tag) || GhostCarRe.IsMatch(tag)
-                || DriverPlaceholderRe.IsMatch(tag) || tag.StartsWith("Player");
+                || DriverPlaceholderRe.IsMatch(tag) || PlayerGenericRe.IsMatch(tag);
         }
 
         /// <summary>
@@ -392,6 +397,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
                                 { "received", store.DiagLobbyInfoReceived },
                                 { "numPlayers", store.DiagLobbyInfoPlayers },
                                 { "tagsMapped", store.LobbyNumPlayers },
+                                { "lobbyResolved", store.DiagLobbyResolved },
+                                { "lobbyFailed", store.DiagLobbyFailed },
+                                { "lobbyNameMap", store.DebugLobbyMap },
+                                { "bestKnownTags", store.DebugBestKnownTags },
+                                { "lobbyByTeamOnly", store.DebugLobbyByTeamOnly },
                             }
                         },
                     }
@@ -463,10 +473,22 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (!seenResultTags.Add(tag)) continue;
                     if (!sess.Drivers.ContainsKey(tag)) continue;
 
-                    // Filter phantom FC entries: generic placeholder tags with 0 laps
-                    if (row.NumLaps == 0 && (EarlyRegRe.IsMatch(tag) || GhostCarRe.IsMatch(tag)
-                        || DriverPlaceholderRe.IsMatch(tag) || tag.StartsWith("Player")))
-                        continue;
+                    // Filter truly empty FC slots: generic tag, 0 laps, no real team
+                    if (row.NumLaps == 0 && IsGenericTag(tag))
+                    {
+                        ParticipantEntry slotInfo;
+                        sess.TeamByCarIdx.TryGetValue(row.CarIdx, out slotInfo);
+                        bool hasRealTeam = slotInfo != null && slotInfo.TeamId != 255;
+                        if (!hasRealTeam) continue;
+                    }
+                    // Filter AI placeholder drivers with 0 laps that aren't real lobby players
+                    if (row.NumLaps == 0 && sess.Drivers.ContainsKey(tag))
+                    {
+                        ParticipantEntry aiInfo;
+                        sess.TeamByCarIdx.TryGetValue(sess.Drivers[tag].CarIdx, out aiInfo);
+                        if (aiInfo != null && aiInfo.AiControlled && aiInfo.TeamId == 255)
+                            continue;
+                    }
 
                     int bestMs;
                     bestByTag.TryGetValue(tag, out bestMs);
@@ -637,6 +659,59 @@ namespace Overtake.SimHub.Plugin.Finalizer
             for (int i = 0; i < resultsOut.Count; i++)
                 resultsOut[i]["position"] = i + 1;
 
+            // Aggregate penalty data from PenaltySnapshots into results.
+            // The FC packet in online multiplayer sends 0 for all penalty fields;
+            // compute real values from captured penalty events.
+            foreach (var res in resultsOut)
+            {
+                string rTag = res["tag"] as string;
+                DriverRun penDr;
+                if (string.IsNullOrEmpty(rTag) || !sess.Drivers.TryGetValue(rTag, out penDr))
+                    continue;
+
+                int nDt = 0, nSg = 0, nTimePen = 0, nWarn = 0, penTimeTotal = 0;
+                foreach (var ps in penDr.PenaltySnapshots)
+                {
+                    if (ps.EventCode == "COLL" || ps.EventCode == "DTSV" || ps.EventCode == "SGSV")
+                        continue;
+                    if (!ps.PenaltyType.HasValue) continue;
+                    int pt = ps.PenaltyType.Value;
+                    if (pt == 0) nDt++;
+                    else if (pt == 1) nSg++;
+                    else if (pt == 4)
+                    {
+                        nTimePen++;
+                        if (ps.TimeSec.HasValue && ps.TimeSec.Value != 255)
+                            penTimeTotal += ps.TimeSec.Value;
+                    }
+                    else if (pt == 5) nWarn++;
+                }
+
+                int nActionable = nDt + nSg + nTimePen;
+                object existingObj;
+
+                int existingPen = 0;
+                if (res.TryGetValue("numPenalties", out existingObj) && existingObj != null)
+                    int.TryParse(existingObj.ToString(), out existingPen);
+                if (nActionable > existingPen)
+                    res["numPenalties"] = nActionable;
+
+                if (!res.ContainsKey("numWarnings") || res["numWarnings"] == null || nWarn > 0)
+                    res["numWarnings"] = nWarn;
+
+                if (!res.ContainsKey("numDriveThroughPens") || res["numDriveThroughPens"] == null || nDt > 0)
+                    res["numDriveThroughPens"] = nDt;
+
+                if (!res.ContainsKey("numStopGoPens") || res["numStopGoPens"] == null || nSg > 0)
+                    res["numStopGoPens"] = nSg;
+
+                int existingPenTime = 0;
+                if (res.TryGetValue("penaltiesTimeSec", out existingObj) && existingObj != null)
+                    int.TryParse(existingObj.ToString(), out existingPenTime);
+                if (penTimeTotal > existingPenTime)
+                    res["penaltiesTimeSec"] = penTimeTotal;
+            }
+
             // Build drivers payload
             var driversOut = new Dictionary<string, object>();
             // When we have FC-derived results (race), use those as source of truth — includes all classified drivers
@@ -695,6 +770,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Awards
             var awards = ComputeAwards(resultsOut, eventsOut, driversOut);
 
+            var lobbySettings = BuildLobbySettings(sess);
+
             return new Dictionary<string, object>
             {
                 { "sessionUID", sid },
@@ -703,6 +780,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "weather", Lookups.Label(Lookups.Weather, sess.Weather.HasValue ? (int?)(int)sess.Weather.Value : null, "Weather") },
                 { "trackTempC", sess.LatestTrackTempC },
                 { "airTempC", sess.LatestAirTempC },
+                { "forecastAccuracy", Lookups.LookupOrDefault(Lookups.ForecastAccuracyMap, sess.ForecastAccuracy, "ForecastAccuracy") },
                 { "weatherTimeline", weatherTimelineOut },
                 { "weatherForecast", FinalizeWeatherForecast(sess) },
                 { "lastPacketMs", sess.LastPacketMs },
@@ -710,6 +788,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "safetyCar", safetyOut },
                 { "networkGame", sess.NetworkGame == 1 },
                 { "isSpectating", sess.IsSpectating != 0 },
+                { "lobbySettings", lobbySettings },
                 { "awards", awards },
                 { "results", resultsOut },
                 { "drivers", driversOut },
@@ -981,6 +1060,59 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "collisionsTimeline", collTl },
                 { "totalWarnings", dr.LastTotalWarnings },
                 { "cornerCuttingWarnings", dr.LastCornerCuttingWarnings },
+                { "driverAssists", null },
+            };
+        }
+
+        private static Dictionary<string, object> BuildLobbySettings(SessionRun sess)
+        {
+            if (!sess.LobbySettingsCaptured) return null;
+
+            return new Dictionary<string, object>
+            {
+                { "safetyCarAndFlags", new Dictionary<string, object>
+                    {
+                        { "safetyCar", Lookups.LookupOrDefault(Lookups.SafetyCarSettingMap, sess.SafetyCarSetting, "SC") },
+                        { "redFlags", Lookups.LookupOrDefault(Lookups.RedFlagsSettingMap, sess.RedFlagsSetting, "RF") },
+                    }
+                },
+                { "rulesAndSimulation", new Dictionary<string, object>
+                    {
+                        { "ruleSet", Lookups.LookupOrDefault(Lookups.RuleSetMap, sess.RuleSet, "RuleSet") },
+                        { "collisions", Lookups.LookupOrDefault(Lookups.CollisionsMap, sess.Collisions, "Coll") },
+                        { "collisionsOffForFirstLapOnly", sess.CollisionsOffForFirstLapOnly != 0 },
+                        { "cornerCuttingStringency", Lookups.LookupOrDefault(Lookups.CornerCuttingMap, sess.CornerCuttingStringency, "CC") },
+                        { "parcFermeRules", sess.ParcFermeRules != 0 },
+                        { "formationLap", sess.FormationLap != 0 },
+                        { "equalCarPerformance", sess.EqualCarPerformance != 0 },
+                    }
+                },
+                { "damageAndRealism", new Dictionary<string, object>
+                    {
+                        { "carDamage", Lookups.LookupOrDefault(Lookups.CarDamageMap, sess.CarDamage, "Dmg") },
+                        { "carDamageRate", Lookups.LookupOrDefault(Lookups.CarDamageRateMap, sess.CarDamageRate, "DmgRate") },
+                        { "surfaceType", Lookups.LookupOrDefault(Lookups.SurfaceTypeSettingMap, sess.SurfaceType, "Surf") },
+                        { "lowFuelMode", Lookups.LookupOrDefault(Lookups.LowFuelModeMap, sess.LowFuelMode, "Fuel") },
+                        { "tyreTemperature", Lookups.LookupOrDefault(Lookups.TyreTemperatureMap, sess.TyreTemperature, "TyreTemp") },
+                        { "pitLaneTyreSim", sess.PitLaneTyreSim == 0 },
+                    }
+                },
+                { "assists", new Dictionary<string, object>
+                    {
+                        { "steeringAssist", sess.SteeringAssist != 0 },
+                        { "brakingAssist", Lookups.LookupOrDefault(Lookups.BrakingAssistMap, sess.BrakingAssist, "Brake") },
+                        { "gearboxAssist", Lookups.LookupOrDefault(Lookups.GearboxAssistMap, sess.GearboxAssist, "Gear") },
+                        { "pitAssist", sess.PitAssist != 0 },
+                        { "pitReleaseAssist", sess.PitReleaseAssist != 0 },
+                        { "ersAssist", sess.ERSAssist != 0 },
+                        { "drsAssist", sess.DRSAssist != 0 },
+                        { "dynamicRacingLine", Lookups.LookupOrDefault(Lookups.DynamicRacingLineMap, sess.DynamicRacingLine, "Line") },
+                        { "dynamicRacingLineType", Lookups.LookupOrDefault(Lookups.DynamicRacingLineTypeMap, sess.DynamicRacingLineType, "LineType") },
+                        { "raceStarts", sess.RaceStarts == 0 ? "Manual" : "Assisted" },
+                        { "recoveryMode", Lookups.LookupOrDefault(Lookups.RecoveryModeMap, sess.RecoveryMode, "Rec") },
+                        { "flashbackLimit", Lookups.LookupOrDefault(Lookups.FlashbackLimitMap, sess.FlashbackLimit, "FB") },
+                    }
+                },
             };
         }
 

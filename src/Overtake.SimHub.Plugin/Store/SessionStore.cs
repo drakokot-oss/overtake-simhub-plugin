@@ -27,9 +27,29 @@ namespace Overtake.SimHub.Plugin.Store
         // LobbyInfo slot index does NOT correspond to in-session carIdx, so we
         // must NOT use it for carIdx-based seeding. Instead we match via (teamId, raceNumber).
         private Dictionary<string, string> _lobbyNameByTeamRn = new Dictionary<string, string>();
+        // Fallback: teamId-only → name. Only used when (raceNumber,teamId) key fails.
+        // Stores only NON-generic names. If multiple players share a teamId, value = null (ambiguous).
+        private Dictionary<int, string> _lobbyNameByTeamOnly = new Dictionary<int, string>();
+        // Track distinct lookup_keys per teamId to detect shared teams.
+        private Dictionary<int, HashSet<string>> _lobbyTeamKeys = new Dictionary<int, HashSet<string>>();
         public int LobbyNumPlayers;
 
+        public Dictionary<string, string> DebugLobbyMap { get { return new Dictionary<string, string>(_lobbyNameByTeamRn); } }
+        public Dictionary<string, string> DebugBestKnownTags { get { return new Dictionary<string, string>(_bestKnownTags); } }
+        public Dictionary<string, string> DebugLobbyByTeamOnly
+        {
+            get
+            {
+                var d = new Dictionary<string, string>();
+                foreach (var kvp in _lobbyNameByTeamOnly)
+                    d[kvp.Key.ToString()] = kvp.Value ?? "(ambiguous)";
+                return d;
+            }
+        }
+
         // Diagnostics
+        public int DiagLobbyResolved;
+        public int DiagLobbyFailed;
         public int DiagShReceived;
         public int DiagShNoDriver;
         public int DiagShDedup;
@@ -56,6 +76,11 @@ namespace Overtake.SimHub.Plugin.Store
         private static readonly HashSet<string> IgnoreEvents =
             new HashSet<string> { "SPTP", "DRSE", "DRSD", "STLG", "BUTN" };
 
+        // Track the last-known trackId to detect lobby changes.
+        // When trackId changes, we clear cross-session name caches because
+        // raceNumber_teamId keys can be reused by different players in different lobbies.
+        private int? _lastTrackId;
+
         public SessionStore()
         {
             StartedAtMs = NowMs();
@@ -64,6 +89,28 @@ namespace Overtake.SimHub.Plugin.Store
         private static long NowMs()
         {
             return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        }
+
+        /// <summary>
+        /// Detect lobby change: when trackId changes, clear all cross-session name caches.
+        /// raceNumber_teamId keys are reused by different players in different lobbies,
+        /// so stale entries would cause wrong names.
+        /// </summary>
+        private void CheckLobbyChange(int newTrackId)
+        {
+            if (_lastTrackId.HasValue && _lastTrackId.Value != newTrackId)
+            {
+                if (Notes.Count < 500)
+                    Notes.Add(string.Format("LOBBY CHANGE detected: trackId {0}->{1}. Clearing name caches.",
+                        _lastTrackId.Value, newTrackId));
+                _bestKnownTags.Clear();
+                _lobbyNameByTeamRn.Clear();
+                _lobbyNameByTeamOnly.Clear();
+                _lobbyTeamKeys.Clear();
+                DiagLobbyResolved = 0;
+                DiagLobbyFailed = 0;
+            }
+            _lastTrackId = newTrackId;
         }
 
         private static string MsToStr(int ms)
@@ -85,7 +132,9 @@ namespace Overtake.SimHub.Plugin.Store
             {
                 var newSess = new SessionRun { SessionUID = sid };
                 // Cross-session carry-over from the most recent previous session.
-                // carIdx IS stable across sessions within the same lobby.
+                // Only within the SAME lobby (same trackId). Across different lobbies,
+                // carIdx slots are used by different players, so carrying names would
+                // assign the wrong gamertag to the wrong car.
                 if (Sessions.Count > 0)
                 {
                     SessionRun prevSess = null;
@@ -93,10 +142,29 @@ namespace Overtake.SimHub.Plugin.Store
                         prevSess = kvp.Value;
                     if (prevSess != null)
                     {
+                        bool sameLobby = _lastTrackId.HasValue && prevSess.TrackId.HasValue
+                            && prevSess.TrackId.Value == _lastTrackId.Value;
                         foreach (var kvp in prevSess.TagsByCarIdx)
-                            newSess.TagsByCarIdx[kvp.Key] = kvp.Value;
+                        {
+                            if (sameLobby)
+                            {
+                                newSess.TagsByCarIdx[kvp.Key] = kvp.Value;
+                            }
+                            else
+                            {
+                                // Different lobby: only carry generic placeholders.
+                                // Non-generic names belong to different players now.
+                                if (IsGenericTag(kvp.Value))
+                                    newSess.TagsByCarIdx[kvp.Key] = kvp.Value;
+                            }
+                        }
                         foreach (var kvp in prevSess.TeamByCarIdx)
-                            newSess.TeamByCarIdx[kvp.Key] = kvp.Value;
+                        {
+                            if (sameLobby)
+                                newSess.TeamByCarIdx[kvp.Key] = kvp.Value;
+                            // Don't carry team data across lobbies either:
+                            // different player may be at same carIdx with different team.
+                        }
                         if (prevSess.MaxNumActiveCars > newSess.MaxNumActiveCars)
                             newSess.MaxNumActiveCars = prevSess.MaxNumActiveCars;
                     }
@@ -203,6 +271,10 @@ namespace Overtake.SimHub.Plugin.Store
             else if (pid == 2 && parsed.LapData != null)
                 IngestLapData(sid, sess, parsed.LapData, nowMs);
 
+            // 7) CarStatus (per-car assists)
+            else if (pid == 7 && parsed.CarStatus != null)
+                IngestCarStatus(sid, parsed.CarStatus);
+
             // 10) CarDamage
             else if (pid == 10 && parsed.CarDamage != null)
                 IngestCarDamage(sid, parsed.CarDamage);
@@ -212,6 +284,10 @@ namespace Overtake.SimHub.Plugin.Store
         {
             sess.SessionType = s.SessionType;
             sess.TrackId = s.TrackId;
+
+            // Detect lobby changes (track change = different lobby)
+            if (s.TrackId >= 0)
+                CheckLobbyChange(s.TrackId);
             sess.Weather = s.Weather;
             sess.SafetyCarStatus = s.SafetyCarStatus;
 
@@ -256,6 +332,75 @@ namespace Overtake.SimHub.Plugin.Store
                 }
                 sess.WeatherForecast = fc;
             }
+
+            // Lobby settings — keep updating until we see non-zero data.
+            // Early Session packets may arrive before the game populates lobby fields.
+            bool hasData = s.CarDamage != 0 || s.Collisions != 0 || s.RuleSet != 0
+                || s.SafetyCarSetting != 0 || s.RedFlagsSetting != 0
+                || s.SteeringAssist != 0 || s.GearboxAssist != 0
+                || s.FormationLap != 0 || s.EqualCarPerformance != 0;
+
+            if (!sess.LobbySettingsCaptured || hasData)
+            {
+                sess.ForecastAccuracy = s.ForecastAccuracy;
+                sess.SteeringAssist = s.SteeringAssist;
+                sess.BrakingAssist = s.BrakingAssist;
+                sess.GearboxAssist = s.GearboxAssist;
+                sess.PitAssist = s.PitAssist;
+                sess.PitReleaseAssist = s.PitReleaseAssist;
+                sess.ERSAssist = s.ERSAssist;
+                sess.DRSAssist = s.DRSAssist;
+                sess.DynamicRacingLine = s.DynamicRacingLine;
+                sess.DynamicRacingLineType = s.DynamicRacingLineType;
+                sess.RuleSet = s.RuleSet;
+                sess.RaceStarts = s.RaceStarts;
+                sess.RecoveryMode = s.RecoveryMode;
+                sess.FlashbackLimit = s.FlashbackLimit;
+                sess.EqualCarPerformance = s.EqualCarPerformance;
+                sess.SurfaceType = s.SurfaceType;
+                sess.LowFuelMode = s.LowFuelMode;
+                sess.TyreTemperature = s.TyreTemperature;
+                sess.PitLaneTyreSim = s.PitLaneTyreSim;
+                sess.CarDamage = s.CarDamage;
+                sess.CarDamageRate = s.CarDamageRate;
+                sess.Collisions = s.Collisions;
+                sess.CollisionsOffForFirstLapOnly = s.CollisionsOffForFirstLapOnly;
+                sess.CornerCuttingStringency = s.CornerCuttingStringency;
+                sess.ParcFermeRules = s.ParcFermeRules;
+                sess.FormationLap = s.FormationLap;
+                sess.SafetyCarSetting = s.SafetyCarSetting;
+                sess.RedFlagsSetting = s.RedFlagsSetting;
+                if (hasData) sess.LobbySettingsCaptured = true;
+            }
+        }
+
+        private void IngestCarStatus(string sid, CarStatusEntry[] entries)
+        {
+            if (entries == null) return;
+            for (int i = 0; i < entries.Length; i++)
+            {
+                if (entries[i] == null) continue;
+                var d = EnsureDriver(sid, i);
+                if (d == null) continue;
+
+                byte newTc = entries[i].TractionControl;
+                byte newAbs = entries[i].AntiLockBrakes;
+
+                if (!d.AssistsCaptured)
+                {
+                    d.TractionControl = newTc;
+                    d.AntiLockBrakes = newAbs;
+                    d.AssistsCaptured = true;
+                }
+                else
+                {
+                    // Prefer lowest (most restrictive) value: post-race packets
+                    // send defaults (TC=2/Full, ABS=1/On) that must not overwrite
+                    // the correct mid-race values.
+                    if (newTc < d.TractionControl) d.TractionControl = newTc;
+                    if (newAbs < d.AntiLockBrakes) d.AntiLockBrakes = newAbs;
+                }
+            }
         }
 
         private void IngestLobbyInfo(string sid, SessionRun sess, LobbyInfoData lobby)
@@ -265,9 +410,6 @@ namespace Overtake.SimHub.Plugin.Store
             DiagLobbyInfoPlayers = lobby.NumPlayers;
             LobbyNumPlayers = lobby.NumPlayers;
 
-            // Build name lookup by (teamId, carNumber).
-            // LobbyInfo slot index does NOT correspond to in-session carIdx,
-            // so we NEVER use the slot index for TagsByCarIdx seeding.
             for (int i = 0; i < lobby.Entries.Length; i++)
             {
                 var entry = lobby.Entries[i];
@@ -277,28 +419,89 @@ namespace Overtake.SimHub.Plugin.Store
                 string name = entry.Name;
                 if (string.IsNullOrWhiteSpace(name)) continue;
 
-                string lookupKey = string.Format("{0}_{1}", entry.CarNumber, entry.TeamId);
-                _lobbyNameByTeamRn[lookupKey] = name;
+                bool nameIsGeneric = IsGenericTag(name);
 
-                bool isGeneric = name.StartsWith("Player #") || name.StartsWith("Player_")
-                              || name.StartsWith("Driver_") || name.StartsWith("Car");
-                if (!isGeneric)
+                // Primary key: (carNumber, teamId)
+                string lookupKey = string.Format("{0}_{1}", entry.CarNumber, entry.TeamId);
+
+                // Never overwrite a non-generic name with a generic one
+                string existing;
+                if (nameIsGeneric && _lobbyNameByTeamRn.TryGetValue(lookupKey, out existing)
+                    && !IsGenericTag(existing))
+                {
+                    // keep existing non-generic name
+                }
+                else
+                {
+                    _lobbyNameByTeamRn[lookupKey] = name;
+                }
+
+                // Track distinct lookup_keys per teamId. When 2+ cars share a team,
+                // the team-only fallback is ambiguous and must not resolve names.
+                int teamIdVal = entry.TeamId;
+                HashSet<string> teamKeys;
+                if (!_lobbyTeamKeys.TryGetValue(teamIdVal, out teamKeys))
+                {
+                    teamKeys = new HashSet<string>();
+                    _lobbyTeamKeys[teamIdVal] = teamKeys;
+                }
+                teamKeys.Add(lookupKey);
+                if (teamKeys.Count > 1)
+                    _lobbyNameByTeamOnly[teamIdVal] = null;
+
+                if (!nameIsGeneric)
+                {
                     _bestKnownTags[lookupKey] = name;
+
+                    // TeamId-only fallback (only when unambiguous — single car on team)
+                    if (teamKeys.Count <= 1)
+                    {
+                        string existingTeamName;
+                        if (!_lobbyNameByTeamOnly.TryGetValue(teamIdVal, out existingTeamName))
+                        {
+                            _lobbyNameByTeamOnly[teamIdVal] = name;
+                        }
+                        else if (existingTeamName != null && existingTeamName != name)
+                        {
+                            _lobbyNameByTeamOnly[teamIdVal] = null;
+                        }
+                    }
+                }
             }
         }
 
+        private static readonly System.Text.RegularExpressions.Regex _genericTagRe =
+            new System.Text.RegularExpressions.Regex(
+                @"^(Driver_\d+|Player_\d+|Player #\d+|Player|Car_\d+|Car\d+)$",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
         private static bool IsGenericTag(string tag)
         {
-            return !string.IsNullOrEmpty(tag) &&
-                (tag.StartsWith("Driver_") || tag.StartsWith("Player_")
-                || tag.StartsWith("Player #") || tag.StartsWith("Car_")
-                || tag.StartsWith("Car"));
+            return !string.IsNullOrEmpty(tag) && _genericTagRe.IsMatch(tag);
         }
 
         private void IngestParticipants(string sid, SessionRun sess, ParticipantsData p, int playerCarIndex)
         {
             var entries = p.Entries;
             if (entries == null) return;
+
+            // In offline mode (networkGame=0), showOnlineNames is irrelevant.
+            // The parser replaces human names with Driver_X when showOnlineNames=0,
+            // but offline names are always the real gamertag. Restore them.
+            if (sess.NetworkGame == 0)
+            {
+                for (int i = 0; i < p.NumActiveCars && i < entries.Length; i++)
+                {
+                    if (entries[i] != null
+                        && entries[i].ShowOnlineNames == 0
+                        && !entries[i].AiControlled
+                        && !string.IsNullOrWhiteSpace(entries[i].Name)
+                        && !IsGenericTag(entries[i].Name))
+                    {
+                        p.TagsByCarIdx[i] = entries[i].Name;
+                    }
+                }
+            }
 
             DiagParticipantsReceived++;
             DiagParticipantsNumActive = p.NumActiveCars;
@@ -345,10 +548,8 @@ namespace Overtake.SimHub.Plugin.Store
                 }
                 else if (IsGenericTag(tag))
                 {
-                    string resolved;
-                    if (_bestKnownTags.TryGetValue(lookupKey, out resolved))
-                        tags[carIdx] = resolved;
-                    else if (_lobbyNameByTeamRn.TryGetValue(lookupKey, out resolved))
+                    string resolved = ResolveLobbyName(rn, tid);
+                    if (!string.IsNullOrEmpty(resolved))
                         tags[carIdx] = resolved;
                 }
             }
@@ -375,7 +576,10 @@ namespace Overtake.SimHub.Plugin.Store
                 }
             }
 
-            // ── Step 3: Duplicate tag protection + merge ──
+            // ── Step 3: Authoritative tag assignment from Participants packet ──
+            // The Participants packet is the TRUTH for carIdx→tag mapping.
+            // When the game reassigns carIdx between sessions (e.g. quali→race),
+            // tags must be allowed to MOVE to their new carIdx.
             var existingTagToIdx = new Dictionary<string, int>();
             foreach (var kvp in sess.TagsByCarIdx)
                 existingTagToIdx[kvp.Value] = kvp.Key;
@@ -389,7 +593,58 @@ namespace Overtake.SimHub.Plugin.Store
 
                 int existingIdx;
                 if (existingTagToIdx.TryGetValue(newTag, out existingIdx) && existingIdx != carIdx)
-                    continue;
+                {
+                    // Tag already mapped to a different carIdx.
+                    // Check what the current Participants packet says about the OLD carIdx.
+                    string oldIdxTagInPacket;
+                    bool oldIdxInPacket = tags.TryGetValue(existingIdx, out oldIdxTagInPacket);
+                    bool allowMove;
+                    if (!oldIdxInPacket)
+                    {
+                        // Old carIdx not in this Participants packet → stale carry-over
+                        allowMove = true;
+                    }
+                    else if (oldIdxTagInPacket != newTag)
+                    {
+                        // Old carIdx has a DIFFERENT driver now → reassigned
+                        allowMove = true;
+                    }
+                    else
+                    {
+                        // Same tag at both carIdx in same packet → genuine duplicate
+                        allowMove = false;
+                    }
+
+                    if (allowMove)
+                    {
+                        string oldTagAtOldIdx;
+                        if (sess.TagsByCarIdx.TryGetValue(existingIdx, out oldTagAtOldIdx)
+                            && oldTagAtOldIdx == newTag)
+                        {
+                            sess.TagsByCarIdx.Remove(existingIdx);
+                            DriverRun dr;
+                            if (sess.Drivers.TryGetValue(newTag, out dr))
+                                dr.CarIdx = carIdx;
+                        }
+                        existingTagToIdx.Remove(newTag);
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
+                // Never downgrade a resolved real name to a generic placeholder.
+                // Later Participants packets may have empty names for cars outside
+                // the camera view, producing "Driver_X". Don't let that overwrite
+                // a previously-resolved gamertag.
+                if (IsGenericTag(newTag))
+                {
+                    string currentTag;
+                    if (sess.TagsByCarIdx.TryGetValue(carIdx, out currentTag)
+                        && !string.IsNullOrEmpty(currentTag) && !IsGenericTag(currentTag))
+                        continue;
+                }
 
                 bool dupInBatch = false;
                 foreach (var other in safeTags)
@@ -450,9 +705,33 @@ namespace Overtake.SimHub.Plugin.Store
         /// generic/placeholder tag), attempt to resolve the real name via
         /// _bestKnownTags or _lobbyNameByTeamRn.
         /// </summary>
+        private string ResolveLobbyName(int raceNumber, int teamId)
+        {
+            string lookupKey = string.Format("{0}_{1}", raceNumber, teamId);
+            string resolved = null;
+
+            if (_bestKnownTags.ContainsKey(lookupKey))
+                resolved = _bestKnownTags[lookupKey];
+            else if (_lobbyNameByTeamRn.ContainsKey(lookupKey))
+                resolved = _lobbyNameByTeamRn[lookupKey];
+
+            // Fallback: teamId-only when primary key misses (CarNumber may differ from RaceNumber)
+            if ((string.IsNullOrEmpty(resolved) || IsGenericTag(resolved)) && teamId >= 0 && teamId < 255)
+            {
+                string teamOnly;
+                if (_lobbyNameByTeamOnly.TryGetValue(teamId, out teamOnly) && teamOnly != null)
+                    resolved = teamOnly;
+            }
+
+            // Never resolve to a generic name
+            if (IsGenericTag(resolved))
+                return null;
+
+            return resolved;
+        }
+
         private void ResolveNamesFromLobby(string sid, SessionRun sess)
         {
-            // Build reverse map for duplicate checking
             var tagToIdx = new Dictionary<string, int>();
             foreach (var kvp in sess.TagsByCarIdx)
                 tagToIdx[kvp.Value] = kvp.Key;
@@ -469,21 +748,20 @@ namespace Overtake.SimHub.Plugin.Store
                 if (!string.IsNullOrEmpty(existingTag) && !IsGenericTag(existingTag))
                     continue;
 
-                string lookupKey = string.Format("{0}_{1}", team.RaceNumber, team.TeamId);
-                string resolved = null;
-                if (_bestKnownTags.ContainsKey(lookupKey))
-                    resolved = _bestKnownTags[lookupKey];
-                else if (_lobbyNameByTeamRn.ContainsKey(lookupKey))
-                    resolved = _lobbyNameByTeamRn[lookupKey];
-
-                if (string.IsNullOrEmpty(resolved)) continue;
+                string resolved = ResolveLobbyName(team.RaceNumber, team.TeamId);
+                if (string.IsNullOrEmpty(resolved))
+                {
+                    DiagLobbyFailed++;
+                    continue;
+                }
 
                 // Duplicate check
                 int existingIdx;
                 if (tagToIdx.TryGetValue(resolved, out existingIdx) && existingIdx != carIdx)
                     continue;
 
-                // Rename if the tag is changing
+                DiagLobbyResolved++;
+
                 if (!string.IsNullOrEmpty(existingTag) && existingTag != resolved)
                 {
                     DriverRun dr;
@@ -819,9 +1097,11 @@ namespace Overtake.SimHub.Plugin.Store
 
                 int carIdx = row.CarIdx;
 
-                // Cross-session tag recovery
+                // Cross-session tag recovery (prefer non-generic tags)
                 if (!sess.TagsByCarIdx.ContainsKey(carIdx))
                 {
+                    string bestCross = null;
+                    ParticipantEntry bestCrossTeam = null;
                     foreach (var otherKvp in Sessions)
                     {
                         if (otherKvp.Value == sess) continue;
@@ -829,13 +1109,28 @@ namespace Overtake.SimHub.Plugin.Store
                         if (otherKvp.Value.TagsByCarIdx.TryGetValue(carIdx, out crossTag)
                             && !string.IsNullOrEmpty(crossTag))
                         {
-                            sess.TagsByCarIdx[carIdx] = crossTag;
-                            ParticipantEntry crossTeam;
-                            if (otherKvp.Value.TeamByCarIdx.TryGetValue(carIdx, out crossTeam)
-                                && crossTeam != null && !sess.TeamByCarIdx.ContainsKey(carIdx))
-                                sess.TeamByCarIdx[carIdx] = crossTeam;
-                            break;
+                            if (!IsGenericTag(crossTag))
+                            {
+                                bestCross = crossTag;
+                                ParticipantEntry ct;
+                                if (otherKvp.Value.TeamByCarIdx.TryGetValue(carIdx, out ct))
+                                    bestCrossTeam = ct;
+                                break;
+                            }
+                            if (bestCross == null)
+                            {
+                                bestCross = crossTag;
+                                ParticipantEntry ct;
+                                if (otherKvp.Value.TeamByCarIdx.TryGetValue(carIdx, out ct))
+                                    bestCrossTeam = ct;
+                            }
                         }
+                    }
+                    if (!string.IsNullOrEmpty(bestCross))
+                    {
+                        sess.TagsByCarIdx[carIdx] = bestCross;
+                        if (bestCrossTeam != null && !sess.TeamByCarIdx.ContainsKey(carIdx))
+                            sess.TeamByCarIdx[carIdx] = bestCrossTeam;
                     }
                 }
 
@@ -846,12 +1141,7 @@ namespace Overtake.SimHub.Plugin.Store
                     ParticipantEntry team;
                     if (sess.TeamByCarIdx.TryGetValue(carIdx, out team) && team != null && team.TeamId != 255)
                     {
-                        string lookupKey = string.Format("{0}_{1}", team.RaceNumber, team.TeamId);
-                        string resolved = null;
-                        if (_bestKnownTags.ContainsKey(lookupKey))
-                            resolved = _bestKnownTags[lookupKey];
-                        else if (_lobbyNameByTeamRn.ContainsKey(lookupKey))
-                            resolved = _lobbyNameByTeamRn[lookupKey];
+                        string resolved = ResolveLobbyName(team.RaceNumber, team.TeamId);
                         if (!string.IsNullOrEmpty(resolved))
                         {
                             bool isDup = false;
@@ -901,6 +1191,37 @@ namespace Overtake.SimHub.Plugin.Store
                     if (stints.Count > 0)
                         d.TyreStints = stints;
                 }
+            }
+
+            // Register ALL cars from TeamByCarIdx that still lack tags.
+            // In spectator mode, FC may report Position=0 for cars outside the camera
+            // view, so they never get registered above. These are real human players
+            // whose data should appear in results (with Driver_X if name is unknown).
+            for (int ci = 0; ci < 22; ci++)
+            {
+                if (sess.TagsByCarIdx.ContainsKey(ci)) continue;
+                ParticipantEntry team;
+                if (!sess.TeamByCarIdx.TryGetValue(ci, out team)) continue;
+                if (team == null || team.TeamId == 255) continue;
+
+                string resolved = ResolveLobbyName(team.RaceNumber, team.TeamId);
+                if (!string.IsNullOrEmpty(resolved))
+                {
+                    bool isDup = false;
+                    foreach (var kv in sess.TagsByCarIdx)
+                    {
+                        if (kv.Key != ci && kv.Value == resolved)
+                        { isDup = true; break; }
+                    }
+                    if (!isDup)
+                    {
+                        sess.TagsByCarIdx[ci] = resolved;
+                        EnsureDriver(sid, ci);
+                        continue;
+                    }
+                }
+                sess.TagsByCarIdx[ci] = "Driver_" + ci;
+                EnsureDriver(sid, ci);
             }
         }
 

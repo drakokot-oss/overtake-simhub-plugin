@@ -1,5 +1,7 @@
-{
-    "released":  "2026-02-26",
-    "version":  "1.1.12",
-    "download":  "https://racehub.overtakef1.com/downloads"
+﻿{
+    "version":  "1.1.13",
+    "released":  "2026-03-02",
+    "download":  "https://racehub.overtakef1.com/downloads",
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.13/Overtake.SimHub.Plugin-v1.1.13-Setup.exe",
+    "releaseNotes":  "### Fixed\r\n- Resolucao de nomes entre lobbies: caches limpos ao detectar mudanca de trackId (lobby change)\r\n- Nome de piloto atribuido ao carro errado quando dois pilotos compartilhavam a mesma equipe (lobbyByTeamOnly ambiguity)\r\n- Nomes de sessoes anteriores vazando para lobbies diferentes (cross-lobby name bleeding)\r\n- Lobby settings travando em valores default (zeros) antes de receber dados reais\r\n- Pilotos humanos com showOnlineNames=0 agora aparecem como Driver_X (admin edita no frontend)\r\n- Modo offline: nomes reais restaurados corretamente quando networkGame=0\r\n- Agregacao de penalidades: soma correta de penaltyCount e penaltyTime a partir dos snapshots\r\n- Registro pos-FinalClassification para carros conhecidos sem tag (Driver_X placeholders)\r\n\r\n### Improved\r\n- Resolucao centralizada de nomes via ResolveLobbyName com fallback teamId-only\r\n- Deteccao de ambiguidade por equipe (_lobbyTeamKeys) previne atribuicao incorreta\r\n- Carry-over de nomes entre sessoes agora restrito ao mesmo lobby (same trackId)"
 }

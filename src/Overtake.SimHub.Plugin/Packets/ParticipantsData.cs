@@ -24,9 +24,11 @@ namespace Overtake.SimHub.Plugin.Packets
     /// Name field: 32 bytes at offset 7 within each entry (null-terminated, UTF-8/Latin-1).
     ///
     /// ALL 22 entries are always parsed for team data (teamId, raceNumber, etc.)
-    /// because this data is reliable even in overflow positions. However, only entries
-    /// within [0..numActiveCars-1] have reliable NAME data in spectator mode.
-    /// TagsByCarIdx is populated only for active entries (names).
+    /// because this data is reliable even in overflow positions.
+    /// TagsByCarIdx is populated only for active entries (0..numActive-1).
+    /// For human players with showOnlineNames=0, the game sends the F1 seat name
+    /// instead of the gamertag, so these are replaced with placeholders.
+    /// Overflow/hidden names are resolved via LobbyInfo and cross-session recovery.
     /// </summary>
     public class ParticipantsData
     {
@@ -39,7 +41,7 @@ namespace Overtake.SimHub.Plugin.Packets
         public byte NumActiveCars;
         /// <summary>Always 22 entries (some may be null if packet is short).</summary>
         public ParticipantEntry[] Entries;
-        /// <summary>Tags for ACTIVE entries only [0..NumActiveCars-1].</summary>
+        /// <summary>Tags for active entries only (0..NumActiveCars-1).</summary>
         public Dictionary<int, string> TagsByCarIdx;
 
         private static ParticipantEntry ParseEntry(byte[] data, int start, int i)
@@ -113,10 +115,24 @@ namespace Overtake.SimHub.Plugin.Packets
                 }
             }
 
-            // Build tags for ACTIVE entries only (name data is unreliable in overflow)
+            // Build tags for ACTIVE entries only.
+            // Overflow entries (beyond numActive) are NOT used for names because the
+            // game fills them with F1 seat names, not real gamertags. Name resolution
+            // for overflow entries is handled by LobbyInfo and cross-session recovery.
             for (int i = 0; i < numActive; i++)
             {
                 if (entries[i] == null) continue;
+
+                // When showOnlineNames=0 and the entry is a human player, the game
+                // sends the F1 seat name (e.g. "Alexander ALBON" for Williams #23)
+                // instead of the gamertag. Treat as unreliable and generate a
+                // placeholder so LobbyInfo resolution can fill in the real name.
+                if (entries[i].ShowOnlineNames == 0 && !entries[i].AiControlled)
+                {
+                    tagsByIdx[i] = string.Format("Driver_{0}", i);
+                    continue;
+                }
+
                 string baseName = entries[i].Name;
                 int count;
                 nameCount.TryGetValue(baseName, out count);

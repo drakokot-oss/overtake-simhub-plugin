@@ -15,6 +15,7 @@ namespace Overtake.SimHub.Plugin.Parsers
         public ParticipantsData Participants;
         public FinalClassificationData FinalClassification;
         public LobbyInfoData LobbyInfo;
+        public CarStatusEntry[] CarStatus;
         public CarDamageEntry[] CarDamage;
         public SessionHistoryData SessionHistory;
     }
@@ -46,6 +47,9 @@ namespace Overtake.SimHub.Plugin.Parsers
                     break;
                 case 4:
                     result.Participants = ParticipantsData.Parse(data);
+                    break;
+                case 7:
+                    result.CarStatus = CarStatusEntry.Parse(data);
                     break;
                 case 8:
                     result.FinalClassification = FinalClassificationData.Parse(data);

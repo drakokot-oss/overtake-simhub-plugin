@@ -107,7 +107,7 @@ if (Test-Path $changelogPath) {
         $releaseNotes = "Release v$Version"
     }
 } else {
-    Write-Host "  CHANGELOG.md not found — using default notes" -ForegroundColor DarkYellow
+    Write-Host "  CHANGELOG.md not found - using default notes" -ForegroundColor DarkYellow
     $releaseNotes = "Release v$Version"
 }
 
@@ -135,9 +135,13 @@ $ok = $true
 foreach ($artifact in @($dllPath, $versionJsonPath)) {
     if (Test-Path $artifact) {
         $size = [math]::Round((Get-Item $artifact).Length / 1024, 1)
-        Write-Host "  OK  $(Split-Path $artifact -Leaf)  ($size KB)" -ForegroundColor Green
+        $aName = Split-Path $artifact -Leaf
+        $msg = "  OK  $aName  $size KB"
+        Write-Host $msg -ForegroundColor Green
     } else {
-        Write-Host "  MISSING  $(Split-Path $artifact -Leaf)" -ForegroundColor Red
+        $aName = Split-Path $artifact -Leaf
+        $msg = "  MISSING  $aName"
+        Write-Host $msg -ForegroundColor Red
         $ok = $false
     }
 }
@@ -146,9 +150,10 @@ foreach ($artifact in @($dllPath, $versionJsonPath)) {
 $installerExe = Get-ChildItem "$repoRoot\dist" -Filter "*Setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($installerExe) {
     $instSize = [math]::Round($installerExe.Length / 1024, 1)
-    Write-Host "  OK  $($installerExe.Name)  ($instSize KB)" -ForegroundColor Green
+    $msg = "  OK  $($installerExe.Name)  $instSize KB"
+    Write-Host $msg -ForegroundColor Green
 } else {
-    Write-Host "  WARN: No installer .exe found in dist/" -ForegroundColor DarkYellow
+    Write-Host "  WARN - No installer .exe found in dist/" -ForegroundColor DarkYellow
 }
 
 if (-not $ok) { Write-Host "Artifacts missing. Release aborted." -ForegroundColor Red; exit 1 }
@@ -311,7 +316,7 @@ if (-not $NoInstall) {
         }
     } else {
         Write-Host "  SimHub not found. Copy manually:" -ForegroundColor DarkYellow
-        Write-Host "  $dllPath -> <SimHub folder>\Overtake.SimHub.Plugin.dll" -ForegroundColor Gray
+        Write-Host "  $dllPath -> [SimHub folder]\Overtake.SimHub.Plugin.dll" -ForegroundColor Gray
     }
     $step++
 }
@@ -337,5 +342,5 @@ if (-not $NoInstall) {
 }
 Write-Host ""
 Write-Host "  Plugin users: update notification appears automatically" -ForegroundColor Cyan
-Write-Host "  Website:      racehub.overtakef1.com/downloads auto-updates" -ForegroundColor Cyan
+Write-Host "  Website:      racehub.overtakef1.com/downloads" -ForegroundColor Cyan
 Write-Host ""

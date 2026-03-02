@@ -137,6 +137,97 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 39, "Silverstone Reverse" }, { 40, "Austria Reverse" }, { 41, "Zandvoort Reverse" },
         };
 
+        // Lobby settings lookups
+        public static readonly Dictionary<int, string> ForecastAccuracyMap = new Dictionary<int, string>
+        {
+            { 0, "Perfect" }, { 1, "Approximate" },
+        };
+
+        public static readonly Dictionary<int, string> SafetyCarSettingMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Reduced" }, { 2, "Standard" }, { 3, "Increased" },
+        };
+
+        public static readonly Dictionary<int, string> RedFlagsSettingMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Reduced" }, { 2, "Standard" }, { 3, "Increased" },
+        };
+
+        public static readonly Dictionary<int, string> RuleSetMap = new Dictionary<int, string>
+        {
+            { 0, "Practice & Qualifying" }, { 1, "Race" }, { 2, "Time Trial" }, { 12, "Elimination" },
+        };
+
+        public static readonly Dictionary<int, string> CarDamageMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Reduced" }, { 2, "Standard" }, { 3, "Simulation" },
+        };
+
+        public static readonly Dictionary<int, string> CarDamageRateMap = new Dictionary<int, string>
+        {
+            { 0, "Reduced" }, { 1, "Standard" }, { 2, "Simulation" },
+        };
+
+        public static readonly Dictionary<int, string> CollisionsMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Player-to-Player Off" }, { 2, "On" },
+        };
+
+        public static readonly Dictionary<int, string> CornerCuttingMap = new Dictionary<int, string>
+        {
+            { 0, "Regular" }, { 1, "Strict" },
+        };
+
+        public static readonly Dictionary<int, string> BrakingAssistMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Low" }, { 2, "Medium" }, { 3, "High" },
+        };
+
+        public static readonly Dictionary<int, string> GearboxAssistMap = new Dictionary<int, string>
+        {
+            { 1, "Manual" }, { 2, "Manual & Suggested Gear" }, { 3, "Auto" },
+        };
+
+        public static readonly Dictionary<int, string> DynamicRacingLineMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Corners Only" }, { 2, "Full" },
+        };
+
+        public static readonly Dictionary<int, string> DynamicRacingLineTypeMap = new Dictionary<int, string>
+        {
+            { 0, "2D" }, { 1, "3D" },
+        };
+
+        public static readonly Dictionary<int, string> RecoveryModeMap = new Dictionary<int, string>
+        {
+            { 0, "None" }, { 1, "Flashbacks" }, { 2, "Auto-recovery" },
+        };
+
+        public static readonly Dictionary<int, string> FlashbackLimitMap = new Dictionary<int, string>
+        {
+            { 0, "Low" }, { 1, "Medium" }, { 2, "High" }, { 3, "Unlimited" },
+        };
+
+        public static readonly Dictionary<int, string> SurfaceTypeSettingMap = new Dictionary<int, string>
+        {
+            { 0, "Simplified" }, { 1, "Realistic" },
+        };
+
+        public static readonly Dictionary<int, string> LowFuelModeMap = new Dictionary<int, string>
+        {
+            { 0, "Easy" }, { 1, "Hard" },
+        };
+
+        public static readonly Dictionary<int, string> TyreTemperatureMap = new Dictionary<int, string>
+        {
+            { 0, "Surface Only" }, { 1, "Surface & Carcass" },
+        };
+
+        public static readonly Dictionary<int, string> TractionControlMap = new Dictionary<int, string>
+        {
+            { 0, "Off" }, { 1, "Medium" }, { 2, "Full" },
+        };
+
         public static readonly Dictionary<int, string> ResultStatus = new Dictionary<int, string>
         {
             { 0, "Unknown" }, { 1, "Invalid" }, { 2, "Inactive" }, { 3, "Finished" },

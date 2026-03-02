@@ -41,6 +41,36 @@ namespace Overtake.SimHub.Plugin.Packets
         public byte NumVirtualSafetyCarPeriods;
         public byte NumRedFlagPeriods;
 
+        // Lobby settings (deep in Session packet payload)
+        public byte ForecastAccuracy;
+        public byte SteeringAssist;
+        public byte BrakingAssist;
+        public byte GearboxAssist;
+        public byte PitAssist;
+        public byte PitReleaseAssist;
+        public byte ERSAssist;
+        public byte DRSAssist;
+        public byte DynamicRacingLine;
+        public byte DynamicRacingLineType;
+        public byte RuleSet;
+        public byte RaceStarts;
+        public byte RecoveryMode;
+        public byte FlashbackLimit;
+        public byte EqualCarPerformance;
+        public byte SurfaceType;
+        public byte LowFuelMode;
+        public byte TyreTemperature;
+        public byte PitLaneTyreSim;
+        public byte CarDamage;
+        public byte CarDamageRate;
+        public byte Collisions;
+        public byte CollisionsOffForFirstLapOnly;
+        public byte CornerCuttingStringency;
+        public byte ParcFermeRules;
+        public byte FormationLap;
+        public byte SafetyCarSetting;
+        public byte RedFlagsSetting;
+
         public static SessionData Parse(byte[] data)
         {
             if (data == null || data.Length < PacketHeader.Size + 126)
@@ -100,6 +130,39 @@ namespace Overtake.SimHub.Plugin.Packets
             result.NumSafetyCarPeriods = (data.Length > p + 676) ? data[p + 676] : (byte)0;
             result.NumVirtualSafetyCarPeriods = (data.Length > p + 677) ? data[p + 677] : (byte)0;
             result.NumRedFlagPeriods = (data.Length > p + 678) ? data[p + 678] : (byte)0;
+
+            // Lobby settings (offsets after weather forecast block)
+            if (data.Length > p + 700)
+            {
+                result.ForecastAccuracy = data[p + 639];
+                result.SteeringAssist = data[p + 656];
+                result.BrakingAssist = data[p + 657];
+                result.GearboxAssist = data[p + 658];
+                result.PitAssist = data[p + 659];
+                result.PitReleaseAssist = data[p + 660];
+                result.ERSAssist = data[p + 661];
+                result.DRSAssist = data[p + 662];
+                result.DynamicRacingLine = data[p + 663];
+                result.DynamicRacingLineType = data[p + 664];
+                result.RuleSet = data[p + 666];
+                result.RaceStarts = data[p + 684];
+                result.RecoveryMode = data[p + 680];
+                result.FlashbackLimit = data[p + 681];
+                result.EqualCarPerformance = data[p + 679];
+                result.SurfaceType = data[p + 682];
+                result.LowFuelMode = data[p + 683];
+                result.TyreTemperature = data[p + 685];
+                result.PitLaneTyreSim = data[p + 686];
+                result.CarDamage = data[p + 687];
+                result.CarDamageRate = data[p + 688];
+                result.Collisions = data[p + 689];
+                result.CollisionsOffForFirstLapOnly = data[p + 690];
+                result.CornerCuttingStringency = data[p + 693];
+                result.ParcFermeRules = data[p + 694];
+                result.FormationLap = data[p + 698];
+                result.SafetyCarSetting = data[p + 696];
+                result.RedFlagsSetting = data[p + 700];
+            }
 
             return result;
         }

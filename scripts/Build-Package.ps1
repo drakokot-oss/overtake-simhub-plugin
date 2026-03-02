@@ -103,9 +103,50 @@ if (-not $SkipTests) {
     Write-Host "[2/4] Tests skipped" -ForegroundColor DarkYellow
 }
 
-# Step 3: Build Inno Setup installer
+# Step 3: Obfuscate DLL (optional, requires ConfuserEx CLI)
 Write-Host ""
-Write-Host "[3/4] Building installer (Inno Setup)..." -ForegroundColor Yellow
+Write-Host "[3/5] Obfuscating DLL (ConfuserEx)..." -ForegroundColor Yellow
+
+$confuserCli = $null
+$confuserSearchPaths = @(
+    "$repoRoot\tools\ConfuserEx\Confuser.CLI.exe",
+    "C:\Tools\ConfuserEx\Confuser.CLI.exe",
+    "$env:LOCALAPPDATA\ConfuserEx\Confuser.CLI.exe"
+)
+foreach ($cp in $confuserSearchPaths) {
+    if (Test-Path $cp) { $confuserCli = $cp; break }
+}
+
+if ($confuserCli) {
+    $confuserOut = "$binDir\Confused"
+    if (Test-Path $confuserOut) { Remove-Item $confuserOut -Recurse -Force }
+
+    $crprojTemplate = Get-Content "$repoRoot\confuser.crproj" -Raw
+    $crprojContent = $crprojTemplate `
+        -replace '\{outputDir\}', $confuserOut `
+        -replace '\{baseDir\}', $binDir `
+        -replace '\{dllPath\}', $dllName
+    $crprojTmp = "$binDir\_confuser.crproj"
+    Set-Content -Path $crprojTmp -Value $crprojContent -Encoding UTF8
+
+    & $confuserCli $crprojTmp 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+    $obfuscatedDll = "$confuserOut\$dllName"
+    if (Test-Path $obfuscatedDll) {
+        Copy-Item $obfuscatedDll $dllPath -Force
+        Write-Host "  Obfuscated DLL applied" -ForegroundColor Green
+    } else {
+        Write-Host "  [WARN] Obfuscated DLL not found, using unobfuscated build" -ForegroundColor DarkYellow
+    }
+    Remove-Item $crprojTmp -Force -ErrorAction SilentlyContinue
+    Remove-Item $confuserOut -Recurse -Force -ErrorAction SilentlyContinue
+} else {
+    Write-Host "  [SKIP] ConfuserEx CLI not found. Download to tools\ConfuserEx\ for obfuscation." -ForegroundColor DarkYellow
+    Write-Host "  https://github.com/mkaring/ConfuserEx/releases" -ForegroundColor DarkGray
+}
+
+# Step 4: Build Inno Setup installer
+Write-Host ""
+Write-Host "[4/5] Building installer (Inno Setup)..." -ForegroundColor Yellow
 
 $issDir = "$repoRoot\dist\v1.1.12"
 $issFile = Get-ChildItem "$repoRoot\dist" -Filter "installer.iss" -Recurse | Select-Object -First 1
@@ -150,9 +191,9 @@ if ($iscc -and (Test-Path $issPath)) {
     if (-not (Test-Path $issPath)) { Write-Host "  [SKIP] installer.iss not found at $issPath" -ForegroundColor DarkYellow }
 }
 
-# Step 4: Package
+# Step 5: Package
 Write-Host ""
-Write-Host "[4/4] Packaging .simhubplugin..." -ForegroundColor Yellow
+Write-Host "[5/5] Packaging .simhubplugin..." -ForegroundColor Yellow
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 

@@ -84,12 +84,15 @@
     <Compile Include="Packets\CarDamageEntry.cs" />
     <Compile Include="Packets\SessionHistoryData.cs" />
     <Compile Include="Packets\LobbyInfoData.cs" />
+    <Compile Include="Packets\CarStatusData.cs" />
     <Compile Include="Parsers\PacketParser.cs" />
     <Compile Include="Store\DriverRun.cs" />
     <Compile Include="Store\SessionRun.cs" />
     <Compile Include="Store\SessionStore.cs" />
     <Compile Include="Finalizer\Lookups.cs" />
     <Compile Include="Finalizer\LeagueFinalizer.cs" />
+    <Compile Include="Security\KeyStore.cs" />
+    <Compile Include="Security\OtkWriter.cs" />
     <Compile Include="UI\SettingsControl.xaml.cs">
       <DependentUpon>SettingsControl.xaml</DependentUpon>
     </Compile>
