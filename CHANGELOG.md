@@ -2,6 +2,17 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.14] - 2026-03-02
+
+### Fixed
+- Carros de IA (grid fillers) apareciam nos resultados mesmo com voltas completadas
+- Nomes genericos (Car_15) nao eram resolvidos retroativamente com bestKnownTags de sessoes posteriores
+- Status "Retired" incorreto em qualifying quando piloto tinha tempo valido (quirk de transicao quali->race)
+
+### Improved
+- Filtro de IA agora exclui todo carro aiControlled, independente de numero de voltas
+- Resolucao retroativa de nomes: tags genericas substituidas por nomes reais descobertos em sessoes seguintes
+
 ## [1.1.13] - 2026-03-02
 
 ### Fixed

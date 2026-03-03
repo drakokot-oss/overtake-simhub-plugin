@@ -32,15 +32,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
             ParticipantEntry teamInfo;
             sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
 
-            // Entries with valid team data are REAL cars, keep them even if generic/0 laps
-            bool hasRealTeam = teamInfo != null && teamInfo.TeamId != 255;
-
-            // Only filter AI placeholders with 0 laps that have no real team context
-            if (teamInfo != null && teamInfo.AiControlled && dr.Laps.Count == 0 && !hasRealTeam)
+            // AI-controlled = grid filler, always exclude (even if it ran some laps)
+            if (teamInfo != null && teamInfo.AiControlled)
                 return true;
 
-            // Empty FC slots: generic tag, 0 laps, AND no team data
-            if (dr.Laps.Count == 0 && IsGenericTag(tag) && !hasRealTeam)
+            // Generic tag with 0 laps = empty slot, always exclude
+            if (dr.Laps.Count == 0 && IsGenericTag(tag))
                 return true;
 
             return false;
@@ -64,6 +61,51 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (tag.StartsWith("Player #") || tag.StartsWith("Player_"))
                 return 2;
             return 1;
+        }
+
+        /// <summary>
+        /// Retroactively resolves generic tags (Car_X, Driver_X) using bestKnownTags
+        /// from later sessions in the same lobby. E.g., a driver known only as Car_15
+        /// in qualifying may have their real name discovered in the race session.
+        /// </summary>
+        private static void RetroResolveNames(SessionRun sess, SessionStore store)
+        {
+            var bkt = store.DebugBestKnownTags;
+            if (bkt == null || bkt.Count == 0) return;
+
+            var renames = new List<KeyValuePair<string, string>>();
+            foreach (var kvp in sess.Drivers)
+            {
+                string tag = kvp.Key;
+                if (!IsGenericTag(tag)) continue;
+                DriverRun dr = kvp.Value;
+
+                ParticipantEntry teamInfo;
+                sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
+                if (teamInfo == null) continue;
+
+                string lookupKey = string.Format("{0}_{1}", teamInfo.RaceNumber, teamInfo.TeamId);
+                string resolvedName;
+                if (bkt.TryGetValue(lookupKey, out resolvedName) && !string.IsNullOrEmpty(resolvedName)
+                    && !IsGenericTag(resolvedName) && resolvedName != tag
+                    && !sess.Drivers.ContainsKey(resolvedName))
+                {
+                    renames.Add(new KeyValuePair<string, string>(tag, resolvedName));
+                }
+            }
+
+            foreach (var r in renames)
+            {
+                DriverRun dr = sess.Drivers[r.Key];
+                sess.Drivers.Remove(r.Key);
+                sess.Drivers[r.Value] = dr;
+
+                foreach (var kv in sess.TagsByCarIdx.ToList())
+                {
+                    if (kv.Value == r.Key)
+                        sess.TagsByCarIdx[kv.Key] = r.Value;
+                }
+            }
         }
 
         /// <summary>
@@ -418,6 +460,9 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Deduplicate drivers by physical car identity before building any results
             DeduplicateDrivers(sess);
 
+            // Retroactive name resolution: replace generic tags with real names from bestKnownTags
+            RetroResolveNames(sess, store);
+
             // Build carIdx->tag lookup
             var idxToTag = new Dictionary<int, string>(sess.TagsByCarIdx);
             if (sess.FinalClassification != null && sess.FinalClassification.Classification != null)
@@ -455,6 +500,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     bestByTag[tag] = bestMs;
             }
 
+            string stName = sess.SessionType.HasValue ? Lookups.LookupOrDefault(Lookups.SessionType, sess.SessionType.Value, "S") : "";
+            bool isQuali = stName.IndexOf("Qualifying", StringComparison.OrdinalIgnoreCase) >= 0
+                        || stName.IndexOf("Shootout", StringComparison.OrdinalIgnoreCase) >= 0;
+
             // Build results from FinalClassification
             var resultsOut = new List<Dictionary<string, object>>();
             int numActiveCars = sess.MaxNumActiveCars;
@@ -473,22 +522,15 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (!seenResultTags.Add(tag)) continue;
                     if (!sess.Drivers.ContainsKey(tag)) continue;
 
-                    // Filter truly empty FC slots: generic tag, 0 laps, no real team
-                    if (row.NumLaps == 0 && IsGenericTag(tag))
+                    // Filter AI grid fillers (regardless of lap count)
                     {
                         ParticipantEntry slotInfo;
                         sess.TeamByCarIdx.TryGetValue(row.CarIdx, out slotInfo);
-                        bool hasRealTeam = slotInfo != null && slotInfo.TeamId != 255;
-                        if (!hasRealTeam) continue;
-                    }
-                    // Filter AI placeholder drivers with 0 laps that aren't real lobby players
-                    if (row.NumLaps == 0 && sess.Drivers.ContainsKey(tag))
-                    {
-                        ParticipantEntry aiInfo;
-                        sess.TeamByCarIdx.TryGetValue(sess.Drivers[tag].CarIdx, out aiInfo);
-                        if (aiInfo != null && aiInfo.AiControlled && aiInfo.TeamId == 255)
+                        if (slotInfo != null && slotInfo.AiControlled)
                             continue;
                     }
+                    if (row.NumLaps == 0 && IsGenericTag(tag))
+                        continue;
 
                     int bestMs;
                     bestByTag.TryGetValue(tag, out bestMs);
@@ -500,6 +542,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     string statusStr;
                     Lookups.ResultStatus.TryGetValue(row.ResultStatus, out statusStr);
                     if (statusStr == null) statusStr = "FinishedOrUnknown";
+
+                    // Qualifying quirk: game marks drivers as Retired at session transition
+                    if (statusStr == "Retired" && row.BestLapTimeMs > 0 && isQuali)
+                        statusStr = "Finished";
 
                     var drData = sess.Drivers.ContainsKey(tag) ? sess.Drivers[tag] : null;
                     ParticipantEntry teamInfo;
@@ -583,11 +629,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
             }
 
             // Fallback: reconstruct race results from lap data
-            string stName = sess.SessionType.HasValue ? Lookups.LookupOrDefault(Lookups.SessionType, sess.SessionType.Value, "S") : "";
             bool isRace = stName.IndexOf("Race", StringComparison.OrdinalIgnoreCase) >= 0
                        || stName.IndexOf("Sprint", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool isQuali = stName.IndexOf("Qualifying", StringComparison.OrdinalIgnoreCase) >= 0
-                        || stName.IndexOf("Shootout", StringComparison.OrdinalIgnoreCase) >= 0;
 
             if (resultsOut.Count == 0 && isRace && sess.Drivers.Count > 0)
                 resultsOut = BuildRaceFallbackResults(sess, bestByTag, idxToTag, previousSessions, globalTeamByTag);
