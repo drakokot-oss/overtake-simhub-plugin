@@ -2,6 +2,31 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.15] - 2026-03-05
+
+### Fixed
+- Pilotos reais desapareciam dos resultados em lobbies com showOnlineNames=OFF (placeholder Driver_XX agora registrado para carIdx com teamId valido)
+- SessionHistory sobrescrevia voltas acumuladas em modo espectador (agora faz merge: preserva historico + adiciona novas)
+- FinalClassification numCars undercount em spectator (parser agora le 22 slots, ignora position=0)
+- Filtro Position > maxNumActiveCars descartava pilotos em posicoes altas (removido; phantom filter downstream ja trata)
+- IsPhantomEntry filtrava pilotos reais com tag generica e 0 laps quando tinham teamId valido
+- FC results loop ignorava pilotos removidos por deduplicacao (agora re-cria driver entry quando presente no FC)
+- Nomes de IA (LAWSON, BEARMAN) atribuidos a pilotos humanos quando showOnlineNames=OFF
+- TagReliability system muito agressivo bloqueava toda resolucao de nomes (parcialmente revertido)
+- AI grid fillers (carros vazios do jogo) com teamId valido passavam no phantom filter
+
+### Added
+- Barreira de seguranca absoluta: piloto com 1+ voltas NUNCA e filtrado como phantom
+- HumanCarIdxs tracking: carIdx detectado como humano e marcado permanentemente (carry-over entre sessoes)
+- wasHuman check no phantom filter: pilotos que desconectaram (AI assumiu) sao protegidos
+- FC como fonte autoritativa: re-cria DriverRun para pilotos listados no FC mas ausentes no SessionStore
+
+### Improved
+- Phantom filter multi-camada: laps>0 safety → AI+generic+!human → generic+noTeam
+- Resolucao de nomes com fallback Driver_XX quando lobby resolution falha completamente
+- SessionHistory merge preserva dados acumulados de pacotes anteriores em spectator mode
+- Validado end-to-end em 6 lobbies multiplayer (Spa, Catalunya, Austria, Baku, Singapore, Melbourne)
+
 ## [1.1.14] - 2026-03-02
 
 ### Fixed

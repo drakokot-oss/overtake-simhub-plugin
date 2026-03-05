@@ -29,15 +29,22 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (string.IsNullOrEmpty(tag))
                 return true;
 
+            // A driver who completed at least one lap is NEVER phantom.
+            if (dr.Laps.Count > 0)
+                return false;
+
             ParticipantEntry teamInfo;
             sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
 
-            // AI-controlled = grid filler, always exclude (even if it ran some laps)
-            if (teamInfo != null && teamInfo.AiControlled)
+            bool hasValidTeam = teamInfo != null && teamInfo.TeamId != 255;
+            bool wasHuman = sess.HumanCarIdxs.ContainsKey(dr.CarIdx) && sess.HumanCarIdxs[dr.CarIdx];
+
+            // AI flag + generic tag + 0 laps + never seen as human = grid filler, exclude.
+            if (teamInfo != null && teamInfo.AiControlled && IsGenericTag(tag) && !wasHuman)
                 return true;
 
-            // Generic tag with 0 laps = empty slot, always exclude
-            if (dr.Laps.Count == 0 && IsGenericTag(tag))
+            // Generic tag with 0 laps AND no valid team data = empty slot, exclude.
+            if (IsGenericTag(tag) && !hasValidTeam)
                 return true;
 
             return false;
@@ -506,31 +513,60 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             // Build results from FinalClassification
             var resultsOut = new List<Dictionary<string, object>>();
-            int numActiveCars = sess.MaxNumActiveCars;
             if (sess.FinalClassification != null && sess.FinalClassification.Classification != null)
             {
                 var seenResultTags = new HashSet<string>();
                 foreach (var row in sess.FinalClassification.Classification)
                 {
                     if (row == null || row.Position <= 0) continue;
-                    if (numActiveCars > 0 && row.Position > numActiveCars) continue;
                     string tag;
                     if (!sess.TagsByCarIdx.TryGetValue(row.CarIdx, out tag))
                         tag = string.Format("Car{0}", row.CarIdx);
 
+                    // Try to recover unknown drivers from bestKnownTags
+                    if (!sess.Drivers.ContainsKey(tag) && (IsGenericTag(tag) || tag.StartsWith("Car")))
+                    {
+                        ParticipantEntry pe;
+                        sess.TeamByCarIdx.TryGetValue(row.CarIdx, out pe);
+                        if (pe != null)
+                        {
+                            string lk = string.Format("{0}_{1}", pe.RaceNumber, pe.TeamId);
+                            var bkt = store.DebugBestKnownTags;
+                            string resolved;
+                            if (bkt.TryGetValue(lk, out resolved) && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                                tag = resolved;
+                        }
+                    }
+
                     if (GhostCarRe.IsMatch(tag) && !sess.Drivers.ContainsKey(tag)) continue;
                     if (!seenResultTags.Add(tag)) continue;
-                    if (!sess.Drivers.ContainsKey(tag)) continue;
 
-                    // Filter AI grid fillers (regardless of lap count)
+                    // A classified driver who completed laps is NEVER filtered.
+                    if (row.NumLaps > 0)
+                        goto fc_accept;
+
+                    // 0 laps below this point — filter ghosts and AI grid fillers.
                     {
                         ParticipantEntry slotInfo;
                         sess.TeamByCarIdx.TryGetValue(row.CarIdx, out slotInfo);
-                        if (slotInfo != null && slotInfo.AiControlled)
+                        bool wasHuman = sess.HumanCarIdxs.ContainsKey(row.CarIdx) && sess.HumanCarIdxs[row.CarIdx];
+
+                        // AI + generic + never human + 0 laps = grid filler
+                        if (slotInfo != null && slotInfo.AiControlled && IsGenericTag(tag) && !wasHuman)
+                            continue;
+
+                        // Generic + 0 laps + no valid team = empty slot
+                        if (IsGenericTag(tag) && (slotInfo == null || slotInfo.TeamId == 255))
                             continue;
                     }
-                    if (row.NumLaps == 0 && IsGenericTag(tag))
-                        continue;
+                    fc_accept:
+
+                    // FC is the authoritative source for who participated.
+                    // Always create DriverRun for valid FC entries.
+                    if (!sess.Drivers.ContainsKey(tag))
+                    {
+                        sess.Drivers[tag] = new DriverRun { CarIdx = row.CarIdx };
+                    }
 
                     int bestMs;
                     bestByTag.TryGetValue(tag, out bestMs);
@@ -758,7 +794,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Build drivers payload
             var driversOut = new Dictionary<string, object>();
             // When we have FC-derived results (race), use those as source of truth — includes all classified drivers
-            // (DNF, DSQ, etc.) and respects numActiveCars; avoids excluding real pilots with Car_X tags.
+            // (DNF, DSQ, etc.); avoids excluding real pilots with Car_X tags.
             if (resultsOut.Count > 0)
             {
                 foreach (var res in resultsOut)

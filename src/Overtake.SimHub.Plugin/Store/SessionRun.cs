@@ -21,6 +21,15 @@ namespace Overtake.SimHub.Plugin.Store
         public Dictionary<int, string> TagsByCarIdx = new Dictionary<int, string>();
         public Dictionary<int, ParticipantEntry> TeamByCarIdx = new Dictionary<int, ParticipantEntry>();
         public Dictionary<string, DriverRun> Drivers = new Dictionary<string, DriverRun>();
+
+        /// <summary>Per-carIdx tag reliability level (0=GENERIC, 1=UNRELIABLE, 2=RELIABLE).</summary>
+        public Dictionary<int, int> TagReliability = new Dictionary<int, int>();
+
+        /// <summary>
+        /// carIdx values that were EVER seen as human (aiControlled=false, platform!=255).
+        /// Once marked human, stays human even after disconnect/AI takeover.
+        /// </summary>
+        public Dictionary<int, bool> HumanCarIdxs = new Dictionary<int, bool>();
         public List<Dictionary<string, object>> Events = new List<Dictionary<string, object>>();
         public FinalClassificationData FinalClassification;
 
