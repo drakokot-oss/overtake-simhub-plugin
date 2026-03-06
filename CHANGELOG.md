@@ -2,6 +2,16 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.16] - 2026-03-06
+
+### Fixed
+- Carros fantasma (AI grid fillers) apareciam na corrida quando o jogo envia Participants packets iniciais com AiControlled=false para todos os slots, envenenando o HumanCarIdxs sticky
+- Removido check wasHuman do phantom filter para entradas com 0 voltas — barreira laps>0 ja protege pilotos reais
+
+### Improved
+- Phantom filter simplificado: 0 laps + AI + generic tag = filtrado (sem dependencia de HumanCarIdxs)
+- Validado em Melbourne (17 pilotos reais + 3 AI fillers corretamente removidos)
+
 ## [1.1.15] - 2026-03-05
 
 ### Fixed

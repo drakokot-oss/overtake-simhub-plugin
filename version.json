@@ -1,7 +1,7 @@
 {
-    "version": "1.1.15",
-    "released": "2026-03-05",
-    "download": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.15/Overtake.SimHub.Plugin-v1.1.15-Setup.exe",
-    "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.15/Overtake.SimHub.Plugin-v1.1.15-Setup.exe",
-    "releaseNotes": "### Fixed\n- Pilotos reais desapareciam dos resultados em lobbies com showOnlineNames=OFF\n- SessionHistory sobrescrevia voltas acumuladas em modo espectador\n- FinalClassification numCars undercount em spectator\n- IsPhantomEntry filtrava pilotos reais com tag generica e 0 laps\n- AI grid fillers com teamId valido passavam no phantom filter\n\n### Added\n- Barreira de seguranca absoluta: piloto com 1+ voltas NUNCA e filtrado\n- HumanCarIdxs tracking permanente\n- FC como fonte autoritativa: re-cria DriverRun para pilotos do FC\n\n### Improved\n- Phantom filter multi-camada com safety barrier\n- Validado end-to-end em 6 lobbies multiplayer"
+    "version": "1.1.16",
+    "released": "2026-03-06",
+    "download": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.16/Overtake.SimHub.Plugin-v1.1.16-Setup.exe",
+    "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.16/Overtake.SimHub.Plugin-v1.1.16-Setup.exe",
+    "releaseNotes": "### Fixed\n- Carros fantasma (AI grid fillers) apareciam na corrida quando jogo envia Participants packets iniciais com AiControlled=false para todos os slots\n- Removido check wasHuman do phantom filter para entradas com 0 voltas\n\n### Improved\n- Phantom filter simplificado: 0 laps + AI + generic tag = filtrado\n- Validado em Melbourne (17 pilotos reais + 3 AI fillers removidos)"
 }

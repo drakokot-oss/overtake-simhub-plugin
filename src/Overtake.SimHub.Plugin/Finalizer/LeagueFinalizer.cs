@@ -37,10 +37,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
             sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
 
             bool hasValidTeam = teamInfo != null && teamInfo.TeamId != 255;
-            bool wasHuman = sess.HumanCarIdxs.ContainsKey(dr.CarIdx) && sess.HumanCarIdxs[dr.CarIdx];
 
-            // AI flag + generic tag + 0 laps + never seen as human = grid filler, exclude.
-            if (teamInfo != null && teamInfo.AiControlled && IsGenericTag(tag) && !wasHuman)
+            // AI flag + generic tag + 0 laps = grid filler, exclude.
+            // wasHuman is NOT checked here: the game sends early Participants packets
+            // where AI fillers momentarily appear as human (AiControlled=false),
+            // poisoning the sticky HumanCarIdxs. The laps>0 barrier above already
+            // protects any real driver who actually drove.
+            if (teamInfo != null && teamInfo.AiControlled && IsGenericTag(tag))
                 return true;
 
             // Generic tag with 0 laps AND no valid team data = empty slot, exclude.
@@ -549,10 +552,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     {
                         ParticipantEntry slotInfo;
                         sess.TeamByCarIdx.TryGetValue(row.CarIdx, out slotInfo);
-                        bool wasHuman = sess.HumanCarIdxs.ContainsKey(row.CarIdx) && sess.HumanCarIdxs[row.CarIdx];
 
-                        // AI + generic + never human + 0 laps = grid filler
-                        if (slotInfo != null && slotInfo.AiControlled && IsGenericTag(tag) && !wasHuman)
+                        // AI + generic + 0 laps = grid filler (wasHuman not checked;
+                        // see IsPhantomEntry comment for rationale)
+                        if (slotInfo != null && slotInfo.AiControlled && IsGenericTag(tag))
                             continue;
 
                         // Generic + 0 laps + no valid team = empty slot
