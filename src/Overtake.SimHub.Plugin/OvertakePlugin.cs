@@ -458,16 +458,40 @@ namespace Overtake.SimHub.Plugin
         }
 
         /// <summary>
-        /// Only auto-export after the main Race ends, so the JSON contains
-        /// all accumulated sessions (Qualifying, Sprint, etc.) in one file.
-        /// Sprint-only lobbies can use the manual Export button.
+        /// Only auto-export after the LAST Race of the weekend.
+        /// In a sprint weekend (FP → SprintShootout → SprintRace → Qualifying → MainRace),
+        /// the Sprint Race and Main Race both use sessionTypeId=15 ("Race").
+        /// We detect a sprint weekend by the presence of a SprintShootout session
+        /// and only treat the second Race as terminal.
+        /// Sprint-only lobbies (no Main Race) can use the manual Export button.
         /// </summary>
-        private static bool IsTerminalSession(byte id)
+        private bool IsTerminalSession(byte id)
         {
             string name;
-            if (Finalizer.Lookups.SessionType.TryGetValue(id, out name))
-                return name == "Race";
-            return false;
+            if (!Finalizer.Lookups.SessionType.TryGetValue(id, out name))
+                return false;
+            if (name != "Race")
+                return false;
+
+            bool hasSprintShootout = false;
+            int raceCount = 0;
+            foreach (var sess in _store.Sessions.Values)
+            {
+                if (!sess.SessionType.HasValue) continue;
+                string sn;
+                if (Finalizer.Lookups.SessionType.TryGetValue(sess.SessionType.Value, out sn))
+                {
+                    if (sn == "SprintShootout" || sn == "Sprint")
+                        hasSprintShootout = true;
+                    if (sn == "Race")
+                        raceCount++;
+                }
+            }
+
+            if (hasSprintShootout && raceCount <= 1)
+                return false;
+
+            return true;
         }
 
         private static string SessionTypeName(byte id)

@@ -2,6 +2,15 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.17] - 2026-03-10
+
+### Fixed
+- Sprint weekend: auto-export disparava prematuramente apos o Sprint Race (sessionTypeId=15 = "Race"), impedindo captura do Main Qualifying + Main Race no mesmo JSON
+- Deteccao de sprint weekend via presenca de sessao SprintShootout no store: so exporta apos a segunda "Race" (Main Race)
+
+### Note
+- Weekends normais (sem sprint) nao sao afetados — comportamento identico ao v1.1.16
+
 ## [1.1.16] - 2026-03-06
 
 ### Fixed
