@@ -460,10 +460,10 @@ namespace Overtake.SimHub.Plugin
         /// <summary>
         /// Only auto-export after the LAST Race of the weekend.
         /// In a sprint weekend (FP → SprintShootout → SprintRace → Qualifying → MainRace),
-        /// the Sprint Race and Main Race both use sessionTypeId=15 ("Race").
-        /// We detect a sprint weekend by the presence of a SprintShootout session
-        /// and only treat the second Race as terminal.
-        /// Sprint-only lobbies (no Main Race) can use the manual Export button.
+        /// the Sprint Race uses sessionTypeId=15 and the Main Race uses sessionTypeId=16,
+        /// but both map to "Race" in Lookups.  We detect a sprint weekend by the
+        /// presence of a SprintShootout/Sprint session and only treat the second
+        /// Race as terminal.  Sprint-only lobbies can use the manual Export button.
         /// </summary>
         private bool IsTerminalSession(byte id)
         {
@@ -512,6 +512,9 @@ namespace Overtake.SimHub.Plugin
                 case 11: return "Race 2";
                 case 12: return "Race 3";
                 case 13: return "Time Trial";
+                case 14: return "Sprint Shootout";
+                case 15: return "Race";
+                case 16: return "Race";
                 default: return string.Format("Session ({0})", id);
             }
         }

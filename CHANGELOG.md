@@ -2,6 +2,15 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.18] - 2026-03-10
+
+### Fixed
+- Session type ID 16 (Main Race em sprint weekends) nao estava mapeado no Lookups, gerando "SessionType(16)" no JSON em vez de "Race"
+- IsTerminalSession agora reconhece ID 16 como "Race", garantindo auto-export correto no final da Main Race
+
+### Note
+- Weekends normais nao sao afetados — apenas sprint weekends usam ID 16
+
 ## [1.1.17] - 2026-03-10
 
 ### Fixed

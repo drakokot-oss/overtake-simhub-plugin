@@ -10,7 +10,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 4, "ShortPractice" }, { 5, "Qualifying1" }, { 6, "Qualifying2" }, { 7, "Qualifying3" },
             { 8, "ShortQualifying" }, { 9, "OneShotQualifying" }, { 10, "Race" }, { 11, "Race2" },
             { 12, "TimeTrial" }, { 13, "Sprint" }, { 14, "SprintShootout" },
-            { 15, "Race" }, { 19, "Race" }, { 24, "SprintShootout" },
+            { 15, "Race" }, { 16, "Race" }, { 19, "Race" }, { 24, "SprintShootout" },
             { 25, "Race" }, { 26, "Race" }, { 29, "Race" }, { 30, "Race" }, { 36, "Race" },
         };
 
