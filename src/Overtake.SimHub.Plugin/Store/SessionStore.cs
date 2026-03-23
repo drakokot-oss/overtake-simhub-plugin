@@ -387,6 +387,8 @@ namespace Overtake.SimHub.Plugin.Store
             }
         }
 
+        private const float CarStatusFuelCapacityMinKg = 5f;
+
         private void IngestCarStatus(string sid, CarStatusEntry[] entries)
         {
             if (entries == null) return;
@@ -412,6 +414,22 @@ namespace Overtake.SimHub.Plugin.Store
                     // the correct mid-race values.
                     if (newTc < d.TractionControl) d.TractionControl = newTc;
                     if (newAbs < d.AntiLockBrakes) d.AntiLockBrakes = newAbs;
+                }
+
+                float cap = entries[i].FuelCapacity;
+                if (cap >= CarStatusFuelCapacityMinKg)
+                {
+                    if (!d.FuelFirstSampleSet)
+                    {
+                        d.FuelInTankFirst = entries[i].FuelInTank;
+                        d.FuelRemainingLapsFirst = entries[i].FuelRemainingLaps;
+                        d.FuelFirstSampleSet = true;
+                    }
+                    d.FuelInTankLast = entries[i].FuelInTank;
+                    d.FuelRemainingLapsLast = entries[i].FuelRemainingLaps;
+                    d.FuelCapacityKg = cap;
+                    d.FuelMixLast = entries[i].FuelMix;
+                    d.FuelCaptured = true;
                 }
             }
         }
@@ -513,7 +531,11 @@ namespace Overtake.SimHub.Plugin.Store
                 sess.MaxNumActiveCars = p.NumActiveCars;
 
             // Track human carIdx: once seen as human, stays human forever in this session.
-            for (int i = 0; i < entries.Length; i++)
+            // Only check the active range (i < NumActiveCars) to prevent overflow
+            // entries (AI grid fillers) from being falsely marked as human when the
+            // game sends early packets with incorrect AiControlled=false flags.
+            int humanScanLimit = Math.Min(p.NumActiveCars, entries.Length);
+            for (int i = 0; i < humanScanLimit; i++)
             {
                 if (entries[i] == null) continue;
                 if (!entries[i].AiControlled && entries[i].Platform != 255)

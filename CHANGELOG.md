@@ -2,6 +2,17 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.19] - 2026-03-04
+
+### Fixed
+- Nomes de assento F1 (VERSTAPPEN, PIASTRI, etc.) com 0 voltas voltavam ao JSON quando o FC reidratatava stubs ou `TeamByCarIdx` nao batia — alinhado ao Python `league_finalizer` v1.1.19
+- `RemovePhantomDrivers` antes do loop FC + limpeza de `TagsByCarIdx` para tags fantasma
+- `ShouldSkipFcAiGridFillerRow`: IA + 0 laps; fallback por sobrenome oficial quando `aiControlled` ausente na slot
+
+### Note
+- `fuelTelemetry` / CarStatus ja estavam na v1.1.18; sem mudanca funcional aqui
+- Apos merge: rodar `Release.ps1 -Version "1.1.19"` e atualizar `version.json` + `useAppVersion.ts` no race-hub
+
 ## [1.1.18] - 2026-03-10
 
 ### Fixed

@@ -38,12 +38,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             bool hasValidTeam = teamInfo != null && teamInfo.TeamId != 255;
 
-            // AI flag + generic tag + 0 laps = grid filler, exclude.
-            // wasHuman is NOT checked here: the game sends early Participants packets
-            // where AI fillers momentarily appear as human (AiControlled=false),
-            // poisoning the sticky HumanCarIdxs. The laps>0 barrier above already
-            // protects any real driver who actually drove.
-            if (teamInfo != null && teamInfo.AiControlled && IsGenericTag(tag))
+            // AI-controlled + 0 laps = grid filler, regardless of tag name.
+            // In showOnlineNames=OFF lobbies, AI fillers get real F1 driver names
+            // (VERSTAPPEN, LECLERC, etc.) instead of generic tags. Requiring
+            // IsGenericTag would miss these. The laps>0 barrier above already
+            // protects any AI car that completed laps (e.g. disconnected human
+            // whose car was taken over by AI).
+            if (teamInfo != null && teamInfo.AiControlled)
                 return true;
 
             // Generic tag with 0 laps AND no valid team data = empty slot, exclude.
@@ -57,6 +58,83 @@ namespace Overtake.SimHub.Plugin.Finalizer
         {
             return EarlyRegRe.IsMatch(tag) || GhostCarRe.IsMatch(tag)
                 || DriverPlaceholderRe.IsMatch(tag) || PlayerGenericRe.IsMatch(tag);
+        }
+
+        /// <summary>
+        /// Game-assigned official surnames for empty grid slots when showOnlineNames=OFF.
+        /// Fallback when TeamByCarIdx lacks aiControlled (legacy captures).
+        /// </summary>
+        private static readonly HashSet<string> AiGridFillerSurnameTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "VERSTAPPEN", "HAMILTON", "LECLERC", "NORRIS", "SAINZ", "RUSSELL",
+            "PIASTRI", "ALONSO", "OCON", "GASLY", "TSUNODA", "STROLL",
+            "ALBON", "HULKENBERG", "RICCIARDO", "BOTTAS", "ZHOU", "MAGNUSSEN",
+            "SARGEANT", "LAWSON", "BEARMAN", "ANTONELLI", "HADJAR", "DOOHAN",
+            "BORTOLETO", "COLAPINTO", "DRUGOVICH", "VRIES",
+        };
+
+        private static bool TagMatchesOfficialAiSeatRoster(string tag)
+        {
+            if (string.IsNullOrEmpty(tag) || IsGenericTag(tag))
+                return false;
+            string u = tag.ToUpperInvariant();
+            if (u.IndexOf("DE VRIES", StringComparison.Ordinal) >= 0)
+                return true;
+            foreach (string chunk in Regex.Split(u, @"[^\w]+"))
+            {
+                if (chunk.Length >= 2 && AiGridFillerSurnameTokens.Contains(chunk))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Skip FC rows for AI grid fillers with no laps — matches Python _should_skip_fc_ai_grid_filler_row.
+        /// </summary>
+        private static bool ShouldSkipFcAiGridFillerRow(SessionRun sess, string tag, FinalClassificationEntry row, DriverRun preDr)
+        {
+            int fcLaps = row.NumLaps;
+            int telemLaps = preDr != null ? preDr.Laps.Count : 0;
+            if (Math.Max(fcLaps, telemLaps) > 0)
+                return false;
+
+            ParticipantEntry slotInfo;
+            sess.TeamByCarIdx.TryGetValue(row.CarIdx, out slotInfo);
+            bool? effAi = slotInfo != null ? (bool?)slotInfo.AiControlled : null;
+
+            if (effAi == true)
+                return true;
+            // Explicit human — do not use roster heuristic
+            if (effAi == false)
+                return false;
+            if (preDr == null && TagMatchesOfficialAiSeatRoster(tag))
+                return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Remove phantom drivers before FC processing (Python parity). Cleans TagsByCarIdx entries for removed tags.
+        /// </summary>
+        private static void RemovePhantomDrivers(SessionRun sess)
+        {
+            var phantomTags = new List<string>();
+            foreach (var kvp in sess.Drivers)
+            {
+                if (IsPhantomEntry(kvp.Key, kvp.Value, sess))
+                    phantomTags.Add(kvp.Key);
+            }
+            foreach (string t in phantomTags)
+            {
+                sess.Drivers.Remove(t);
+                var staleIdx = new List<int>();
+                foreach (var kv in sess.TagsByCarIdx)
+                {
+                    if (kv.Value == t)
+                        staleIdx.Add(kv.Key);
+                }
+                foreach (int idx in staleIdx)
+                    sess.TagsByCarIdx.Remove(idx);
+            }
         }
 
         /// <summary>
@@ -473,6 +551,9 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Retroactive name resolution: replace generic tags with real names from bestKnownTags
             RetroResolveNames(sess, store);
 
+            // Drop AI+0-lap phantoms before FC (Python parity); strip stale TagsByCarIdx
+            RemovePhantomDrivers(sess);
+
             // Build carIdx->tag lookup
             var idxToTag = new Dictionary<int, string>(sess.TagsByCarIdx);
             if (sess.FinalClassification != null && sess.FinalClassification.Classification != null)
@@ -541,6 +622,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
                         }
                     }
 
+                    DriverRun preDrFc;
+                    sess.Drivers.TryGetValue(tag, out preDrFc);
+                    if (ShouldSkipFcAiGridFillerRow(sess, tag, row, preDrFc))
+                        continue;
+
                     if (GhostCarRe.IsMatch(tag) && !sess.Drivers.ContainsKey(tag)) continue;
                     if (!seenResultTags.Add(tag)) continue;
 
@@ -548,17 +634,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (row.NumLaps > 0)
                         goto fc_accept;
 
-                    // 0 laps below this point — filter ghosts and AI grid fillers.
+                    // 0 laps — empty generic slots only (AI+0 handled by ShouldSkipFcAiGridFillerRow)
                     {
                         ParticipantEntry slotInfo;
                         sess.TeamByCarIdx.TryGetValue(row.CarIdx, out slotInfo);
-
-                        // AI + generic + 0 laps = grid filler (wasHuman not checked;
-                        // see IsPhantomEntry comment for rationale)
-                        if (slotInfo != null && slotInfo.AiControlled && IsGenericTag(tag))
-                            continue;
-
-                        // Generic + 0 laps + no valid team = empty slot
                         if (IsGenericTag(tag) && (slotInfo == null || slotInfo.TeamId == 255))
                             continue;
                     }
@@ -1118,6 +1197,31 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 globalTeamByTag.TryGetValue(dr.Tag, out teamInfo);
             string teamName = ResolveTeamName(teamInfo);
 
+            object driverAssistsOut = null;
+            if (dr.AssistsCaptured)
+            {
+                // Match Python league_finalizer _build_driver_assists: string labels, not {id,name}
+                driverAssistsOut = new Dictionary<string, object>
+                {
+                    { "tractionControl", Lookups.LookupOrDefault(Lookups.TractionControlMap, dr.TractionControl, "TC") },
+                    { "antiLockBrakes", dr.AntiLockBrakes != 0 },
+                };
+            }
+
+            object fuelTelemetryOut = null;
+            if (dr.FuelCaptured)
+            {
+                fuelTelemetryOut = new Dictionary<string, object>
+                {
+                    { "fuelMix", Lookups.LookupOrDefault(Lookups.FuelMixMap, dr.FuelMixLast, "FuelMix") },
+                    { "fuelCapacityKg", Math.Round(dr.FuelCapacityKg, 3) },
+                    { "fuelInTankKgFirst", Math.Round(dr.FuelInTankFirst, 3) },
+                    { "fuelInTankKgLast", Math.Round(dr.FuelInTankLast, 3) },
+                    { "fuelRemainingLapsFirst", Math.Round(dr.FuelRemainingLapsFirst, 3) },
+                    { "fuelRemainingLapsLast", Math.Round(dr.FuelRemainingLapsLast, 3) },
+                };
+            }
+
             return new Dictionary<string, object>
             {
                 { "position", 0 },
@@ -1142,7 +1246,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "collisionsTimeline", collTl },
                 { "totalWarnings", dr.LastTotalWarnings },
                 { "cornerCuttingWarnings", dr.LastCornerCuttingWarnings },
-                { "driverAssists", null },
+                { "driverAssists", driverAssistsOut },
+                { "fuelTelemetry", fuelTelemetryOut },
             };
         }
 

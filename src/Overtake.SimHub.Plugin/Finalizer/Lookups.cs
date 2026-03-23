@@ -228,6 +228,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 0, "Off" }, { 1, "Medium" }, { 2, "Full" },
         };
 
+        /// <summary>CarStatus m_fuelMix (F1 25 UDP packet 7).</summary>
+        public static readonly Dictionary<int, string> FuelMixMap = new Dictionary<int, string>
+        {
+            { 0, "Lean" }, { 1, "Standard" }, { 2, "Rich" }, { 3, "Max" },
+        };
+
         public static readonly Dictionary<int, string> ResultStatus = new Dictionary<int, string>
         {
             { 0, "Unknown" }, { 1, "Invalid" }, { 2, "Inactive" }, { 3, "Finished" },

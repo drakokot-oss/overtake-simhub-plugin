@@ -129,6 +129,17 @@ namespace Overtake.SimHub.Plugin.Store
         public byte AntiLockBrakes;
         public bool AssistsCaptured;
 
+        // Fuel snapshot (CarStatus packet 7) — only when FuelCapacity >= threshold
+        // (multiplayer Restricted telemetry zeroes fuel for other cars).
+        public byte FuelMixLast;
+        public float FuelCapacityKg;
+        public float FuelInTankFirst;
+        public float FuelInTankLast;
+        public float FuelRemainingLapsFirst;
+        public float FuelRemainingLapsLast;
+        public bool FuelFirstSampleSet;
+        public bool FuelCaptured;
+
         public void Reset()
         {
             Laps.Clear();
@@ -146,6 +157,15 @@ namespace Overtake.SimHub.Plugin.Store
             LastTotalWarnings = 0;
             LastCornerCuttingWarnings = 0;
             PenaltySnapshots.Clear();
+            FuelMixLast = 0;
+            FuelCapacityKg = 0f;
+            FuelInTankFirst = 0f;
+            FuelInTankLast = 0f;
+            FuelRemainingLapsFirst = 0f;
+            FuelRemainingLapsLast = 0f;
+            FuelFirstSampleSet = false;
+            FuelCaptured = false;
         }
     }
 }
+

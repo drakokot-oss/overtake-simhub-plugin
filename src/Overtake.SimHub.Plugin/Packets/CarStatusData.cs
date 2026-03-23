@@ -6,6 +6,10 @@ namespace Overtake.SimHub.Plugin.Packets
     {
         public byte TractionControl;
         public byte AntiLockBrakes;
+        public byte FuelMix;
+        public float FuelInTank;
+        public float FuelCapacity;
+        public float FuelRemainingLaps;
 
         private const int EntrySize = 55;
 
@@ -21,11 +25,15 @@ namespace Overtake.SimHub.Plugin.Packets
             for (int i = 0; i < maxCars; i++)
             {
                 int off = p + i * EntrySize;
-                if (off + 2 > data.Length) break;
+                if (off + 17 > data.Length) break;
                 entries[i] = new CarStatusEntry
                 {
                     TractionControl = data[off + 0],
                     AntiLockBrakes = data[off + 1],
+                    FuelMix = data[off + 2],
+                    FuelInTank = BitConverter.ToSingle(data, off + 5),
+                    FuelCapacity = BitConverter.ToSingle(data, off + 9),
+                    FuelRemainingLaps = BitConverter.ToSingle(data, off + 13),
                 };
             }
 
