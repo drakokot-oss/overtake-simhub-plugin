@@ -569,7 +569,9 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 }
             }
 
-            // Best lap by tag
+            // Best lap by tag — use minimum of scanned laps and SessionHistory best.
+            // SessionHistory (Packet 11) best is authoritative per-driver and immune
+            // to carIdx-reuse contamination that can pollute the Laps list.
             var bestByTag = new Dictionary<string, int>();
             foreach (var dkvp in sess.Drivers)
             {
@@ -579,11 +581,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 foreach (var lap in dr.Laps)
                     if (lap.LapTimeMs > 0 && (bestMs == 0 || lap.LapTimeMs < bestMs))
                         bestMs = lap.LapTimeMs;
-                if (bestMs == 0 && dr.Best.ContainsKey("bestLapTimeMs") && dr.Best["bestLapTimeMs"] != null)
+                if (dr.Best.ContainsKey("bestLapTimeMs") && dr.Best["bestLapTimeMs"] != null)
                 {
                     int shBest;
                     if (int.TryParse(dr.Best["bestLapTimeMs"].ToString(), out shBest) && shBest > 0)
-                        bestMs = shBest;
+                        if (bestMs == 0 || shBest < bestMs)
+                            bestMs = shBest;
                 }
                 if (bestMs == 0 && dr.LastSeenLapTimeMs > 0)
                     bestMs = dr.LastSeenLapTimeMs;
@@ -627,12 +630,16 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (ShouldSkipFcAiGridFillerRow(sess, tag, row, preDrFc))
                         continue;
 
-                    if (GhostCarRe.IsMatch(tag) && !sess.Drivers.ContainsKey(tag)) continue;
                     if (!seenResultTags.Add(tag)) continue;
 
                     // A classified driver who completed laps is NEVER filtered.
                     if (row.NumLaps > 0)
                         goto fc_accept;
+
+                    // Ghost filter: unregistered Car{N} entries with 0 laps are empty slots.
+                    // Must run AFTER NumLaps check so real drivers who were missed by
+                    // IngestParticipants (e.g. showOnlineNames=Off + no LobbyInfo) are kept.
+                    if (GhostCarRe.IsMatch(tag) && !sess.Drivers.ContainsKey(tag)) continue;
 
                     // 0 laps — empty generic slots only (AI+0 handled by ShouldSkipFcAiGridFillerRow)
                     {
@@ -649,6 +656,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     {
                         sess.Drivers[tag] = new DriverRun { CarIdx = row.CarIdx };
                     }
+                    if (!idxToTag.ContainsKey(row.CarIdx))
+                        idxToTag[row.CarIdx] = tag;
 
                     int bestMs;
                     bestByTag.TryGetValue(tag, out bestMs);
@@ -830,12 +839,29 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 if (string.IsNullOrEmpty(rTag) || !sess.Drivers.TryGetValue(rTag, out penDr))
                     continue;
 
+                int driverNumLaps = 0;
+                object nlObj;
+                if (res.TryGetValue("numLaps", out nlObj) && nlObj != null)
+                    int.TryParse(nlObj.ToString(), out driverNumLaps);
+
                 int nDt = 0, nSg = 0, nTimePen = 0, nWarn = 0, penTimeTotal = 0;
+                bool phantomFiltered = false;
                 foreach (var ps in penDr.PenaltySnapshots)
                 {
                     if (ps.EventCode == "COLL" || ps.EventCode == "DTSV" || ps.EventCode == "SGSV")
                         continue;
                     if (!ps.PenaltyType.HasValue) continue;
+
+                    // F1 25 UDP bug: duplicate UnservedStopGo/UnservedDriveThrough events
+                    // fired on last lap or after race end. Filter out post-race duplicates.
+                    int inf = ps.InfringementType.HasValue ? ps.InfringementType.Value : -1;
+                    if ((inf == 45 || inf == 46) && driverNumLaps > 0
+                        && ps.LapNum.HasValue && ps.LapNum.Value > driverNumLaps)
+                    {
+                        phantomFiltered = true;
+                        continue;
+                    }
+
                     int pt = ps.PenaltyType.Value;
                     if (pt == 0) nDt++;
                     else if (pt == 1) nSg++;
@@ -869,7 +895,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 int existingPenTime = 0;
                 if (res.TryGetValue("penaltiesTimeSec", out existingObj) && existingObj != null)
                     int.TryParse(existingObj.ToString(), out existingPenTime);
-                if (penTimeTotal > existingPenTime)
+                if (phantomFiltered || penTimeTotal > existingPenTime)
                     res["penaltiesTimeSec"] = penTimeTotal;
             }
 

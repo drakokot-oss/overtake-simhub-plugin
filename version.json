@@ -1,7 +1,7 @@
-{
-    "version": "1.1.18",
-    "released": "2026-03-10",
-    "download": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.18/Overtake.SimHub.Plugin-v1.1.18-Setup.exe",
-    "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.18/Overtake.SimHub.Plugin-v1.1.18-Setup.exe",
-    "releaseNotes": "### Fixed\n- Session type ID 16 (Main Race em sprint weekends) nao mapeado — gerava 'SessionType(16)' no JSON\n- Auto-export agora reconhece ID 16 como Race terminal em sprint weekends\n\n### Note\n- Weekends normais nao sao afetados"
+﻿{
+    "version":  "1.1.19",
+    "released":  "2026-03-27",
+    "download":  "https://racehub.overtakef1.com/downloads",
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.19/Overtake.SimHub.Plugin-v1.1.19-Setup.exe",
+    "releaseNotes":  "### Fixed\r\n- Nomes de assento F1 (VERSTAPPEN, PIASTRI, etc.) com 0 voltas voltavam ao JSON quando o FC reidratatava stubs ou `TeamByCarIdx` nao batia â€” alinhado ao Python `league_finalizer` v1.1.19\r\n- `RemovePhantomDrivers` antes do loop FC + limpeza de `TagsByCarIdx` para tags fantasma\r\n- `ShouldSkipFcAiGridFillerRow`: IA + 0 laps; fallback por sobrenome oficial quando `aiControlled` ausente na slot\r\n- Penalidades fantasma (`UnservedStopGoPenalty` / `UnservedDriveThroughPenalty`) duplicadas pelo jogo em voltas alem de `numLaps` agora sao filtradas; flag `phantomFiltered` forca correcao de `penaltiesTimeSec` mesmo quando menor que o valor do FC\r\n- `bestByTag` agora sempre usa o minimo entre tempos escaneados das voltas e `SessionHistory.bestLapTimeMs` â€” corrige best lap contaminado por reuso de `carIdx`\r\n- Filtro ghost `Car{N}` reordenado para rodar APOS checagem de `NumLaps \u003e 0` â€” pilotos reais nao registrados pelo `IngestParticipants` (ex: `showOnlineNames=Off`) nao sao mais filtrados indevidamente\r\n- Pilotos recuperados via FC agora sao adicionados ao mapa `idxToTag`, garantindo resolucao correta de eventos por `carIdx`\r\n\r\n### Changed\r\n- Export agora gera somente `.otk` (criptografado AES-256-CBC + HMAC-SHA256) â€” arquivo `.json` plain nao e mais gerado ao lado\r\n- O site (Edge Function `decrypt-telemetry`) ja decripta `.otk` automaticamente no upload\r\n\r\n### Note\r\n- `fuelTelemetry` / CarStatus ja estavam na v1.1.18; sem mudanca funcional aqui"
 }

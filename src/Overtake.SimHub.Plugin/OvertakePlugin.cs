@@ -302,7 +302,7 @@ namespace Overtake.SimHub.Plugin
         }
 
         /// <summary>
-        /// Finalizes the accumulated telemetry data and exports it as a JSON file.
+        /// Finalizes the accumulated telemetry data and exports it as an encrypted .otk file.
         /// Returns the full path to the generated file, or an error message.
         /// </summary>
         internal string ExportLeagueJson(string outputDir)
@@ -323,10 +323,6 @@ namespace Overtake.SimHub.Plugin
                 string otkPath = Path.Combine(outputDir, filename);
 
                 OtkWriter.WriteOtk(json, otkPath);
-
-                // Also write plain JSON alongside for local debugging
-                string jsonPath = Path.ChangeExtension(otkPath, ".json");
-                File.WriteAllText(jsonPath, json, System.Text.Encoding.UTF8);
 
                 _lastExportPath = otkPath;
                 global::SimHub.Logging.Current.Info(string.Format("[Overtake] Exported .otk to {0}", otkPath));

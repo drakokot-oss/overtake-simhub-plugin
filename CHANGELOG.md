@@ -8,10 +8,17 @@ All notable changes to the Overtake SimHub Plugin are documented here.
 - Nomes de assento F1 (VERSTAPPEN, PIASTRI, etc.) com 0 voltas voltavam ao JSON quando o FC reidratatava stubs ou `TeamByCarIdx` nao batia — alinhado ao Python `league_finalizer` v1.1.19
 - `RemovePhantomDrivers` antes do loop FC + limpeza de `TagsByCarIdx` para tags fantasma
 - `ShouldSkipFcAiGridFillerRow`: IA + 0 laps; fallback por sobrenome oficial quando `aiControlled` ausente na slot
+- Penalidades fantasma (`UnservedStopGoPenalty` / `UnservedDriveThroughPenalty`) duplicadas pelo jogo em voltas alem de `numLaps` agora sao filtradas; flag `phantomFiltered` forca correcao de `penaltiesTimeSec` mesmo quando menor que o valor do FC
+- `bestByTag` agora sempre usa o minimo entre tempos escaneados das voltas e `SessionHistory.bestLapTimeMs` — corrige best lap contaminado por reuso de `carIdx`
+- Filtro ghost `Car{N}` reordenado para rodar APOS checagem de `NumLaps > 0` — pilotos reais nao registrados pelo `IngestParticipants` (ex: `showOnlineNames=Off`) nao sao mais filtrados indevidamente
+- Pilotos recuperados via FC agora sao adicionados ao mapa `idxToTag`, garantindo resolucao correta de eventos por `carIdx`
+
+### Changed
+- Export agora gera somente `.otk` (criptografado AES-256-CBC + HMAC-SHA256) — arquivo `.json` plain nao e mais gerado ao lado
+- O site (Edge Function `decrypt-telemetry`) ja decripta `.otk` automaticamente no upload
 
 ### Note
 - `fuelTelemetry` / CarStatus ja estavam na v1.1.18; sem mudanca funcional aqui
-- Apos merge: rodar `Release.ps1 -Version "1.1.19"` e atualizar `version.json` + `useAppVersion.ts` no race-hub
 
 ## [1.1.18] - 2026-03-10
 
