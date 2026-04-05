@@ -289,6 +289,28 @@ namespace Overtake.SimHub.Plugin
             this.SaveCommonSettings("OvertakeSettings", _settings);
         }
 
+        /// <summary>
+        /// Clears all telemetry in memory and the UDP queue. Listener stays active.
+        /// Call after export before the next session to avoid mixing two races in one capture.
+        /// </summary>
+        internal void BeginNewCaptureSession()
+        {
+            if (_receiver != null)
+                _receiver.DrainPacketQueue();
+            if (_store != null)
+                _store.BeginNewCapture();
+            _sessionType = "";
+            _currentSessionTypeId = 0;
+            _sessionEndDetected = false;
+            _sessionEnded = false;
+            _raceFinalClassificationReceived = false;
+            _autoExportArmed = false;
+            _raceSendAtMs = 0;
+            _raceFcFirstMs = 0;
+            _lastAutoExportMsg = "";
+            global::SimHub.Logging.Current.Info("[Overtake] Capture cleared for new session (user)");
+        }
+
         internal void RestartReceiver()
         {
             if (_receiver != null)

@@ -146,8 +146,10 @@ foreach ($artifact in @($dllPath, $versionJsonPath)) {
     }
 }
 
-# Find the installer .exe
-$installerExe = Get-ChildItem "$repoRoot\dist" -Filter "*Setup*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+# Find the installer .exe (newest in dist/ — avoid picking an old *Setup*.exe)
+$installerExe = Get-ChildItem "$repoRoot\dist" -Filter "*Setup*.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
 if ($installerExe) {
     $instSize = [math]::Round($installerExe.Length / 1024, 1)
     $msg = "  OK  $($installerExe.Name)  $instSize KB"

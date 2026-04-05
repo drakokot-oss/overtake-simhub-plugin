@@ -148,16 +148,41 @@ if ($confuserCli) {
 Write-Host ""
 Write-Host "[4/5] Building installer (Inno Setup)..." -ForegroundColor Yellow
 
-$issDir = "$repoRoot\dist\v1.1.12"
-$issFile = Get-ChildItem "$repoRoot\dist" -Filter "installer.iss" -Recurse | Select-Object -First 1
-if ($issFile) {
-    $issDir = $issFile.DirectoryName
-    $issPath = $issFile.FullName
+# Prefer dist\v{AssemblyVersion}\installer.iss; else newest dist\v*\installer.iss by semver
+$asmInfoPath = "$repoRoot\src\Overtake.SimHub.Plugin\Properties\AssemblyInfo.cs"
+$asmShortVer = $null
+if (Test-Path $asmInfoPath) {
+    $asmRaw = Get-Content $asmInfoPath -Raw
+    if ($asmRaw -match 'AssemblyVersion\("(\d+\.\d+\.\d+)') { $asmShortVer = $Matches[1] }
+}
+$preferredIss = if ($asmShortVer) { "$repoRoot\dist\v$asmShortVer\installer.iss" } else { $null }
+if ($preferredIss -and (Test-Path $preferredIss)) {
+    $issPath = $preferredIss
+    $issDir = Split-Path $issPath -Parent
 } else {
-    $issPath = "$issDir\installer.iss"
+    $issRow = Get-ChildItem "$repoRoot\dist" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+        $iss = Join-Path $_.FullName "installer.iss"
+        if (-not (Test-Path $iss)) { return }
+        $dirName = $_.Name
+        if ($dirName -match '^v([\d\.]+)$') {
+            [PSCustomObject]@{ Dir = $_.FullName; Ver = [version]$Matches[1]; Iss = $iss }
+        }
+    } | Sort-Object Ver -Descending | Select-Object -First 1
+    if (-not $issRow) {
+        $issPath = "$repoRoot\dist\v1.1.12\installer.iss"
+        $issDir = Split-Path $issPath -Parent
+    } else {
+        $issPath = $issRow.Iss
+        $issDir = $issRow.Dir
+    }
+    if ($preferredIss -and -not (Test-Path $preferredIss) -and $issRow) {
+        $t = Split-Path -Leaf $issRow.Dir
+        Write-Host "  [NOTE] No dist\v$asmShortVer - using Inno template from $t" -ForegroundColor DarkYellow
+    }
 }
 
 $isccPaths = @(
+    "C:\InnoSetup6\ISCC.exe",
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     "C:\Program Files\Inno Setup 6\ISCC.exe"
 )
@@ -178,7 +203,10 @@ if ($iscc -and (Test-Path $issPath)) {
     Set-Content -Path $issPath -Value $issContent -Encoding UTF8 -NoNewline
 
     & $iscc $issPath 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
-    $installerExe = Get-ChildItem $issDir -Filter "*.exe" | Where-Object { $_.Name -match "Setup" } | Select-Object -First 1
+    $installerExe = Get-ChildItem $issDir -Filter "*.exe" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "Setup" } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
     if ($installerExe) {
         $instSize = [math]::Round($installerExe.Length / 1024, 1)
         Write-Host "  Installer: $($installerExe.Name) ($instSize KB)" -ForegroundColor Green

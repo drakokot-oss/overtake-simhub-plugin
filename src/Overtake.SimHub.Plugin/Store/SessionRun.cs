@@ -65,6 +65,10 @@ namespace Overtake.SimHub.Plugin.Store
         // Peak numActiveCars seen across all Participants packets (spectator mode fluctuates)
         public int MaxNumActiveCars;
 
+        /// <summary>Peak NumActiveCars from Participants (packet 4) only — never bumped by FC.
+        /// Used to drop overflow FC rows in online quali (e.g. Driver_19 when lobby has 19 drivers).</summary>
+        public int ParticipantsPeakNumActive;
+
         // Lobby settings (captured once from first Session packet with data)
         public bool LobbySettingsCaptured;
         public byte ForecastAccuracy;

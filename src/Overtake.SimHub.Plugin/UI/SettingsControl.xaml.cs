@@ -92,6 +92,25 @@ namespace Overtake.SimHub.Plugin.UI
             SaveSettings();
         }
 
+        private void BtnNewSession_Click(object sender, RoutedEventArgs e)
+        {
+            if (_plugin == null) return;
+            var r = MessageBox.Show(
+                "Isto apaga toda a telemetria em memoria (sessoes, pilotos, caches de nomes).\n\n" +
+                "Use depois de ter guardado o export (.otk) e antes da proxima corrida.\n\n" +
+                "O listener UDP continua ativo (SimHub nao e afetado).\n\n" +
+                "Continuar?",
+                "Nova sessao — Overtake",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (r != MessageBoxResult.Yes) return;
+
+            _plugin.BeginNewCaptureSession();
+            LblExportResult.Text = "Captura limpa. A proxima corrida comeca do zero.";
+            LblExportResult.Foreground = TealBrush;
+            UpdateStatusLabels();
+        }
+
         private void BtnExport_Click(object sender, RoutedEventArgs e)
         {
             if (_plugin == null) return;

@@ -78,6 +78,14 @@ namespace Overtake.SimHub.Plugin.Store
         public int DiagLobbyInfoReceived;
         public int DiagLobbyInfoPlayers;
 
+        // Full My Team (all active slots MyTeam=true, online): lobby wins on raceNumber_teamId keys.
+        private bool _captureFullMyTeam;
+        private int _fullMyTeamStreak;
+        public bool CaptureFullMyTeam { get { return _captureFullMyTeam; } }
+
+        /// <summary>Populated at export: lobby vs bestKnown disagreements before full-My-Team merge.</summary>
+        public List<Dictionary<string, object>> LastExportedNameKeyConflicts { get; set; }
+
         private static readonly HashSet<string> IgnoreEvents =
             new HashSet<string> { "SPTP", "DRSE", "DRSD", "STLG", "BUTN" };
 
@@ -89,6 +97,57 @@ namespace Overtake.SimHub.Plugin.Store
         public SessionStore()
         {
             StartedAtMs = NowMs();
+            LastExportedNameKeyConflicts = new List<Dictionary<string, object>>();
+        }
+
+        /// <summary>
+        /// Clears all captured sessions, per-driver data, and cross-session name caches.
+        /// UDP listener is unchanged. Use after export when starting another race/lobby
+        /// so the next file is not merged with or polluted by the previous capture.
+        /// </summary>
+        public void BeginNewCapture()
+        {
+            Sessions.Clear();
+            _bestKnownTags.Clear();
+            _bestKnownTagReliability.Clear();
+            _lobbyNameByTeamRn.Clear();
+            _lobbyNameByTeamOnly.Clear();
+            _lobbyTeamKeys.Clear();
+            _lastTrackId = null;
+            _captureFullMyTeam = false;
+            _fullMyTeamStreak = 0;
+            SessionUid = null;
+            StartedAtMs = NowMs();
+            LastPacketMs = 0;
+            PacketCounts.Clear();
+            Notes.Clear();
+            LastExportedNameKeyConflicts.Clear();
+            LobbyNumPlayers = 0;
+
+            DiagLobbyResolved = 0;
+            DiagLobbyFailed = 0;
+            DiagShReceived = 0;
+            DiagShNoDriver = 0;
+            DiagShDedup = 0;
+            DiagShLapsParsed = 0;
+            DiagShLapsAccepted = 0;
+            DiagShLapsFiltered = 0;
+            DiagLdLapRecorded = 0;
+            DiagLdNoDriver = 0;
+            DiagLdNoPrevLap = 0;
+            DiagLdTimeZero = 0;
+            DiagLdAlreadyExists = 0;
+            DiagLdSanityFail = 0;
+            DiagLdEarlyRegister = 0;
+            DiagShEarlyRegister = 0;
+            DiagParticipantsReceived = 0;
+            DiagParticipantsNumActive = 0;
+            DiagPlayerCarIdx = -1;
+            DiagPlayerRecoveredFromOverflow = 0;
+            DiagFcTotal = 0;
+            DiagFcRegistered = 0;
+            DiagLobbyInfoReceived = 0;
+            DiagLobbyInfoPlayers = 0;
         }
 
         private static long NowMs()
@@ -115,8 +174,67 @@ namespace Overtake.SimHub.Plugin.Store
                 _lobbyTeamKeys.Clear();
                 DiagLobbyResolved = 0;
                 DiagLobbyFailed = 0;
+                _captureFullMyTeam = false;
+                _fullMyTeamStreak = 0;
             }
             _lastTrackId = newTrackId;
+        }
+
+        /// <summary>
+        /// All active slots are My Team cars (online). Official grids have MyTeam=false.
+        /// </summary>
+        private static bool DetectFullMyTeamGrid(SessionRun sess, ParticipantEntry[] entries, int numActive)
+        {
+            if (sess.NetworkGame != 1 || numActive < 2) return false;
+            if (entries == null) return false;
+            for (int i = 0; i < numActive && i < entries.Length; i++)
+            {
+                var e = entries[i];
+                if (e == null) return false;
+                if (!e.MyTeam) return false;
+                if (e.TeamId == 255) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Before finalizing export: make lobby roster win every raceNumber_teamId seat (full My Team only).
+        /// </summary>
+        public void ApplyFullMyTeamLobbyMergeIfNeeded()
+        {
+            if (!_captureFullMyTeam) return;
+            foreach (var kv in _lobbyNameByTeamRn)
+            {
+                string lv = kv.Value;
+                if (string.IsNullOrEmpty(lv) || IsGenericTag(lv)) continue;
+                string bk;
+                if (!_bestKnownTags.TryGetValue(kv.Key, out bk) || IsGenericTag(bk) || bk != lv)
+                {
+                    _bestKnownTags[kv.Key] = lv;
+                    int rel;
+                    if (!_bestKnownTagReliability.TryGetValue(kv.Key, out rel) || rel < TAG_RELIABLE)
+                        _bestKnownTagReliability[kv.Key] = TAG_RELIABLE;
+                }
+            }
+        }
+
+        /// <summary>Conflicts between lobby map and bestKnownTags before merge (diagnostics).</summary>
+        public List<Dictionary<string, object>> SnapshotNameKeyConflicts()
+        {
+            var rows = new List<Dictionary<string, object>>();
+            foreach (var kv in _lobbyNameByTeamRn)
+            {
+                string lv = kv.Value;
+                if (string.IsNullOrEmpty(lv) || IsGenericTag(lv)) continue;
+                string bk;
+                if (_bestKnownTags.TryGetValue(kv.Key, out bk) && !string.IsNullOrEmpty(bk) && !IsGenericTag(bk) && bk != lv)
+                    rows.Add(new Dictionary<string, object> {
+                        { "key", kv.Key },
+                        { "lobbyName", lv },
+                        { "bestKnown", bk },
+                    });
+            }
+            return rows;
         }
 
         private static string MsToStr(int ms)
@@ -529,6 +647,8 @@ namespace Overtake.SimHub.Plugin.Store
 
             if (p.NumActiveCars > sess.MaxNumActiveCars)
                 sess.MaxNumActiveCars = p.NumActiveCars;
+            if (p.NumActiveCars > sess.ParticipantsPeakNumActive)
+                sess.ParticipantsPeakNumActive = p.NumActiveCars;
 
             // Track human carIdx: once seen as human, stays human forever in this session.
             // Only check the active range (i < NumActiveCars) to prevent overflow
@@ -597,6 +717,13 @@ namespace Overtake.SimHub.Plugin.Store
                 sess.TeamByCarIdx[i] = entries[i];
             }
 
+            if (DetectFullMyTeamGrid(sess, entries, p.NumActiveCars))
+                _fullMyTeamStreak++;
+            else
+                _fullMyTeamStreak = 0;
+            if (_fullMyTeamStreak >= 2)
+                _captureFullMyTeam = true;
+
             // ── Step 2: Force Driver_X for unreliable names on known-human carIdx ──
             var tags = p.TagsByCarIdx;
             if (tags == null) tags = new Dictionary<int, string>();
@@ -627,8 +754,25 @@ namespace Overtake.SimHub.Plugin.Store
                     // Only store in bestKnownTags if source is reliable (not AI seat name)
                     if (rel >= TAG_RELIABLE)
                     {
-                        _bestKnownTags[lookupKey] = tag;
-                        _bestKnownTagReliability[lookupKey] = rel;
+                        if (_captureFullMyTeam)
+                        {
+                            string lobbyNm;
+                            if (_lobbyNameByTeamRn.TryGetValue(lookupKey, out lobbyNm)
+                                && !string.IsNullOrEmpty(lobbyNm) && !IsGenericTag(lobbyNm))
+                            {
+                                // Lobby already owns this seat key — do not overwrite with Participant.
+                            }
+                            else
+                            {
+                                _bestKnownTags[lookupKey] = tag;
+                                _bestKnownTagReliability[lookupKey] = rel;
+                            }
+                        }
+                        else
+                        {
+                            _bestKnownTags[lookupKey] = tag;
+                            _bestKnownTagReliability[lookupKey] = rel;
+                        }
                     }
                 }
                 else if (IsGenericTag(tag))
@@ -1144,6 +1288,64 @@ namespace Overtake.SimHub.Plugin.Store
             d.LastHistoryUpdateMs = nowMs;
         }
 
+        /// <summary>
+        /// drivers{} key that holds lap telemetry for this grid slot (Python _best_driver_tag_for_car_idx).
+        /// </summary>
+        private static string BestDriverTagForCarIdx(SessionRun sess, int carIdx)
+        {
+            string bestK = null;
+            int bestN = -1;
+            foreach (var cand in new[]
+                     {
+                         "Driver_" + carIdx,
+                         "Car_" + carIdx,
+                         "Car" + carIdx
+                     })
+            {
+                DriverRun dr;
+                if (!sess.Drivers.TryGetValue(cand, out dr) || dr == null) continue;
+                int n = dr.Laps != null ? dr.Laps.Count : 0;
+                if (n > bestN)
+                {
+                    bestN = n;
+                    bestK = cand;
+                }
+            }
+            foreach (var kvp in sess.Drivers)
+            {
+                var dr = kvp.Value;
+                if (dr == null || dr.CarIdx != carIdx) continue;
+                int n = dr.Laps != null ? dr.Laps.Count : 0;
+                if (n > bestN)
+                {
+                    bestN = n;
+                    bestK = kvp.Key;
+                }
+            }
+            return bestN > 0 && !string.IsNullOrEmpty(bestK) ? bestK : null;
+        }
+
+        private static void MergeFcDriverBucket(SessionRun sess, int carIdx, string newTag, string oldTag)
+        {
+            if (string.IsNullOrEmpty(newTag)) return;
+            if (string.IsNullOrEmpty(oldTag) || oldTag == newTag) return;
+            DriverRun drOld;
+            if (!sess.Drivers.TryGetValue(oldTag, out drOld) || drOld == null) return;
+            sess.Drivers.Remove(oldTag);
+            drOld.Tag = newTag;
+            drOld.CarIdx = carIdx;
+            DriverRun existing;
+            if (sess.Drivers.TryGetValue(newTag, out existing) && existing != null)
+            {
+                int nOld = drOld.Laps != null ? drOld.Laps.Count : 0;
+                int nEx = existing.Laps != null ? existing.Laps.Count : 0;
+                if (nOld > nEx)
+                    sess.Drivers[newTag] = drOld;
+            }
+            else
+                sess.Drivers[newTag] = drOld;
+        }
+
         private void IngestFinalClassification(SessionRun sess, FinalClassificationData fc, long nowMs)
         {
             // Accumulate FC: merge entries across repeated broadcasts.
@@ -1209,8 +1411,11 @@ namespace Overtake.SimHub.Plugin.Store
 
                 int carIdx = row.CarIdx;
 
-                // Cross-session tag recovery (prefer non-generic tags)
-                if (!sess.TagsByCarIdx.ContainsKey(carIdx))
+                string tag;
+                bool weakTag = !sess.TagsByCarIdx.TryGetValue(carIdx, out tag) || string.IsNullOrEmpty(tag) || IsGenericTag(tag);
+
+                // Cross-session tag recovery (prefer non-generic tags) — also when slot only has Driver_X / Car_X.
+                if (weakTag)
                 {
                     string bestCross = null;
                     ParticipantEntry bestCrossTeam = null;
@@ -1241,14 +1446,16 @@ namespace Overtake.SimHub.Plugin.Store
                     if (!string.IsNullOrEmpty(bestCross))
                     {
                         sess.TagsByCarIdx[carIdx] = bestCross;
+                        tag = bestCross;
                         if (bestCrossTeam != null && !sess.TeamByCarIdx.ContainsKey(carIdx))
                             sess.TeamByCarIdx[carIdx] = bestCrossTeam;
                     }
                 }
 
-                // FC validates that this car is real. Try lobby resolution before falling
-                // back to a placeholder so drivers aren't silently dropped.
-                if (!sess.TagsByCarIdx.ContainsKey(carIdx))
+                weakTag = !sess.TagsByCarIdx.TryGetValue(carIdx, out tag) || string.IsNullOrEmpty(tag) || IsGenericTag(tag);
+
+                // FC validates that this car is real. Try lobby resolution before placeholder.
+                if (weakTag)
                 {
                     ParticipantEntry team;
                     if (sess.TeamByCarIdx.TryGetValue(carIdx, out team) && team != null && team.TeamId != 255)
@@ -1263,14 +1470,41 @@ namespace Overtake.SimHub.Plugin.Store
                                 { isDup = true; break; }
                             }
                             if (!isDup)
+                            {
                                 sess.TagsByCarIdx[carIdx] = resolved;
+                                tag = resolved;
+                            }
                         }
                     }
                 }
-                if (!sess.TagsByCarIdx.ContainsKey(carIdx))
+
+                weakTag = !sess.TagsByCarIdx.TryGetValue(carIdx, out tag) || string.IsNullOrEmpty(tag) || IsGenericTag(tag);
+
+                // Bridge FC slot to drivers{} bucket that has laps (Qualy→Race identity drift).
+                if (weakTag)
                 {
-                    sess.TagsByCarIdx[carIdx] = "Car_" + carIdx;
+                    string bridged = BestDriverTagForCarIdx(sess, carIdx);
+                    if (!string.IsNullOrEmpty(bridged))
+                    {
+                        string prevTag = null;
+                        sess.TagsByCarIdx.TryGetValue(carIdx, out prevTag);
+                        MergeFcDriverBucket(sess, carIdx, bridged, prevTag);
+                        sess.TagsByCarIdx[carIdx] = bridged;
+                        tag = bridged;
+                    }
+                }
+
+                if (!sess.TagsByCarIdx.TryGetValue(carIdx, out tag) || string.IsNullOrEmpty(tag))
+                {
+                    bool online = sess.NetworkGame == 1;
+                    tag = online ? ("Driver_" + carIdx) : ("Car_" + carIdx);
+                    sess.TagsByCarIdx[carIdx] = tag;
                     DiagFcRegistered++;
+                }
+                else if (sess.NetworkGame == 1 && tag == "Car_" + carIdx)
+                {
+                    tag = "Driver_" + carIdx;
+                    sess.TagsByCarIdx[carIdx] = tag;
                 }
 
                 DiagFcTotal++;

@@ -1,8 +1,8 @@
-; Overtake SimHub Plugin - Inno Setup Installer
+﻿; Overtake SimHub Plugin - Inno Setup Installer
 ; Version 1.1.19
 
 #define MyAppName "Overtake SimHub Plugin"
-#define MyAppVersion "1.1.19"
+#define MyAppVersion "1.1.26"
 #define MyAppPublisher "Overtake F1"
 #define MyAppURL "https://racehub.overtakef1.com"
 

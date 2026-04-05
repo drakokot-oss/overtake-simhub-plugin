@@ -2,6 +2,63 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.26] - 2026-03-31
+
+### Fixed
+- **Qualificação online — P20 `Driver_19` fantasma (lobby com 19 pilotos):** o FC lista 22 slots; índices `carIdx >= NumActiveCars` do **Participants** (pico, só packet 4) com tag genérica e sem volta/tempo são **ignorados**. Export inclui `participantsPeakNumActive` na sessão (paridade Python `session_store` + `league_finalizer`)
+
+## [1.1.25] - 2026-03-31
+
+### Fixed
+- **Final Classification (packet 8) — identidade Quali→Race / liga:** recuperação cross-session e resolução por lobby passam a correr também quando o slot já tem tag **genérica** (`Driver_N`, etc.), não só quando a chave falta em `TagsByCarIdx` (paridade com Python `session_store`)
+- **Ponte FC → `drivers{}`:** `BestDriverTagForCarIdx` + `MergeFcDriverBucket` — se ainda só há placeholder mas existe bucket com **voltas** (gamertag ou outro nome), alinha `TagsByCarIdx` e move o `DriverRun` (menos `Car17` / stub vazio vs telemetria noutra chave)
+- **Online:** fallback FC **`Driver_{carIdx}`** em vez de `Car_{carIdx}`; se ainda vier `Car_{idx}` online, normaliza para **`Driver_{idx}`**
+
+## [1.1.24] - 2026-03-30
+
+### Fixed
+- **FC tag duplicate (online):** segundo assento com a mesma `tag` ja nao usa `Driver_{raceNumber}` como fallback — numeros de corrida repetem-se (#2, etc.) e o primeiro piloto a consumir `Driver_11` roubava o **bucket** do `carIdx` 11, gerando **Car11/Car0** sem telemetria enquanto o jogo mostrava DNF/classificados com tempos. Fallback agora e **`Driver_{carIdx}`** e, se preciso, **`Car{carIdx}`** (paridade com `f125` `league_finalizer.py`)
+
+## [1.1.23] - 2026-03-30
+
+### Fixed
+- **FC tag `Car{N}` vs `Driver_{N}`:** reconcilia quando o stub `CarN` existe vazio mas `Driver_N` tem telemetria; match por indice no nome quando `DriverRun.CarIdx` vem 0 no store
+- **Race `Retired` +1 lap:** F1 UDP marca muitos classificados a uma volta como `Retired` (7); export mantem `status` cru e acrescenta `classifiedLapped` + `classificationLeaderLaps` para o front / ligas alinharem ao ecran do jogo
+
+### Changed
+- Awards **mostPositionsGained** e recorte **mostConsistent** incluem linhas com `classifiedLapped`
+
+## [1.1.22] - 2026-03-30
+
+### Fixed
+- **Multiplayer online (`networkGame`):** cada linha do Final Classification com `position > 0` passa a ser **sempre** exportada — nao se descarta como IA filler, ghost `Car{N}` com 0 laps, ou generico sem team no blob (late join / DSQ sem volta / espectador)
+- **Dedup:** chave fisica agora inclui `carIdx` (`teamId_raceNumber_carIdx`) para nao fundir dois humanos na mesma equipa My Team
+
+### Added
+- Campos `carIdx` e `raceNumber` em cada entrada de `results[]`
+- Objeto `exportDiagnostics` por sessao (`fcRowsPositionGt0`, `fcRowsEmittedFromLoop`, contadores de drops, `driversMergedByDedup`, etc.)
+- Duas linhas FC com a mesma `tag` em online: segunda renomeada para `Driver_{raceNumber}` ou `Car{carIdx}`
+
+### Note
+- Paridade com `f125-telemetry-mvp` `league_finalizer.py`; ver `docs/PROJECT-CONTEXT.md` (secao FC autoritario). Testes: lobbies aleatorios + ligas reais.
+
+## [1.1.21] - 2026-03-28
+
+### Added
+- Botao **Nova sessao (limpar captura)** nas definicoes: apaga sessoes, pilotos e caches de nomes em memoria; esvazia a fila UDP pendente; **nao** para o listener — use apos export e antes da proxima corrida para nao misturar duas capturas
+
+## [1.1.20] - 2026-03-27
+
+### Fixed
+- Grids **full My Team** (online, todos os slots ativos com `myTeam`): o **Lobby** passa a ganhar na chave `raceNumber_teamId` — Participantes com tag "reliable" ja **nao sobrescrevem** `_bestKnownTags` quando o lobby ja definiu nome para esse assento (evita trocar tempos/nomes entre pilotos)
+- No export, **merge** final: `lobbyNameMap` sobrepoe `bestKnownTags` em conflito quando `fullMyTeamGrid` (paridade com Python `finalize_league_json`)
+
+### Added
+- Diagnostico `fullMyTeamGrid`, `nameKeyConflicts` em `_debug.diagnostics.lobbyInfo` (conflitos lobby vs bestKnown **antes** do merge)
+
+### Note
+- Detecao exige **2 pacotes Participantes consecutivos** com grid full My Team; grelhas oficiais (`myTeam=false`) **nao** sao afetadas
+
 ## [1.1.19] - 2026-03-04
 
 ### Fixed

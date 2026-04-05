@@ -41,6 +41,16 @@ namespace Overtake.SimHub.Plugin
             get { return _packetQueue; }
         }
 
+        /// <summary>Removes queued packets (e.g. after user starts a new capture). Does not reset packet counters.</summary>
+        public int DrainPacketQueue()
+        {
+            int n = 0;
+            byte[] dummy;
+            while (_packetQueue.TryDequeue(out dummy))
+                n++;
+            return n;
+        }
+
         public long PacketsReceived
         {
             get { return _packetsReceived; }
