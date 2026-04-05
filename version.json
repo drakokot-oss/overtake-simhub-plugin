@@ -1,7 +1,7 @@
 ﻿{
-    "version":  "1.1.26",
-    "released":  "2026-04-05",
-    "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.26/Overtake.SimHub.Plugin-v1.1.26-Setup.exe",
-    "releaseNotes":  "### Fixed\n- **QualificaÃ§Ã£o online â€” P20 `Driver_19` fantasma (lobby com 19 pilotos):** o FC lista 22 slots; Ã­ndices `carIdx \u003e= NumActiveCars` do **Participants** (pico, sÃ³ packet 4) com tag genÃ©rica e sem volta/tempo sÃ£o **ignorados**. Export inclui `participantsPeakNumActive` na sessÃ£o (paridade Python `session_store` + `league_finalizer`)"
+  "version": "1.1.26",
+  "released": "2026-04-05",
+  "download": "https://racehub.overtakef1.com/downloads",
+  "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.26/Overtake.SimHub.Plugin-v1.1.26-Setup.exe",
+  "releaseNotes": "### Fixed\n- **Qualificação online — P20 `Driver_19` fantasma (lobby com 19 pilotos):** o FC lista 22 slots; índices `carIdx >= NumActiveCars` do **Participants** (pico, só packet 4) com tag genérica e sem volta/tempo são **ignorados**. Export inclui `participantsPeakNumActive` na sessão (paridade Python `session_store` + `league_finalizer`)"
 }

@@ -94,7 +94,7 @@ Write-Host ""
 Write-Host "[2/$totalSteps] Extracting release notes..." -ForegroundColor Yellow
 $releaseNotes = ""
 if (Test-Path $changelogPath) {
-    $clContent = Get-Content $changelogPath -Raw
+    $clContent = Get-Content $changelogPath -Raw -Encoding UTF8
     $escapedVer = [regex]::Escape($Version)
     if ($clContent -match "(?ms)## \[$escapedVer\].*?\n(.*?)(?=\n## \[|\z)") {
         $releaseNotes = $Matches[1].Trim()
@@ -160,13 +160,14 @@ if ($installerExe) {
 
 if (-not $ok) { Write-Host "Artifacts missing. Release aborted." -ForegroundColor Red; exit 1 }
 
-# Inject releaseNotes into version.json
-$vjContent = Get-Content $versionJsonPath -Raw | ConvertFrom-Json
+# Inject releaseNotes into version.json (UTF-8 sem BOM para consumo web / plugin)
+$vjContent = Get-Content $versionJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $vjContent.releaseNotes = $releaseNotes
 $installerName = if ($installerExe) { $installerExe.Name } else { "Overtake.SimHub.Plugin-v$Version-Setup.exe" }
 $vjContent.installerUrl = "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v$Version/$installerName"
-Set-Content -Path $versionJsonPath -Value ($vjContent | ConvertTo-Json -Depth 5) -Encoding UTF8
-Write-Host "  version.json updated with releaseNotes + installerUrl" -ForegroundColor Green
+$jsonOut = $vjContent | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText($versionJsonPath, $jsonOut, [System.Text.UTF8Encoding]::new($false))
+Write-Host "  version.json updated with releaseNotes + installerUrl (UTF-8)" -ForegroundColor Green
 
 # ── Step 5: Git commit + tag ──
 Write-Host ""
