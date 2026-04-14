@@ -1,7 +1,7 @@
-﻿{
-  "version": "1.1.26",
-  "released": "2026-04-05",
+{
+  "version": "1.1.27",
+  "released": "2026-04-06",
   "download": "https://racehub.overtakef1.com/downloads",
-  "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.26/Overtake.SimHub.Plugin-v1.1.26-Setup.exe",
-  "releaseNotes": "### Fixed\n- **Qualificação online — P20 `Driver_19` fantasma (lobby com 19 pilotos):** o FC lista 22 slots; índices `carIdx >= NumActiveCars` do **Participants** (pico, só packet 4) com tag genérica e sem volta/tempo são **ignorados**. Export inclui `participantsPeakNumActive` na sessão (paridade Python `session_store` + `league_finalizer`)"
+  "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.27/Overtake.SimHub.Plugin-v1.1.27-Setup.exe",
+  "releaseNotes": "### Fixed\n- **Qualifying online — nome AI no lugar de jogador real:** RetroResolveNames resolve tags do roster oficial de AI quando bestKnownTags contém gamertag real diferente\n- **Qualifying/Race online — entradas fantasma:** ShouldSkipFcAiGridFillerRow aprimorado para filtrar slots genéricos com 0 voltas sem confirmação humana\n- **Race online — fantasma duplicado por reassign de carIdx:** RemovePhantomDuplicateSeats remove entradas genéricas 0-lap cujo raceNumber_teamId já pertence a outro piloto real\n- **Fallback race results — contagem de voltas incorreta em modo espectador:** EffectiveLapCount corrige ranking quando telemetria perde voltas intermediárias e FC não é recebido\n\n### Added\n- Diagnósticos fcMissingForRace e resultSource no exportDiagnostics"
 }

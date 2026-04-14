@@ -59,14 +59,39 @@ O JSON inclui `_debug.integrity`:
 
 ## Timing do auto-export
 
-O plugin **só exporta automaticamente após receber o FinalClassification** (Packet 8) da corrida. Dessa forma garante-se que o JSON tenha todos os dados: `tyreStints`, `pitStops`, classificação oficial. O F1 25 envia o Packet 8 ao exibir a tela de resultados. **Se fechar o jogo antes da tela de resultados, não haverá auto-export** — use o botão de export manual.
+O plugin usa uma lógica de três caminhos para decidir quando exportar:
 
-## Proteções já implementadas
+1. **Caminho principal:** SEND (fim de sessão) + FC já recebido → export em 5 segundos.
+2. **Caminho FC tardio:** SEND detectado + FC chega depois → export 5 segundos após o FC.
+3. **Fallback 60s:** SEND detectado mas FC nunca chega → export após 60 segundos usando telemetria.
+
+O F1 25 envia o FC (Packet 8) ao exibir a **tela de resultados finais**. Em modo espectador, se a tela de resultados **não carregar** (bug do jogo, desconexão, ou narrador que sai antes), o FC pode nunca ser enviado. Nesses casos o fallback de 60s garante que o export acontece.
+
+### Quando o FC não chega (fallback)
+
+Sem FC, os resultados são reconstruídos a partir da telemetria acumulada. O campo `exportDiagnostics.resultSource` indica a origem:
+
+| Valor | Significado |
+|-------|-------------|
+| `final_classification` | Resultados do FC oficial do jogo (ideal) |
+| `fallback_telemetry` | Resultados reconstruídos a partir de voltas/tempos capturados |
+
+**Limitações do fallback:**
+- Posições baseadas em: voltas completadas (DESC) → tempo total (ASC)
+- Penalidades de tempo pós-corrida podem não afetar a ordem
+- Tempos totais podem ter imprecisão se voltas intermediárias não foram capturadas
+- O campo `fcMissingForRace: true` aparece nos diagnósticos quando isso ocorre
+
+**Recomendação:** Aguarde a tela de resultados finais no jogo antes de sair/fechar. Isso garante que o FC seja enviado e os resultados sejam 100% fiéis ao jogo.
+
+## Proteções implementadas
 
 1. **Retenção de teamId** — Não sobrescrevemos teamId válido com 255 (sync/DSQ).
 2. **LapData para todos** — Voltas vêm do LapData (22 carros).
 3. **Early registration** — Placeholders até Participants chegar.
 4. **PlayerCarIndex=255** — Tratamento correto para espectador.
+5. **EffectiveLapCount** — Contagem de voltas usa o maior entre `Laps.Count`, maior `LapNumber` e `LastRecordedLapNumber`. Gaps de telemetria em espectador não reduzem a contagem.
+6. **Fallback 60s** — Garante export mesmo sem FC.
 
 ---
 
@@ -76,5 +101,7 @@ O plugin **só exporta automaticamente após receber o FinalClassification** (Pa
 |------|---------|
 | Trocar de piloto | ✅ Sim |
 | Conectar antes do lobby | ✅ Recomendado |
+| Aguardar tela de resultados | ✅ **Muito recomendado** |
 | Menu por segundos | ⚠️ Evite longos períodos |
 | Pausar o jogo | ⚠️ Pode interromper UDP |
+| Sair antes dos resultados | ⚠️ FC pode não chegar — fallback é usado |
