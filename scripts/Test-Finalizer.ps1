@@ -67,15 +67,25 @@ $sp[0] = 1; $sp[1] = 28; $sp[2] = 20; $sp[6] = 10; $sp[7] = 5
 $sp[124] = 0; $sp[125] = 1
 $ingestMethod.Invoke($store, @((Dispatch (New-FakePacket 1 $sp))))
 
-# Participants: 2 drivers
+# Participants: 2 drivers (aligned with Test-SessionStore / ParticipantsData.Parse parity)
 $pp = New-Object byte[] 1256
+for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
 $pp[0] = 2
+$pp[1] = 0
 $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
 [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
-$pp[1+3] = 0; $pp[1+5] = 44
+$pp[4] = 0; $pp[6] = 44
+$pp[41] = 1; $pp[44] = 1
+$pp[58] = 0
 $n1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
 [System.Array]::Copy($n1, 0, $pp, 65, $n1.Length)
-$pp[58+3] = 2; $pp[58+5] = 1
+$pp[61] = 2; $pp[63] = 1
+$pp[98] = 1; $pp[101] = 1
+for ($c = 2; $c -lt 22; $c++) {
+    $st = 1 + $c * 57
+    $pp[$st + 3] = 255
+    $pp[$st + 5] = 0
+}
 $ingestMethod.Invoke($store, @((Dispatch (New-FakePacket 4 $pp))))
 
 # LapData: simulate 3 laps for Hamilton

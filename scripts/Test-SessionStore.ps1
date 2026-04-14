@@ -104,15 +104,31 @@ Assert "WeatherTimeline has entry" ((Get-Field $sess "WeatherTimeline").Count -g
 # ---- Test 3: Ingest Participants packet (ID 4) ----
 Write-Host "=== Test 3: Ingest Participants ===" -ForegroundColor Cyan
 $partPayload = New-Object byte[] 1256
+for ($zi = 0; $zi -lt $partPayload.Length; $zi++) { $partPayload[$zi] = 0 }
+# (avoid junk teamId in slots 2..21 — TeamByCarIdx + ResolveNames would add extra TagsByCarIdx entries)
 $partPayload[0] = 2
+# ParticipantsData.Parse: human + ShowOnlineNames=0 => placeholder Driver_i (game parity).
+# Use human + ShowOnlineNames=1 and Platform!=255 so tags stay Hamilton/Verstappen and bestKnownTags stay reliable.
+$partPayload[1] = 0
 $name0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
 [System.Array]::Copy($name0, 0, $partPayload, 8, $name0.Length)
 $partPayload[1 + 3] = 1
 $partPayload[1 + 5] = 44
+$partPayload[41] = 1
+$partPayload[44] = 1
+$partPayload[58] = 0
 $name1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
 [System.Array]::Copy($name1, 0, $partPayload, 65, $name1.Length)
 $partPayload[58 + 3] = 2
 $partPayload[58 + 5] = 1
+$partPayload[98] = 1
+$partPayload[101] = 1
+# Slots 2..21: no team (255 + race 0) so TeamByCarIdx / ResolveNames do not create phantom rows
+for ($c = 2; $c -lt 22; $c++) {
+    $st = 1 + $c * 57
+    $partPayload[$st + 3] = 255
+    $partPayload[$st + 5] = 0
+}
 
 $pkt4 = New-FakePacket 4 $partPayload
 $parsed4 = Dispatch $pkt4
