@@ -364,6 +364,139 @@ $hamDriver = GetDriver (GetSession $store $sid) "Hamilton"
 Assert "TotalWarnings = 2" ((Get-Field $hamDriver "LastTotalWarnings") -eq 2)
 Assert "CornerCuttingWarnings = 1" ((Get-Field $hamDriver "LastCornerCuttingWarnings") -eq 1)
 
+# ---- Test 16: Custom MyTeam raceNumber collision (issue #1) ----
+# Two human players sharing (raceNumber=57, teamId=41) but distinct networkIds.
+# Verifies network-id-keyed map is populated and rn-key flagged ambiguous.
+Write-Host "=== Test 16: Custom MyTeam raceNumber collision (issue #1) ===" -ForegroundColor Cyan
+$storeMt = [System.Activator]::CreateInstance($storeType)
+DoIngest $storeMt (Dispatch (New-FakePacket 1 $sessionPayload))
+
+$mtPayload = New-Object byte[] 1256
+for ($zi = 0; $zi -lt $mtPayload.Length; $zi++) { $mtPayload[$zi] = 0 }
+$mtPayload[0] = 2
+
+# Slot 0: Bruno, networkId=10, teamId=41, raceNumber=57
+$mtPayload[1]  = 0     # AiControlled = false
+$mtPayload[2]  = 255   # DriverId = 255 (network human, skip seat-name override)
+$mtPayload[3]  = 10    # NetworkId
+$nm0 = [System.Text.Encoding]::UTF8.GetBytes("UNA_BrunoKauan")
+[System.Array]::Copy($nm0, 0, $mtPayload, 8, $nm0.Length)
+$mtPayload[4]  = 41    # TeamId
+$mtPayload[6]  = 57    # RaceNumber
+$mtPayload[41] = 1     # ShowOnlineNames
+$mtPayload[44] = 1     # Platform
+
+# Slot 1: Davi, networkId=20, SAME teamId=41 + raceNumber=57 (Custom MyTeam collision)
+$mtPayload[58] = 0
+$mtPayload[59] = 255   # DriverId = 255
+$mtPayload[60] = 20    # NetworkId
+$nm1 = [System.Text.Encoding]::UTF8.GetBytes("EXO_DaviAraujo")
+[System.Array]::Copy($nm1, 0, $mtPayload, 65, $nm1.Length)
+$mtPayload[61] = 41
+$mtPayload[63] = 57
+$mtPayload[98] = 1
+$mtPayload[101] = 1
+
+# Slots 2..21: empty
+for ($c = 2; $c -lt 22; $c++) {
+    $st = 1 + $c * 57
+    $mtPayload[$st + 3] = 255
+    $mtPayload[$st + 5] = 0
+}
+
+DoIngest $storeMt (Dispatch (New-FakePacket 4 $mtPayload))
+$sessMt = GetSession $storeMt $sid
+$tagsMt = Get-Field $sessMt "TagsByCarIdx"
+
+Assert "carIdx 0 = Bruno"  ((Get-DictValue $tagsMt 0) -eq "UNA_BrunoKauan")
+Assert "carIdx 1 = Davi"   ((Get-DictValue $tagsMt 1) -eq "EXO_DaviAraujo")
+Assert "carIdx 0 != Davi"  ((Get-DictValue $tagsMt 0) -ne "EXO_DaviAraujo")
+Assert "carIdx 1 != Bruno" ((Get-DictValue $tagsMt 1) -ne "UNA_BrunoKauan")
+
+# Network-id-keyed map keeps both names independently
+$bktNet = Get-Field $storeMt "DebugBestKnownTagsByNet"
+Assert "BestKnownTagsByNet has both" ($bktNet.Count -ge 2)
+Assert "net10_41 = Bruno" ((Get-DictValue $bktNet "net10_41") -eq "UNA_BrunoKauan")
+Assert "net20_41 = Davi"  ((Get-DictValue $bktNet "net20_41") -eq "EXO_DaviAraujo")
+
+# rn-key flagged ambiguous (rn-keyed fallback must skip it)
+$ambig = Get-Field $storeMt "DebugRnKeyAmbiguous"
+$hasAmbig = $false
+foreach ($k in $ambig) { if ($k -eq "57_41") { $hasAmbig = $true } }
+Assert "rn-key 57_41 flagged ambiguous" $hasAmbig
+
+# ---- Test 17: rn-collision + privacy-on uses networkId, never steals ----
+# Davi toggles showOnlineNames=0 mid-session. Without the fix, the rn-keyed
+# fallback would return Bruno's name. With networkId in place, Davi's slot is
+# resolved correctly via the network-id key.
+Write-Host "=== Test 17: networkId resolves slot when name is hidden ===" -ForegroundColor Cyan
+$mtPayload2 = $mtPayload.Clone()
+$mtPayload2[98] = 0  # Davi: ShowOnlineNames=0 -> raw tag becomes Driver_1
+DoIngest $storeMt (Dispatch (New-FakePacket 4 $mtPayload2))
+$tagsMt2 = Get-Field $sessMt "TagsByCarIdx"
+
+$daviAfter = Get-DictValue $tagsMt2 1
+Assert "Davi resolved via networkId"  ($daviAfter -eq "EXO_DaviAraujo")
+Assert "Davi NOT stolen by Bruno"     ($daviAfter -ne "UNA_BrunoKauan")
+Assert "Bruno keeps his slot"         ((Get-DictValue $tagsMt2 0) -eq "UNA_BrunoKauan")
+
+# ---- Test 18: AI guard prevents AI seat from stealing a confirmed-human name ----
+Write-Host "=== Test 18: AI guard against name stealing ===" -ForegroundColor Cyan
+$storeAi = [System.Activator]::CreateInstance($storeType)
+DoIngest $storeAi (Dispatch (New-FakePacket 1 $sessionPayload))
+
+$aiPayload = New-Object byte[] 1256
+for ($zi = 0; $zi -lt $aiPayload.Length; $zi++) { $aiPayload[$zi] = 0 }
+$aiPayload[0] = 3
+
+# Slot 0: Hamilton, real human, teamId=1, raceNumber=44, networkId=10
+$aiPayload[1]  = 0
+$aiPayload[2]  = 255   # DriverId = 255
+$aiPayload[3]  = 10
+$nmH = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+[System.Array]::Copy($nmH, 0, $aiPayload, 8, $nmH.Length)
+$aiPayload[4]  = 1
+$aiPayload[6]  = 44
+$aiPayload[41] = 1
+$aiPayload[44] = 1
+
+# Slot 1: irrelevant human, distinct slot
+$aiPayload[58] = 0
+$aiPayload[59] = 255   # DriverId = 255
+$aiPayload[60] = 20
+$nmV = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+[System.Array]::Copy($nmV, 0, $aiPayload, 65, $nmV.Length)
+$aiPayload[61] = 2
+$aiPayload[63] = 1
+$aiPayload[98] = 1
+$aiPayload[101] = 1
+
+# Slot 2: AI sharing teamId=1 + raceNumber=44 with Hamilton, generic placeholder
+$st2 = 1 + 2 * 57
+$aiPayload[$st2 + 0] = 1     # AiControlled=true
+$aiPayload[$st2 + 2] = 255   # NetworkId=255 (AI sentinel)
+$aiPayload[$st2 + 3] = 1     # Same teamId
+$aiPayload[$st2 + 5] = 44    # Same raceNumber as Hamilton
+$nmAi = [System.Text.Encoding]::UTF8.GetBytes("Driver_2")
+[System.Array]::Copy($nmAi, 0, $aiPayload, $st2 + 7, $nmAi.Length)
+$aiPayload[$st2 + 40] = 0    # ShowOnlineNames=0 (irrelevant for AI)
+$aiPayload[$st2 + 43] = 255  # Platform=255 (AI)
+
+# Empty remaining slots
+for ($c = 3; $c -lt 22; $c++) {
+    $st = 1 + $c * 57
+    $aiPayload[$st + 3] = 255
+    $aiPayload[$st + 5] = 0
+}
+
+DoIngest $storeAi (Dispatch (New-FakePacket 4 $aiPayload))
+$sessAi = GetSession $storeAi $sid
+$tagsAi = Get-Field $sessAi "TagsByCarIdx"
+
+Assert "Hamilton at slot 0"   ((Get-DictValue $tagsAi 0) -eq "Hamilton")
+$aiTag = Get-DictValue $tagsAi 2
+Assert "AI slot did NOT steal Hamilton" ($aiTag -ne "Hamilton")
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

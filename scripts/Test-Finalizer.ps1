@@ -213,6 +213,13 @@ Assert "Debug not null" ($debug -ne $null)
 Assert "Has packetIdCounts" ((Get-DictValue $debug "packetIdCounts") -ne $null)
 Assert "Has diagnostics" ((Get-DictValue $debug "diagnostics") -ne $null)
 
+# Issue #1 diagnostics: networkId-keyed map and rn-key ambiguity list are exported
+$diag = Get-DictValue $debug "diagnostics"
+$lobbyInfo = Get-DictValue $diag "lobbyInfo"
+Assert "Has lobbyInfo" ($lobbyInfo -ne $null)
+Assert "Has bestKnownTagsByNet" ($lobbyInfo.ContainsKey("bestKnownTagsByNet"))
+Assert "Has rnKeyAmbiguous" ($lobbyInfo.ContainsKey("rnKeyAmbiguous"))
+
 # ---- Test 11: JSON serialization ----
 Write-Host "=== Test 11: JSON serialization ===" -ForegroundColor Cyan
 [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions")

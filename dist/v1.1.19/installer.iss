@@ -2,7 +2,7 @@
 ; Version 1.1.19
 
 #define MyAppName "Overtake SimHub Plugin"
-#define MyAppVersion "1.1.27"
+#define MyAppVersion "1.1.28"
 #define MyAppPublisher "Overtake F1"
 #define MyAppURL "https://racehub.overtakef1.com"
 
