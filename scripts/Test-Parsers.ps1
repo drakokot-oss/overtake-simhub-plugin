@@ -205,16 +205,22 @@ $partBuf[29] = 2   # numActiveCars
 # Car 0: name = "Verstappen"
 $car0Base = 30
 $partBuf[$car0Base + 0] = 0    # aiControlled = false
+$partBuf[$car0Base + 1] = 255  # DriverId = network human (not F1 seat lookup)
 $partBuf[$car0Base + 3] = 1    # teamId = 1 (Red Bull)
 $partBuf[$car0Base + 5] = 1    # raceNumber = 1
+$partBuf[$car0Base + 40] = 1   # ShowOnlineNames = 1 (0 would force Driver_N placeholder)
+$partBuf[$car0Base + 43] = 1   # Platform
 $nameBytes = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
 [Array]::Copy($nameBytes, 0, $partBuf, $car0Base + 7, $nameBytes.Length)
 
 # Car 1: name = "Hamilton"
 $car1Base = 30 + 57
 $partBuf[$car1Base + 0] = 0
+$partBuf[$car1Base + 1] = 255
 $partBuf[$car1Base + 3] = 2    # teamId = 2 (Ferrari)
 $partBuf[$car1Base + 5] = 44   # raceNumber = 44
+$partBuf[$car1Base + 40] = 1
+$partBuf[$car1Base + 43] = 1
 $nameBytes2 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
 [Array]::Copy($nameBytes2, 0, $partBuf, $car1Base + 7, $nameBytes2.Length)
 

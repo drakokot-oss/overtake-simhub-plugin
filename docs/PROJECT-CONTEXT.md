@@ -124,32 +124,52 @@ Reconstrói resultados a partir da telemetria:
 
 ## Filtragem de pilotos fantasma
 
-Três camadas de filtragem removem entradas que não são pilotos reais:
+Cinco camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais.
 
-### 1. IsPhantomEntry (pré-FC)
+### Conceito-chave: overflow slot
+
+`participantsPeakNumActive` é o pico de `NumActiveCars` (packet 4) durante a sessão. **Slots com `carIdx >= peak` são "overflow"** — o jogo preenche essas posições do array de 22 com placeholders/AI fillers, mas elas nunca foram ocupadas por pilotos reais ativos. Esses slots aparecem no FC (packet 8) com `Position > 0` mas `NumLaps = 0` porque o array do FC sempre tem 22 entradas.
+
+### 1. ResolveNamesFromLobby (durante Participants ingestion) — `SessionStore`
+
+- Skip overflow + AI-controlled (sessão online)
+- Skip placeholder em overflow se `wasHuman = false`
+
+### 2. IngestFinalClassification main loop (durante FC ingestion) — `SessionStore`
+
+- Skip overflow + 0 laps + `wasHuman = false` (sessão online)
+
+### 3. IngestFinalClassification post-FC registration (após FC) — `SessionStore`
+
+- Skip overflow + `wasHuman = false` (sessão online)
+
+### 4. IsPhantomEntry / RemovePhantomDrivers (pré-finalização) — `LeagueFinalizer`
 
 Remove de `sess.Drivers` antes do processamento FC:
-- AI-controlled + 0 laps = grid filler
+- AI-controlled + 0 laps = grid filler (offline ou online)
 - Generic tag + 0 laps + sem team válido = slot vazio
+- **Online:** generic + 0 laps + overflow + `wasHuman = false`
 
-### 2. ShouldSkipFcAiGridFillerRow (durante FC)
+### 5. ShouldSkipFcAiGridFillerRow (durante FC loop) — `LeagueFinalizer`
 
 Filtra linhas FC que não representam pilotos reais:
 - **Offline:** AI-controlled ou roster heuristic + 0 laps
-- **Online:** Generic tag + 0 laps + 0 bestLap + não confirmado humano + ausente de lobbyMap/bestKnownTags
+- **Online:** generic + 0 laps + 0 bestLap + não confirmado humano + ausente de lobbyMap/bestKnownTags
+- **Online (overflow):** generic + carIdx >= peak + 0 bestLap
 
-### 3. RemovePhantomDuplicateSeats (pós-RetroResolve)
+### 6. RemovePhantomDuplicateSeats (pós-RetroResolve) — `LeagueFinalizer`
 
 Remove fantasmas de reconexão:
 - Generic tag + 0 laps + `raceNumber_teamId` já pertence a outro driver com nome real
 - Só em sessões online
 
-### Segurança
+### Segurança (invariantes)
 
 - Pilotos com nome real (não genérico) **nunca** são filtrados
-- Pilotos com `HumanCarIdxs[carIdx] = true` **nunca** são filtrados pelo FC filter
+- Pilotos com `HumanCarIdxs[carIdx] = true` **nunca** são filtrados (todos os filtros checam `wasHuman`)
 - Pilotos com laps > 0 **nunca** são filtrados
 - Pilotos com `raceNumber_teamId` no `lobbyNameMap` ou `bestKnownTags` **nunca** são filtrados pelo FC filter
+- Sessões offline (`NetworkGame == 0`) não são afetadas pelos filtros adicionados em v1.1.29
 
 ---
 
@@ -249,6 +269,26 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 ---
 
 ## Problemas conhecidos resolvidos
+
+### v1.1.29
+
+| Problema | Causa raiz | Correção |
+|----------|-----------|----------|
+| Driver_18, Driver_19 (e outros) na qualifying online com grid parcial | `AiControlled` ficava stale (`false`) em pacotes posteriores; `ResolveNamesFromLobby` e o post-FC loop em `IngestFinalClassification` registravam placeholders para todos os 22 slots de `TeamByCarIdx` | 5 filtros de defense-in-depth checando `carIdx >= participantsPeakNumActive` em `SessionStore` (3 pontos de ingestion) e `LeagueFinalizer` (`IsPhantomEntry`, `ShouldSkipFcAiGridFillerRow`); todos com guard `wasHuman` |
+
+**Validação contra OTKs reais (v1.1.29):**
+- Monaco peak=18, before=20 results → após fix=18 (filtra Driver_18, Driver_19)
+- Miami_1 peak=19, before=20 → após fix=19 (filtra Driver_19; mantém WISNER em ci=18)
+- Baku peak=16, before=20 → após fix=16 (filtra Driver_16, 17, 18, 19)
+- Miami_2 peak=20 (Custom MyTeam) → 20 (sem mudança, grid completo)
+- Race sessions: nenhuma alteração; pilotos AI que assumiram lugar de humanos desconectados (KTS-XvenonzinhoX, jeegoomes_, gutierri, KTS-SkiLo no Baku Race) preservados pois têm laps > 0
+
+### v1.1.28
+
+| Problema | Causa raiz | Correção |
+|----------|-----------|----------|
+| Custom MyTeam — colisão de `raceNumber` (issue #1) | EA bug: lobbies de MyTeam customizado podem atribuir mesmo `raceNumber` a 2 jogadores; chave `raceNumber_teamId` era roubada | Prioridade no `m_networkId` (offset 2 do `ParticipantData`) como chave única; mapa `_bestKnownTagsByNet`; `_rnKeyAmbiguous` para skip de rn-key conflitantes |
+| AI fillers herdando gamertags reais | Slots controlados por IA inheriam nome via `(raceNumber, teamId)` colisão | AI guard em `IngestParticipants` impede AI de herdar nome de carIdx confirmado humano |
 
 ### v1.1.27
 

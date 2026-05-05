@@ -1,7 +1,7 @@
-{
-    "version":  "1.1.27",
-    "released":  "2026-04-14",
+﻿{
+    "version":  "1.1.29",
+    "released":  "2026-05-04",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.27/Overtake.SimHub.Plugin-v1.1.27-Setup.exe",
-    "releaseNotes":  "### Fixed\r\n- **Qualifying online — nome AI no lugar de jogador real (HAMILTON → UFB PeEmbaixo):** `RetroResolveNames` agora também resolve tags que correspondem a nomes do roster oficial de AI (HAMILTON, LECLERC, etc.) quando `bestKnownTags` contém um gamertag real diferente para o mesmo `raceNumber_teamId`. Cobre o cenário de jogador que entra mid-session com `showOnlineNames=OFF` e herda sobrenome de AI\r\n- **Qualifying/Race online — entradas fantasma com tag genérica e 0 voltas (Driver_16, Driver_18):** `ShouldSkipFcAiGridFillerRow` aprimorado para modo online — slots com tag genérica, 0 voltas, 0 best-lap, sem confirmação humana (`HumanCarIdxs`) e ausentes de `lobbyNameMap`/`bestKnownTags` são agora filtrados como phantom\r\n- **Race online — fantasma duplicado por reassign de carIdx:** novo filtro `RemovePhantomDuplicateSeats` remove entradas genéricas com 0 voltas cujo `raceNumber_teamId` já pertence a outro piloto com nome real (artefato de desconexão/reconexão em slot diferente)\r\n- **Fallback race results — contagem de voltas incorreta em modo espectador:** `BuildRaceFallbackResults` agora usa `EffectiveLapCount` (máximo entre `Laps.Count`, maior `LapNumber` e `LastRecordedLapNumber`) em vez de `Laps.Count` puro. Corrige ranking errado quando a telemetria do espectador perde voltas intermediárias (gaps) e o FC (packet 8) não é recebido\r\n- **Fallback FC-spillover (espectador):** drivers fora do FC que entram via fallback também usam `EffectiveLapCount`\r\n\r\n### Added\r\n- Diagnósticos `fcMissingForRace` e `resultSource` no `exportDiagnostics` para identificar quando resultados vieram de fallback por falta de FC"
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.29/Overtake.SimHub.Plugin-v1.1.29-Setup.exe",
+    "releaseNotes":  "Filtra pilotos fantasma (Driver_X) que apareciam na qualifying online quando o grid não estava completo. Adiciona defesa em profundidade em 5 camadas do pipeline para detectar slots overflow (carIdx >= participantsPeakNumActive) que o jogo preenche com AI fillers. Corridas e qualifying com grid completo (20/20) não são afetadas. Pilotos humanos reais são preservados via guard wasHuman."
 }

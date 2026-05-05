@@ -70,6 +70,18 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (IsGenericTag(tag) && !hasValidTeam)
                 return true;
 
+            // Online: generic tag + 0 laps + carIdx beyond active range = overflow
+            // grid filler. Catches entries where AiControlled was stale/incorrect.
+            if (sess.NetworkGame == 1
+                && IsGenericTag(tag)
+                && sess.ParticipantsPeakNumActive > 0
+                && dr.CarIdx >= sess.ParticipantsPeakNumActive)
+            {
+                bool wasHuman;
+                if (!sess.HumanCarIdxs.TryGetValue(dr.CarIdx, out wasHuman) || !wasHuman)
+                    return true;
+            }
+
             return false;
         }
 
@@ -137,6 +149,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     confirmedHuman = false;
                 if (confirmedHuman)
                     return false;
+
+                // Overflow slot: carIdx beyond the active participant range with
+                // 0 laps = grid filler the game added to pad the FC array.
+                int peakNa = sess.ParticipantsPeakNumActive;
+                if (peakNa > 0 && row.CarIdx >= peakNa
+                    && IsGenericTag(tag) && row.BestLapTimeMs == 0)
+                    return true;
 
                 if (IsGenericTag(tag) && row.BestLapTimeMs == 0)
                 {
@@ -402,19 +421,20 @@ namespace Overtake.SimHub.Plugin.Finalizer
         }
 
         /// <summary>
-        /// Retroactively resolves driver tags using bestKnownTags from later sessions
-        /// in the same lobby. Handles two cases:
-        ///   1. Generic tags (Car_X, Driver_X) — always resolved.
-        ///   2. AI seat names (HAMILTON, LECLERC, etc.) — resolved only when bestKnownTags
-        ///      holds a different, non-generic, non-AI-roster name for the same raceNumber_teamId.
-        ///      This fixes the scenario where a human joins mid-qualifying with showOnlineNames=OFF,
-        ///      inherits an F1 AI surname, then reveals their real gamertag in the race session.
+        /// Retroactively resolves driver tags using the store's best-known name maps
+        /// (network-id-keyed for intra-session uniqueness, raceNumber-keyed as cross-
+        /// session fallback when not flagged ambiguous). Handles two cases:
+        ///   1. Generic tags (Car_X, Driver_X) — always resolved when a confident
+        ///      name exists for the slot's networkId/teamId.
+        ///   2. AI seat names (HAMILTON, LECLERC, etc.) — resolved only when the
+        ///      store returns a different, non-generic, non-AI-roster name for the
+        ///      same slot. Covers human joining mid-quali with showOnlineNames=OFF
+        ///      and inheriting an AI surname.
+        /// Issue #1: lookups now route via the network-id-keyed map first, so
+        /// raceNumber collisions in Custom MyTeam lobbies do not cause name-stealing.
         /// </summary>
         private static void RetroResolveNames(SessionRun sess, SessionStore store)
         {
-            var bkt = store.DebugBestKnownTags;
-            if (bkt == null || bkt.Count == 0) return;
-
             var renames = new List<KeyValuePair<string, string>>();
             foreach (var kvp in sess.Drivers)
             {
@@ -429,11 +449,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
                 if (teamInfo == null) continue;
 
-                string lookupKey = string.Format("{0}_{1}", teamInfo.RaceNumber, teamInfo.TeamId);
-                string resolvedName;
-                if (!bkt.TryGetValue(lookupKey, out resolvedName) || string.IsNullOrEmpty(resolvedName)
-                    || IsGenericTag(resolvedName) || resolvedName == tag
-                    || sess.Drivers.ContainsKey(resolvedName))
+                // Use the store's lookup (network-id key first, ambiguous rn-keys skipped)
+                string resolvedName = store.LookupBestKnownTagForEntry(teamInfo);
+                if (string.IsNullOrEmpty(resolvedName) || IsGenericTag(resolvedName)
+                    || resolvedName == tag || sess.Drivers.ContainsKey(resolvedName))
                     continue;
 
                 if (aiRoster && TagMatchesOfficialAiSeatRoster(resolvedName))
@@ -795,6 +814,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
                                 { "lobbyFailed", store.DiagLobbyFailed },
                                 { "lobbyNameMap", store.DebugLobbyMap },
                                 { "bestKnownTags", store.DebugBestKnownTags },
+                                { "bestKnownTagsByNet", store.DebugBestKnownTagsByNet },
+                                { "rnKeyAmbiguous", store.DebugRnKeyAmbiguous },
                                 { "lobbyByTeamOnly", store.DebugLobbyByTeamOnly },
                                 { "fullMyTeamGrid", store.CaptureFullMyTeam },
                                 { "nameKeyConflicts", store.LastExportedNameKeyConflicts ?? new List<Dictionary<string, object>>() },
@@ -889,17 +910,16 @@ namespace Overtake.SimHub.Plugin.Finalizer
                             : string.Format("Car{0}", row.CarIdx);
                     }
 
-                    // Try to recover unknown drivers from bestKnownTags
+                    // Try to recover unknown drivers from the store (network-id key
+                    // first; rn-key fallback skipped when ambiguous — issue #1).
                     if (!sess.Drivers.ContainsKey(tag) && (IsGenericTag(tag) || tag.StartsWith("Car")))
                     {
                         ParticipantEntry pe;
                         sess.TeamByCarIdx.TryGetValue(row.CarIdx, out pe);
                         if (pe != null)
                         {
-                            string lk = string.Format("{0}_{1}", pe.RaceNumber, pe.TeamId);
-                            var bkt = store.DebugBestKnownTags;
-                            string resolved;
-                            if (bkt.TryGetValue(lk, out resolved) && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                            string resolved = store.LookupBestKnownTagForEntry(pe);
+                            if (!string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
                                 tag = resolved;
                         }
                     }

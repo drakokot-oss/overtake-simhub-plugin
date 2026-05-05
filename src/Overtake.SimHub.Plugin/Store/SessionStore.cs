@@ -28,6 +28,17 @@ namespace Overtake.SimHub.Plugin.Store
         private Dictionary<string, string> _bestKnownTags = new Dictionary<string, string>();
         private Dictionary<string, int> _bestKnownTagReliability = new Dictionary<string, int>();
 
+        // Network-id-based name resolution: "net{networkId}_{teamId}" -> real name.
+        // Primary disambiguator for raceNumber collisions in Custom MyTeam lobbies
+        // (issue #1: m_raceNumber duplicates across players is a known F1 24/25 bug).
+        // Only populated for confirmed network humans (NetworkId != 255 && !aiControlled).
+        private Dictionary<string, string> _bestKnownTagsByNet = new Dictionary<string, string>();
+        private Dictionary<string, int> _bestKnownTagReliabilityByNet = new Dictionary<string, int>();
+
+        // raceNumber_teamId keys that are known to be shared by 2+ distinct network humans
+        // in this session. Lookups via the rn-keyed map skip these to avoid name-stealing.
+        private HashSet<string> _rnKeyAmbiguous = new HashSet<string>();
+
         // LobbyInfo name lookup: "raceNumber_teamId" -> name (including generic names).
         // LobbyInfo slot index does NOT correspond to in-session carIdx, so we
         // must NOT use it for carIdx-based seeding. Instead we match via (teamId, raceNumber).
@@ -41,6 +52,8 @@ namespace Overtake.SimHub.Plugin.Store
 
         public Dictionary<string, string> DebugLobbyMap { get { return new Dictionary<string, string>(_lobbyNameByTeamRn); } }
         public Dictionary<string, string> DebugBestKnownTags { get { return new Dictionary<string, string>(_bestKnownTags); } }
+        public Dictionary<string, string> DebugBestKnownTagsByNet { get { return new Dictionary<string, string>(_bestKnownTagsByNet); } }
+        public List<string> DebugRnKeyAmbiguous { get { return new List<string>(_rnKeyAmbiguous); } }
         public Dictionary<string, string> DebugLobbyByTeamOnly
         {
             get
@@ -110,6 +123,9 @@ namespace Overtake.SimHub.Plugin.Store
             Sessions.Clear();
             _bestKnownTags.Clear();
             _bestKnownTagReliability.Clear();
+            _bestKnownTagsByNet.Clear();
+            _bestKnownTagReliabilityByNet.Clear();
+            _rnKeyAmbiguous.Clear();
             _lobbyNameByTeamRn.Clear();
             _lobbyNameByTeamOnly.Clear();
             _lobbyTeamKeys.Clear();
@@ -169,6 +185,9 @@ namespace Overtake.SimHub.Plugin.Store
                         _lastTrackId.Value, newTrackId));
                 _bestKnownTags.Clear();
                 _bestKnownTagReliability.Clear();
+                _bestKnownTagsByNet.Clear();
+                _bestKnownTagReliabilityByNet.Clear();
+                _rnKeyAmbiguous.Clear();
                 _lobbyNameByTeamRn.Clear();
                 _lobbyNameByTeamOnly.Clear();
                 _lobbyTeamKeys.Clear();
@@ -724,6 +743,43 @@ namespace Overtake.SimHub.Plugin.Store
             if (_fullMyTeamStreak >= 2)
                 _captureFullMyTeam = true;
 
+            // ── Step 1b: Detect raceNumber collisions among active network humans ──
+            // Custom MyTeam online lobbies can assign the same m_raceNumber to two
+            // different players (EA-acknowledged bug). Once we see two different
+            // network humans with identical (raceNumber, teamId) in the same
+            // packet, mark the rn-key ambiguous so subsequent fallback lookups
+            // do not steal one player's name onto the other player's slot.
+            {
+                var seatHumans = new Dictionary<string, HashSet<byte>>();
+                int activeScan = Math.Min(p.NumActiveCars, entries.Length);
+                for (int i = 0; i < activeScan; i++)
+                {
+                    var e = entries[i];
+                    if (e == null) continue;
+                    if (e.TeamId == 255) continue;
+                    if (e.AiControlled) continue;
+                    if (e.NetworkId == 255) continue;
+                    string rnKey = string.Format("{0}_{1}", e.RaceNumber, e.TeamId);
+                    HashSet<byte> netIds;
+                    if (!seatHumans.TryGetValue(rnKey, out netIds))
+                    {
+                        netIds = new HashSet<byte>();
+                        seatHumans[rnKey] = netIds;
+                    }
+                    netIds.Add(e.NetworkId);
+                }
+                foreach (var kv in seatHumans)
+                {
+                    if (kv.Value.Count > 1 && _rnKeyAmbiguous.Add(kv.Key))
+                    {
+                        if (Notes.Count < 500)
+                            Notes.Add(string.Format(
+                                "rn-key ambiguous: {0} shared by {1} network humans (Custom MyTeam collision; using networkId)",
+                                kv.Key, kv.Value.Count));
+                    }
+                }
+            }
+
             // ── Step 2: Force Driver_X for unreliable names on known-human carIdx ──
             var tags = p.TagsByCarIdx;
             if (tags == null) tags = new Dictionary<int, string>();
@@ -745,6 +801,7 @@ namespace Overtake.SimHub.Plugin.Store
                 int rn = (entry != null) ? entry.RaceNumber : 0;
                 int tid = (entry != null) ? entry.TeamId : -1;
                 string lookupKey = string.Format("{0}_{1}", rn, tid);
+                string netKey = ComputeNetKey(entry);
 
                 int rel;
                 if (!entryReliability.TryGetValue(carIdx, out rel)) rel = TAG_UNRELIABLE;
@@ -754,6 +811,34 @@ namespace Overtake.SimHub.Plugin.Store
                     // Only store in bestKnownTags if source is reliable (not AI seat name)
                     if (rel >= TAG_RELIABLE)
                     {
+                        // ── Write to network-id-keyed map (immune to rn collisions) ──
+                        if (netKey != null)
+                        {
+                            int existingNetRel;
+                            if (!_bestKnownTagReliabilityByNet.TryGetValue(netKey, out existingNetRel))
+                                existingNetRel = TAG_GENERIC;
+                            if (rel >= existingNetRel)
+                            {
+                                _bestKnownTagsByNet[netKey] = tag;
+                                _bestKnownTagReliabilityByNet[netKey] = rel;
+                            }
+                        }
+
+                        // ── Detect rn-key conflict and mark ambiguous ──
+                        // If a different real name already lives on the same
+                        // (raceNumber, teamId), the rn-keyed map is poisoned.
+                        string existingRnName;
+                        if (_bestKnownTags.TryGetValue(lookupKey, out existingRnName)
+                            && !string.IsNullOrEmpty(existingRnName)
+                            && !IsGenericTag(existingRnName)
+                            && existingRnName != tag)
+                        {
+                            if (_rnKeyAmbiguous.Add(lookupKey) && Notes.Count < 500)
+                                Notes.Add(string.Format(
+                                    "rn-key conflict on write: {0} '{1}' vs '{2}' (using networkId)",
+                                    lookupKey, existingRnName, tag));
+                        }
+
                         if (_captureFullMyTeam)
                         {
                             string lobbyNm;
@@ -777,9 +862,32 @@ namespace Overtake.SimHub.Plugin.Store
                 }
                 else if (IsGenericTag(tag))
                 {
-                    string resolved = ResolveLobbyName(rn, tid);
+                    string resolved = ResolveLobbyName(entry);
                     if (!string.IsNullOrEmpty(resolved))
-                        tags[carIdx] = resolved;
+                    {
+                        // AI guard: do not let an AI-controlled slot inherit a
+                        // name already assigned to a confirmed-human carIdx in
+                        // this session. Prevents AI fillers from stealing real
+                        // gamertags via shared (raceNumber, teamId).
+                        bool isAi = entry != null && entry.AiControlled;
+                        bool nameTakenByHuman = false;
+                        if (isAi)
+                        {
+                            foreach (var existKvp in sess.TagsByCarIdx)
+                            {
+                                if (existKvp.Key == carIdx) continue;
+                                if (existKvp.Value != resolved) continue;
+                                bool wasHumanCar;
+                                if (sess.HumanCarIdxs.TryGetValue(existKvp.Key, out wasHumanCar) && wasHumanCar)
+                                {
+                                    nameTakenByHuman = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!nameTakenByHuman)
+                            tags[carIdx] = resolved;
+                    }
                 }
             }
 
@@ -939,19 +1047,93 @@ namespace Overtake.SimHub.Plugin.Store
         }
 
         /// <summary>
-        /// For any carIdx that has team data in TeamByCarIdx but no tag (or a
-        /// generic/placeholder tag), attempt to resolve the real name via
-        /// _bestKnownTags or _lobbyNameByTeamRn.
+        /// Build a network-id-based seat key. Returns null when the entry is not a
+        /// network human or the networkId/teamId is the unknown sentinel (255).
+        /// Used as primary disambiguator for raceNumber collisions (issue #1).
+        /// </summary>
+        private static string ComputeNetKey(ParticipantEntry e)
+        {
+            if (e == null) return null;
+            if (e.AiControlled) return null;
+            if (e.NetworkId == 255) return null;
+            if (e.TeamId == 255) return null;
+            return string.Format("net{0}_{1}", e.NetworkId, e.TeamId);
+        }
+
+        /// <summary>
+        /// Public lookup used by LeagueFinalizer (RetroResolveNames) to apply the
+        /// same priority order the store uses internally. Returns null when no
+        /// confident name can be resolved (including when the rn-key is ambiguous).
+        /// </summary>
+        public string LookupBestKnownTagForEntry(ParticipantEntry entry)
+        {
+            return ResolveLobbyName(entry);
+        }
+
+        /// <summary>
+        /// Entry-aware overload. Priority:
+        ///   1. Network-id key (immune to raceNumber collisions in Custom MyTeam).
+        ///   2. raceNumber key, only when NOT flagged ambiguous.
+        ///   3. teamId-only fallback.
+        /// </summary>
+        private string ResolveLobbyName(ParticipantEntry entry)
+        {
+            if (entry == null) return null;
+            int rn = entry.RaceNumber;
+            int tid = entry.TeamId;
+            string netKey = ComputeNetKey(entry);
+            string rnKey = string.Format("{0}_{1}", rn, tid);
+
+            string resolved;
+
+            // 1) network-id key (intra-session unique per network player)
+            if (netKey != null)
+            {
+                if (_bestKnownTagsByNet.TryGetValue(netKey, out resolved)
+                    && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return resolved;
+            }
+
+            // 2) raceNumber key (cross-session fallback) — skip if ambiguous
+            if (!_rnKeyAmbiguous.Contains(rnKey))
+            {
+                if (_bestKnownTags.TryGetValue(rnKey, out resolved)
+                    && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return resolved;
+                if (_lobbyNameByTeamRn.TryGetValue(rnKey, out resolved)
+                    && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return resolved;
+            }
+
+            // 3) teamId-only fallback (single team in lobby)
+            if (tid >= 0 && tid < 255)
+            {
+                string teamOnly;
+                if (_lobbyNameByTeamOnly.TryGetValue(tid, out teamOnly)
+                    && !string.IsNullOrEmpty(teamOnly) && !IsGenericTag(teamOnly))
+                    return teamOnly;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Legacy (rn, teamId) overload — kept for FC bridge call sites that don't
+        /// hold a full ParticipantEntry. Skips lookups when the rn-key has been
+        /// flagged ambiguous (raceNumber collision detected via Participants).
         /// </summary>
         private string ResolveLobbyName(int raceNumber, int teamId)
         {
             string lookupKey = string.Format("{0}_{1}", raceNumber, teamId);
             string resolved = null;
 
-            if (_bestKnownTags.ContainsKey(lookupKey))
-                resolved = _bestKnownTags[lookupKey];
-            else if (_lobbyNameByTeamRn.ContainsKey(lookupKey))
-                resolved = _lobbyNameByTeamRn[lookupKey];
+            if (!_rnKeyAmbiguous.Contains(lookupKey))
+            {
+                if (_bestKnownTags.ContainsKey(lookupKey))
+                    resolved = _bestKnownTags[lookupKey];
+                else if (_lobbyNameByTeamRn.ContainsKey(lookupKey))
+                    resolved = _lobbyNameByTeamRn[lookupKey];
+            }
 
             // Fallback: teamId-only when primary key misses
             if ((string.IsNullOrEmpty(resolved) || IsGenericTag(resolved)) && teamId >= 0 && teamId < 255)
@@ -978,20 +1160,39 @@ namespace Overtake.SimHub.Plugin.Store
                 var team = kvp.Value;
                 if (team == null || team.TeamId == 255) continue;
 
+                // Online: skip overflow AI filler slots (carIdx beyond the active
+                // participant range). These are empty grid positions the game fills
+                // with placeholder data — never real drivers.
+                if (sess.NetworkGame == 1
+                    && sess.ParticipantsPeakNumActive > 0
+                    && carIdx >= sess.ParticipantsPeakNumActive
+                    && team.AiControlled)
+                    continue;
+
                 string existingTag;
                 sess.TagsByCarIdx.TryGetValue(carIdx, out existingTag);
 
                 if (!string.IsNullOrEmpty(existingTag) && !IsGenericTag(existingTag))
                     continue;
 
-                string resolved = ResolveLobbyName(team.RaceNumber, team.TeamId);
+                string resolved = ResolveLobbyName(team);
                 if (string.IsNullOrEmpty(resolved))
                 {
                     DiagLobbyFailed++;
                     // Still register with placeholder if no tag at all — ensures
                     // LapData/SessionHistory capture starts immediately.
+                    // Skip overflow slots in online sessions — they are grid fillers
+                    // even when AiControlled is stale/false.
                     if (string.IsNullOrEmpty(existingTag))
                     {
+                        bool overflow = sess.NetworkGame == 1
+                            && sess.ParticipantsPeakNumActive > 0
+                            && carIdx >= sess.ParticipantsPeakNumActive;
+                        bool wasHuman;
+                        if (overflow
+                            && (!sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) || !wasHuman))
+                            continue;
+
                         string placeholder = "Driver_" + carIdx;
                         if (!tagToIdx.ContainsKey(placeholder))
                         {
@@ -1411,6 +1612,19 @@ namespace Overtake.SimHub.Plugin.Store
 
                 int carIdx = row.CarIdx;
 
+                // Online: skip overflow slots with 0 laps that were never occupied by
+                // a real driver. The game fills grid positions beyond the active
+                // participant count with AI placeholder data in qualifying FCs.
+                if (sess.NetworkGame == 1
+                    && sess.ParticipantsPeakNumActive > 0
+                    && carIdx >= sess.ParticipantsPeakNumActive
+                    && row.NumLaps == 0)
+                {
+                    bool wasHuman;
+                    if (!sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) || !wasHuman)
+                        continue;
+                }
+
                 string tag;
                 bool weakTag = !sess.TagsByCarIdx.TryGetValue(carIdx, out tag) || string.IsNullOrEmpty(tag) || IsGenericTag(tag);
 
@@ -1460,7 +1674,7 @@ namespace Overtake.SimHub.Plugin.Store
                     ParticipantEntry team;
                     if (sess.TeamByCarIdx.TryGetValue(carIdx, out team) && team != null && team.TeamId != 255)
                     {
-                        string resolved = ResolveLobbyName(team.RaceNumber, team.TeamId);
+                        string resolved = ResolveLobbyName(team);
                         if (!string.IsNullOrEmpty(resolved))
                         {
                             bool isDup = false;
@@ -1539,7 +1753,8 @@ namespace Overtake.SimHub.Plugin.Store
                 }
             }
 
-            // Register ALL cars from TeamByCarIdx that still lack tags.
+            // Register cars from TeamByCarIdx that still lack tags.
+            // Skip overflow AI filler slots in online sessions.
             for (int ci = 0; ci < 22; ci++)
             {
                 if (sess.TagsByCarIdx.ContainsKey(ci)) continue;
@@ -1547,7 +1762,16 @@ namespace Overtake.SimHub.Plugin.Store
                 if (!sess.TeamByCarIdx.TryGetValue(ci, out team)) continue;
                 if (team == null || team.TeamId == 255) continue;
 
-                string resolved = ResolveLobbyName(team.RaceNumber, team.TeamId);
+                if (sess.NetworkGame == 1
+                    && sess.ParticipantsPeakNumActive > 0
+                    && ci >= sess.ParticipantsPeakNumActive)
+                {
+                    bool wasHuman;
+                    if (!sess.HumanCarIdxs.TryGetValue(ci, out wasHuman) || !wasHuman)
+                        continue;
+                }
+
+                string resolved = ResolveLobbyName(team);
                 if (!string.IsNullOrEmpty(resolved))
                 {
                     bool isDup = false;

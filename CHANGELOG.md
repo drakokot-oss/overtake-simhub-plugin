@@ -2,6 +2,32 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.29] - 2026-05-04
+
+### Fixed
+- **Qualifying online — pilotos fantasma `Driver_X` em grids parciais:** quando o lobby não tinha 20 pilotos, os slots de overflow (carIdx ≥ `participantsPeakNumActive`) que o jogo preenche com AI fillers ainda apareciam nos resultados como `Driver_18`, `Driver_19`, etc. Validado contra OTKs reais: Monaco (peak=18, 2 phantoms), Miami (peak=19, 1 phantom), Baku (peak=16, 4 phantoms). Corridas e qualifying com grid completo (peak=20) não são afetados
+- **Causa raiz:** o flag `AiControlled` do `ParticipantData` pode ficar stale (incorretamente `false`) em pacotes posteriores quando o jogo reduz `NumActiveCars`, fazendo `IsPhantomEntry` não pegar essas entradas. Além disso, `ResolveNamesFromLobby` e o loop pós-FC em `IngestFinalClassification` registravam placeholders para todos os 22 slots de `TeamByCarIdx`, criando os Drivers fantasmas
+
+### Added
+- Defesa em profundidade: 5 filtros independentes em `SessionStore` (`ResolveNamesFromLobby`, `IngestFinalClassification` main loop, post-FC registration loop) e `LeagueFinalizer` (`IsPhantomEntry`, `ShouldSkipFcAiGridFillerRow`)
+- Todos os filtros gated em `NetworkGame == 1` (online only) e protegidos por `HumanCarIdxs[carIdx]` — nunca filtram um carIdx que foi confirmado como humano em algum momento da sessão
+- Test 13 em `Test-Finalizer.ps1`: cobre 4 cenários (Monaco-style peak=18, Miami-style peak=19, Baku-style peak=16, full grid peak=20)
+
+## [1.1.28] - 2026-04-25
+
+### Fixed
+- **Custom MyTeam online — colisão de `raceNumber` (issue #1):** lobbies de Equipes AV (My Team customizado) podiam atribuir o mesmo `raceNumber` a dois jogadores diferentes — bug conhecido EA confirmado em F1 24/25. Quando isso acontecia, a chave `raceNumber_teamId` era roubada de um jogador para o slot do outro: um aparecia como `Driver_X`/`Car_X` (placeholder) enquanto o outro acabava com a telemetria misturada (caso do upload Jeddah/Equipes AV onde `Bruno Kauan` foi exportado como `Car_17`/`Driver_17` e seu nome foi herdado por outro carIdx). Solução: prioridade no `m_networkId` (offset 2 do `ParticipantData`) como chave única de jogador online
+- **AI guard:** slots controlados por IA não podem mais herdar o nome de um `carIdx` confirmado humano via colisão de `(raceNumber, teamId)` — protege contra fillers de grid roubarem gamertags reais
+
+### Added
+- `ParticipantEntry.NetworkId` parseado do offset 2 (`m_networkId`) — campo antes ignorado pelo parser
+- Mapa `_bestKnownTagsByNet` (`net{networkId}_{teamId}` → nome real) populado para humanos confirmados (immune a colisões de `raceNumber`)
+- `_rnKeyAmbiguous`: HashSet de chaves `raceNumber_teamId` poluídas (>1 humanos com mesma `(rn, teamId)` num packet ou conflito detectado em escrita). Lookups via rn-key pulam essas chaves
+- `SessionStore.LookupBestKnownTagForEntry(entry)` — API pública usada por `LeagueFinalizer.RetroResolveNames` e pelo loop de fallback FC; aplica prioridade `net-key → rn-key (se não-ambígua) → teamId-only`
+- Diagnósticos exportados: `lobbyInfo.bestKnownTagsByNet`, `lobbyInfo.rnKeyAmbiguous`
+- Notas em `Notes`: `rn-key ambiguous: ...` (detecção pré-loop) e `rn-key conflict on write: ...` (detecção on-write)
+- Testes 16/17/18 em `Test-SessionStore.ps1` para colisão Custom MyTeam, resolução por `networkId` quando `showOnlineNames=0`, e AI guard
+
 ## [1.1.27] - 2026-04-06
 
 ### Fixed

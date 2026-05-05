@@ -7,6 +7,13 @@ namespace Overtake.SimHub.Plugin.Packets
     public class ParticipantEntry
     {
         public byte DriverId;
+        /// <summary>
+        /// F1 25 UDP packet 4, offset 2 inside each ParticipantData entry.
+        /// "Unique identifier for network players" per F1 25 spec. Used as
+        /// primary disambiguator for raceNumber collisions in Custom MyTeam
+        /// online lobbies (issue #1). 255 = unknown / not applicable.
+        /// </summary>
+        public byte NetworkId;
         public byte TeamId;
         public bool MyTeam;
         public byte RaceNumber;
@@ -50,6 +57,7 @@ namespace Overtake.SimHub.Plugin.Packets
             {
                 AiControlled = data[start + 0] != 0,
                 DriverId = data[start + 1],
+                NetworkId = (start + 2 < data.Length) ? data[start + 2] : (byte)255,
                 TeamId = data[start + 3],
                 MyTeam = data[start + 4] != 0,
                 RaceNumber = data[start + 5],
