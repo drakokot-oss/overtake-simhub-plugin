@@ -70,6 +70,18 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (IsGenericTag(tag) && !hasValidTeam)
                 return true;
 
+            // Online: generic tag + 0 laps + carIdx beyond active range = overflow
+            // grid filler. Catches entries where AiControlled was stale/incorrect.
+            if (sess.NetworkGame == 1
+                && IsGenericTag(tag)
+                && sess.ParticipantsPeakNumActive > 0
+                && dr.CarIdx >= sess.ParticipantsPeakNumActive)
+            {
+                bool wasHuman;
+                if (!sess.HumanCarIdxs.TryGetValue(dr.CarIdx, out wasHuman) || !wasHuman)
+                    return true;
+            }
+
             return false;
         }
 
@@ -137,6 +149,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     confirmedHuman = false;
                 if (confirmedHuman)
                     return false;
+
+                // Overflow slot: carIdx beyond the active participant range with
+                // 0 laps = grid filler the game added to pad the FC array.
+                int peakNa = sess.ParticipantsPeakNumActive;
+                if (peakNa > 0 && row.CarIdx >= peakNa
+                    && IsGenericTag(tag) && row.BestLapTimeMs == 0)
+                    return true;
 
                 if (IsGenericTag(tag) && row.BestLapTimeMs == 0)
                 {

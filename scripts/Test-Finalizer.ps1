@@ -263,6 +263,86 @@ if ($sessionsQ.Count -ge 1) {
     }
 }
 
+# ---- Test 13: Online qualifying overflow phantom filter ----
+# Helper to build an online quali store with N active drivers and (22-N) AI fillers.
+# Returns the finalized session results count and dropped phantom tags.
+function Test-OverflowFilter([int]$activeCount, [string]$caseName) {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+    # Session: ShortQualifying (id=8), online
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 8; $sp[7] = 5
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # Participants: $activeCount human drivers + (22-$activeCount) AI fillers
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = [byte]$activeCount
+    for ($c = 0; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        if ($c -lt $activeCount) {
+            $pp[$st + 0] = 0  # AiControlled=false
+            $pp[$st + 40] = 1  # ShowOnlineNames=on
+            $pp[$st + 41] = 1  # Platform = non-255
+            $n = [System.Text.Encoding]::UTF8.GetBytes("Drv$c")
+            [System.Array]::Copy($n, 0, $pp, ($st + 7), $n.Length)
+        } else {
+            $pp[$st + 0] = 1  # AiControlled=true
+        }
+        $pp[$st + 3] = [byte]($c % 10) # TeamId
+        $pp[$st + 5] = [byte](10 + $c) # RaceNumber
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # FC: 20 entries with Position > 0; first $activeCount have NumLaps=3, rest 0
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 20
+    for ($c = 0; $c -lt 20; $c++) {
+        $off = 1 + $c * 46
+        $fc[$off + 0] = [byte]($c + 1)
+        if ($c -lt $activeCount) { $fc[$off + 1] = 3 } else { $fc[$off + 1] = 0 }
+        $fc[$off + 2] = [byte]($c + 1)
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $ss = $res["sessions"]
+    Assert "$caseName : session exists" ($ss.Count -ge 1)
+    if ($ss.Count -lt 1) { return $null }
+    $rsl = $ss[0]["results"]
+    $cnt = if ($rsl -ne $null) { $rsl.Count } else { 0 }
+    Assert "$caseName : result count == $activeCount (expected $activeCount, got $cnt)" ($cnt -eq $activeCount)
+
+    $foundPhantom = $false
+    if ($rsl -ne $null) {
+        foreach ($r in $rsl) {
+            $tg = Get-DictValue $r "tag"
+            if ($tg -match '^Driver_\d+$') {
+                # accept only if carIdx within active range (would mean a real player kept generic name)
+                $cidx = Get-DictValue $r "carIdx"
+                if ($cidx -ge $activeCount) {
+                    $foundPhantom = $true
+                    Write-Host "  Phantom kept: $tg (ci=$cidx, peak=$activeCount)" -ForegroundColor Red
+                }
+            }
+        }
+    }
+    Assert "$caseName : no overflow phantoms" (-not $foundPhantom)
+    return $cnt
+}
+
+Write-Host "=== Test 13a: Monaco-style (peak=18, 2 phantoms) ===" -ForegroundColor Cyan
+[void](Test-OverflowFilter 18 "Monaco")
+
+Write-Host "=== Test 13b: Miami-style (peak=19, 1 phantom) ===" -ForegroundColor Cyan
+[void](Test-OverflowFilter 19 "Miami")
+
+Write-Host "=== Test 13c: Baku-style (peak=16, 4 phantoms) ===" -ForegroundColor Cyan
+[void](Test-OverflowFilter 16 "Baku")
+
+Write-Host "=== Test 13d: Full grid (peak=20, no phantoms) ===" -ForegroundColor Cyan
+[void](Test-OverflowFilter 20 "FullGrid")
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

@@ -1160,6 +1160,15 @@ namespace Overtake.SimHub.Plugin.Store
                 var team = kvp.Value;
                 if (team == null || team.TeamId == 255) continue;
 
+                // Online: skip overflow AI filler slots (carIdx beyond the active
+                // participant range). These are empty grid positions the game fills
+                // with placeholder data — never real drivers.
+                if (sess.NetworkGame == 1
+                    && sess.ParticipantsPeakNumActive > 0
+                    && carIdx >= sess.ParticipantsPeakNumActive
+                    && team.AiControlled)
+                    continue;
+
                 string existingTag;
                 sess.TagsByCarIdx.TryGetValue(carIdx, out existingTag);
 
@@ -1172,8 +1181,18 @@ namespace Overtake.SimHub.Plugin.Store
                     DiagLobbyFailed++;
                     // Still register with placeholder if no tag at all — ensures
                     // LapData/SessionHistory capture starts immediately.
+                    // Skip overflow slots in online sessions — they are grid fillers
+                    // even when AiControlled is stale/false.
                     if (string.IsNullOrEmpty(existingTag))
                     {
+                        bool overflow = sess.NetworkGame == 1
+                            && sess.ParticipantsPeakNumActive > 0
+                            && carIdx >= sess.ParticipantsPeakNumActive;
+                        bool wasHuman;
+                        if (overflow
+                            && (!sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) || !wasHuman))
+                            continue;
+
                         string placeholder = "Driver_" + carIdx;
                         if (!tagToIdx.ContainsKey(placeholder))
                         {
@@ -1593,6 +1612,19 @@ namespace Overtake.SimHub.Plugin.Store
 
                 int carIdx = row.CarIdx;
 
+                // Online: skip overflow slots with 0 laps that were never occupied by
+                // a real driver. The game fills grid positions beyond the active
+                // participant count with AI placeholder data in qualifying FCs.
+                if (sess.NetworkGame == 1
+                    && sess.ParticipantsPeakNumActive > 0
+                    && carIdx >= sess.ParticipantsPeakNumActive
+                    && row.NumLaps == 0)
+                {
+                    bool wasHuman;
+                    if (!sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) || !wasHuman)
+                        continue;
+                }
+
                 string tag;
                 bool weakTag = !sess.TagsByCarIdx.TryGetValue(carIdx, out tag) || string.IsNullOrEmpty(tag) || IsGenericTag(tag);
 
@@ -1721,13 +1753,23 @@ namespace Overtake.SimHub.Plugin.Store
                 }
             }
 
-            // Register ALL cars from TeamByCarIdx that still lack tags.
+            // Register cars from TeamByCarIdx that still lack tags.
+            // Skip overflow AI filler slots in online sessions.
             for (int ci = 0; ci < 22; ci++)
             {
                 if (sess.TagsByCarIdx.ContainsKey(ci)) continue;
                 ParticipantEntry team;
                 if (!sess.TeamByCarIdx.TryGetValue(ci, out team)) continue;
                 if (team == null || team.TeamId == 255) continue;
+
+                if (sess.NetworkGame == 1
+                    && sess.ParticipantsPeakNumActive > 0
+                    && ci >= sess.ParticipantsPeakNumActive)
+                {
+                    bool wasHuman;
+                    if (!sess.HumanCarIdxs.TryGetValue(ci, out wasHuman) || !wasHuman)
+                        continue;
+                }
 
                 string resolved = ResolveLobbyName(team);
                 if (!string.IsNullOrEmpty(resolved))

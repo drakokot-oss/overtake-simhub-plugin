@@ -2,6 +2,17 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.29] - 2026-05-04
+
+### Fixed
+- **Qualifying online — pilotos fantasma `Driver_X` em grids parciais:** quando o lobby não tinha 20 pilotos, os slots de overflow (carIdx ≥ `participantsPeakNumActive`) que o jogo preenche com AI fillers ainda apareciam nos resultados como `Driver_18`, `Driver_19`, etc. Validado contra OTKs reais: Monaco (peak=18, 2 phantoms), Miami (peak=19, 1 phantom), Baku (peak=16, 4 phantoms). Corridas e qualifying com grid completo (peak=20) não são afetados
+- **Causa raiz:** o flag `AiControlled` do `ParticipantData` pode ficar stale (incorretamente `false`) em pacotes posteriores quando o jogo reduz `NumActiveCars`, fazendo `IsPhantomEntry` não pegar essas entradas. Além disso, `ResolveNamesFromLobby` e o loop pós-FC em `IngestFinalClassification` registravam placeholders para todos os 22 slots de `TeamByCarIdx`, criando os Drivers fantasmas
+
+### Added
+- Defesa em profundidade: 5 filtros independentes em `SessionStore` (`ResolveNamesFromLobby`, `IngestFinalClassification` main loop, post-FC registration loop) e `LeagueFinalizer` (`IsPhantomEntry`, `ShouldSkipFcAiGridFillerRow`)
+- Todos os filtros gated em `NetworkGame == 1` (online only) e protegidos por `HumanCarIdxs[carIdx]` — nunca filtram um carIdx que foi confirmado como humano em algum momento da sessão
+- Test 13 em `Test-Finalizer.ps1`: cobre 4 cenários (Monaco-style peak=18, Miami-style peak=19, Baku-style peak=16, full grid peak=20)
+
 ## [1.1.28] - 2026-04-25
 
 ### Fixed

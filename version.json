@@ -1,7 +1,7 @@
 ﻿{
-    "version":  "1.1.28",
-    "released":  "2026-04-25",
+    "version":  "1.1.29",
+    "released":  "2026-05-04",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.28/Overtake.SimHub.Plugin-v1.1.28-Setup.exe",
-    "releaseNotes":  ""
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.29/Overtake.SimHub.Plugin-v1.1.29-Setup.exe",
+    "releaseNotes":  "Filtra pilotos fantasma (Driver_X) que apareciam na qualifying online quando o grid não estava completo. Adiciona defesa em profundidade em 5 camadas do pipeline para detectar slots overflow (carIdx >= participantsPeakNumActive) que o jogo preenche com AI fillers. Corridas e qualifying com grid completo (20/20) não são afetadas. Pilotos humanos reais são preservados via guard wasHuman."
 }
