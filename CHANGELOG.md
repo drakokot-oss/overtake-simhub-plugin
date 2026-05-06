@@ -4,6 +4,12 @@ All notable changes to the Overtake SimHub Plugin are documented here.
 
 ## [1.1.30] - 2026-05-06
 
+### Added (build / release)
+- **GitHub Actions release pipeline** (`.github/workflows/release.yml`): push de uma tag `vX.Y.Z` agora dispara build + tests + Inno Setup + GitHub Release automaticamente, sem depender mais de uma máquina Windows. Usa cache do SimHub 9.11.11 baixado do mirror oficial; valida que `AssemblyInfo.cs`, `version.json`, `CHANGELOG.md` e `installer.iss` estão sincronizados com a tag antes de buildar
+- **GitHub Actions CI** (`.github/workflows/ci.yml`): build + tests em todo push de `main` e em PRs
+- `scripts/Build-Package.ps1`: agora prefere `msbuild.exe` no PATH (compatível com `microsoft/setup-msbuild` em CI), mantendo fallback para `C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe`
+- `docs/RELEASE-PROCESS.md`: documentação completa do novo fluxo
+
 ### Fixed
 - **Online race — pilotos reais que abandonavam antes da primeira volta eram filtrados (UNAcapeleto / Las Vegas):** os filtros de overflow (carIdx ≥ `participantsPeakNumActive` + 0 laps) introduzidos em v1.1.29 só verificavam `HumanCarIdxs[carIdx]` da sessão atual. Quando um humano entrava na quali, abandonava no início da race e seu slot caía no range overflow com 0 laps, ele era removido por engano. Agora, o filtro também checa `lobbyNameMap` e `bestKnownTags`/`bestKnownTagsByNet` (cross-session): se houver evidência positiva de que o `(rn, tid)` pertence a um humano conhecido, o slot é PRESERVADO como DNF — nunca filtrado
 - **Online qualifying — Driver_X dentro do range ativo com flag AI stale (LV quali Driver_18):** `IsPhantomEntry` foi expandido para também filtrar slots online com tag genérica + 0 laps quando NÃO há evidência positiva (lobby/bestKnown/wasHuman), mesmo dentro do range ativo. Cobre o caso onde `AiControlled` foi true em pacotes iniciais e flipou para false depois (stale flag), o que escapava do filtro v1.1.29

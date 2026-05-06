@@ -42,13 +42,32 @@ Write-Host ""
 
 # Step 1: Build
 Write-Host "[1/4] Building Release..." -ForegroundColor Yellow
-$msbuild = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe"
-if (-not (Test-Path $msbuild)) {
-    Write-Host "ERROR: MSBuild not found at $msbuild" -ForegroundColor Red
+
+# Prefer modern msbuild from PATH (set up by VS Build Tools or microsoft/setup-msbuild
+# in CI). Fall back to the .NET Framework 4.8 standalone path on dev workstations.
+$msbuild = $null
+$pathMsbuild = (Get-Command msbuild.exe -ErrorAction SilentlyContinue)
+if ($pathMsbuild) {
+    $msbuild = $pathMsbuild.Source
+} else {
+    $candidates = @(
+        "C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe",
+        "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { $msbuild = $c; break } }
+}
+if (-not $msbuild) {
+    Write-Host "ERROR: MSBuild not found in PATH or known install locations" -ForegroundColor Red
     exit 1
 }
+Write-Host "  MSBuild: $msbuild" -ForegroundColor DarkGray
 
-$buildOutput = & $msbuild $projFile /p:Configuration=Release /verbosity:minimal 2>&1
+# PostBuild XCOPY to SimHub folder fails on machines without SimHub (incl. CI),
+# but the MSB3073 error it raises is filtered below — DLL still gets produced.
+$buildOutput = & $msbuild $projFile /p:Configuration=Release /verbosity:minimal /nologo 2>&1
 $buildExitCode = $LASTEXITCODE
 
 # The PostBuildEvent copies to SimHub folder, which fails on machines without SimHub.

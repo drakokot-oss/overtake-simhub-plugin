@@ -1,155 +1,123 @@
-# Overtake Telemetry — Processo de Release
+# Release process
 
-## TL;DR — Um comando faz tudo
+A v1.1.30 introduziu **release automatizado via GitHub Actions**. Você não precisa mais estar no Windows para gerar e publicar uma nova versão do plugin.
 
-Após fazer alterações no plugin com o Cursor, basta rodar:
+---
 
-```powershell
-.\scripts\Release.ps1
+## TL;DR — como criar um release
+
+A partir de qualquer máquina (Mac, Linux ou Windows):
+
+```bash
+# 1) Bump dos 4 arquivos de versão (única coisa manual):
+#
+#    src/Overtake.SimHub.Plugin/Properties/AssemblyInfo.cs
+#       → AssemblyVersion("X.Y.Z.0") + AssemblyFileVersion("X.Y.Z.0")
+#
+#    CHANGELOG.md
+#       → adicionar `## [X.Y.Z] - YYYY-MM-DD` no topo com descrição do release
+#
+#    version.json
+#       → "version": "X.Y.Z"
+#       → "released": "YYYY-MM-DD"
+#       → "installerUrl": "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/vX.Y.Z/Overtake.SimHub.Plugin-vX.Y.Z-Setup.exe"
+#       → "releaseNotes": "<resumo curto pra notificação dentro do plugin>"
+#
+#    dist/v1.1.19/installer.iss
+#       → #define MyAppVersion "X.Y.Z"
+
+# 2) commit + push (via PR ou direto na main, como preferir)
+git add -A
+git commit -m "release: vX.Y.Z"
+git push origin main
+
+# 3) criar e fazer push da tag — isso dispara o workflow Release
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
-Isso automaticamente:
-1. Incrementa a versão (1.1.1 → 1.1.2)
-2. Compila o plugin
-3. Roda todos os testes (105 testes)
-4. Gera os pacotes de distribuição
-5. Atualiza o `version.json` (para notificação de update)
-6. Faz commit + tag no Git
-7. Push para o GitHub
-8. Instala a DLL no SimHub local
+Em ~5 minutos o GitHub Actions:
 
-**Nenhuma ação manual necessária.**
+1. **Valida** que os 4 arquivos de versão batem com a tag (falha rápido se você esqueceu de bumpar algum)
+2. Baixa o SimHub (cacheado entre runs)
+3. Compila o `.dll` em Release com MSBuild
+4. Roda os 3 test suites (`Test-Parsers.ps1`, `Test-SessionStore.ps1`, `Test-Finalizer.ps1`)
+5. Empacota `.simhubplugin`, gera o instalador Inno Setup (`*-Setup.exe`) e o ZIP do site
+6. Cria a GitHub Release com os 3 artefatos anexados
 
----
-
-## Fluxo Completo (o que acontece internamente)
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Você faz alterações no Cursor com o agente IA          │
-│  (código, UI, lógica, correções)                        │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│  .\scripts\Release.ps1                                  │
-│                                                         │
-│  [1] Bump versão       AssemblyInfo.cs atualizado       │
-│  [2] Build + Test      MSBuild Release + 105 testes     │
-│  [3] Package           .simhubplugin + ZIP + version    │
-│  [4] Git commit + tag  "release: vX.Y.Z"                │
-│  [5] Git push          GitHub origin/main + tag         │
-│  [6] Install local     DLL copiada para SimHub          │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│  GitHub (automático)                                    │
-│                                                         │
-│  version.json acessível em:                             │
-│  raw.githubusercontent.com/.../main/version.json        │
-│                                                         │
-│  Conteúdo: { "version": "1.2.0", "download": "..." }   │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│  Usuários existentes (automático)                       │
-│                                                         │
-│  Ao abrir SimHub → plugin verifica version.json         │
-│  Se versão nova > versão instalada:                     │
-│    → Mostra "Update available! Download vX.Y.Z"         │
-│    → Link para racehub.overtakef1.com/downloads         │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│  Upload manual (única etapa não automatizada)           │
-│                                                         │
-│  Arquivo: dist/OvertakeTelemetry-vX.Y.Z.zip            │
-│  Destino: racehub.overtakef1.com/downloads              │
-│                                                         │
-│  O ZIP contém:                                          │
-│    - Install-OvertakeTelemetry.bat (instalador GUI)     │
-│    - Overtake.SimHub.Plugin.dll                         │
-│    - README.txt (inglês)                                │
-│    - LEIAME.txt (português)                             │
-└─────────────────────────────────────────────────────────┘
-```
+A partir desse momento:
+- **Plugin instalado:** mostra "Update available" automaticamente (consome `version.json` na `main`)
+- **Site `racehub.overtakef1.com/downloads`:** atualiza automaticamente apontando para o novo `*-Setup.exe`
 
 ---
 
-## Opções do Release.ps1
+## Workflows
 
-| Comando | O que faz |
-|---------|-----------|
-| `.\scripts\Release.ps1` | Release completo com auto-bump de patch |
-| `.\scripts\Release.ps1 -Version "2.0.0"` | Versão explícita |
-| `.\scripts\Release.ps1 -SkipTests` | Pula testes (hotfix rápido) |
-| `.\scripts\Release.ps1 -NoPush` | Não faz push para GitHub |
-| `.\scripts\Release.ps1 -NoInstall` | Não instala no SimHub local |
-| `.\scripts\Release.ps1 -NoPush -NoInstall` | Só build + package local |
+### `.github/workflows/release.yml`
 
----
+| Trigger | Ação |
+|---|---|
+| `git push origin vX.Y.Z` (tag) | Build, test, package, GitHub Release |
+| `workflow_dispatch` (botão na UI do GitHub) | Mesmo, com input opcional de versão |
 
-## Versionamento
+Etapas internas:
 
-O plugin usa **Semantic Versioning** (X.Y.Z):
+1. **Resolve target version** — extrai `X.Y.Z` da tag ou do input manual
+2. **Verify version files match tag** — falha cedo se algum dos 4 arquivos não bater com a tag: `AssemblyInfo.cs`, `version.json` (version + installerUrl + releaseNotes), `CHANGELOG.md`, `installer.iss`
+3. **Cache SimHub binaries** — `actions/cache@v4` salva 216MB de SimHub (chave `simhub-{version}-v3`); subsequentes runs pulam download
+4. **Setup MSBuild** + **Install Inno Setup 6.2.2** (via Chocolatey)
+5. **Build (Release)** — `msbuild` direto, `PostBuildEvent=` vazio
+6. **Run tests** — todos os 3 scripts; falha se qualquer um quebrar
+7. **Build installer + package** — chama `scripts/Build-Package.ps1 -SkipTests`
+8. **Extract release notes from CHANGELOG.md** — pega a seção `## [X.Y.Z]`
+9. **Upload build artifacts (debug)** — guarda artifacts por 30 dias (acessíveis na UI)
+10. **Create GitHub Release** — `softprops/action-gh-release@v2`; sobe instalador + `.simhubplugin` + `OvertakeTelemetry-vX.Y.Z.zip`
 
-| Parte | Quando incrementar | Exemplo |
-|-------|-------------------|---------|
-| **X** (Major) | Mudança incompatível no JSON schema | 1.0.0 → 2.0.0 |
-| **Y** (Minor) | Novo recurso (campo novo, funcionalidade) | 1.1.0 → 1.2.0 |
-| **Z** (Patch) | Correção de bug, ajuste de UI | 1.1.0 → 1.1.1 |
+### `.github/workflows/ci.yml`
 
-O script **auto-incrementa o patch** por padrão. Para minor/major, use `-Version`.
-
----
-
-## Onde cada arquivo é usado
-
-| Arquivo | Localização | Função |
-|---------|-------------|--------|
-| `version.json` | Raiz do repo (GitHub) | Plugin verifica no startup para notificar updates |
-| `dist/OvertakeTelemetry-vX.Y.Z.zip` | Gerado pelo build | ZIP para upload no site |
-| `dist/Overtake.SimHub.Plugin.dll` | Gerado pelo build | DLL avulsa para install manual |
-| `dist/Install-OvertakeTelemetry.bat` | Fonte no repo | Instalador GUI para usuários |
-| `dist/README.txt` / `LEIAME.txt` | Fonte no repo | Instruções no ZIP |
-| `AssemblyInfo.cs` | `src/.../Properties/` | Versão do assembly (.NET) |
+Roda em todo push de `main` e em PRs. Faz build + tests, sem publicar nada. Usa o mesmo cache do SimHub.
 
 ---
 
-## Verificação pós-release
+## Pré-requisitos no GitHub
 
-Após rodar o Release.ps1, verifique:
-
-1. **Terminal** — Script terminou com "RELEASE vX.Y.Z COMPLETE"
-2. **SimHub** — Abra e veja a versão no plugin (canto superior direito)
-3. **GitHub** — `version.json` atualizado: `https://raw.githubusercontent.com/drakokot-oss/overtake-simhub-plugin/main/version.json`
-4. **Website** — Faça upload do ZIP em `racehub.overtakef1.com/downloads`
+Nenhum. O `GITHUB_TOKEN` que o Actions injeta automaticamente já tem permissão para criar Releases (declarado em `permissions: contents: write` no workflow).
 
 ---
 
-## Fluxo típico de trabalho
+## Como o SimHub é resolvido no CI
 
-```
-1. Abrir Cursor
-2. Pedir alterações ao agente IA (ex: "adicione campo X ao JSON")
-3. Agente faz as alterações no código
-4. Rodar: .\scripts\Release.ps1
-5. Upload do ZIP no site (se necessário)
-6. Pronto — usuários recebem notificação de update
-```
+O `.csproj` referencia DLLs do SimHub via `$(SimHubInstallPath)`. No CI:
+
+1. O workflow baixa `SimHub.9.11.11.zip` de `https://www.simhubdash.com/official/`
+2. Extrai em `<workspace>/simhub/`
+3. Define `SIMHUB_INSTALL_PATH=<workspace>\simhub\` antes de `msbuild`
+4. As DLLs ficam em cache do Actions; runs futuros levam ~10 segundos só pra restaurar
+
+Se a EA/SimHub Wotever um dia remover essa versão do mirror, basta atualizar `SIMHUB_VERSION` e `SIMHUB_URL` nos dois workflows. Versões antigas costumam ficar para sempre no `/official/`.
 
 ---
 
-## Troubleshooting
+## Trabalho local (Windows) ainda funciona
 
-| Problema | Solução |
-|----------|---------|
-| "BUILD FAILED" | Verifique erros no output. Corrija e rode novamente. |
-| "Tests FAILED" | Alguma lógica quebrou. O agente IA pode corrigir. |
-| Push falhou | `git push origin main --tags` manualmente. |
-| SimHub não encontrado | Instale manualmente: copie a DLL para a pasta do SimHub. |
-| Versão no plugin não mudou | Feche e reabra o SimHub após instalar. |
-| Update não aparece para usuários | Aguarde ~1 min (cache do GitHub). Verifique a URL do version.json. |
+Os scripts `scripts/Build-Package.ps1` e `scripts/Release.ps1` continuam funcionando normalmente no Windows. Os workflows do GitHub Actions e o processo local são caminhos paralelos e independentes — você pode usar um, o outro, ou ambos.
+
+---
+
+## Erros comuns
+
+| Sintoma | Causa | Correção |
+|---|---|---|
+| `::error::AssemblyInfo.cs: AssemblyVersion does not match X.Y.Z.0` | Tag criada antes do bump de versão | Apague a tag (`git tag -d vX.Y.Z; git push origin :vX.Y.Z`), bumpe os arquivos, recommit, retag |
+| `::error::version.json: installerUrl is '...'` | URL do `version.json` não bate com `https://github.com/<repo>/releases/download/v<X.Y.Z>/Overtake.SimHub.Plugin-v<X.Y.Z>-Setup.exe` | Ajuste manualmente — o nome do instalador é determinístico (vem do `installer.iss` `OutputBaseFilename`) |
+| `::error::CHANGELOG.md: no '## [X.Y.Z]' entry` | Esqueceu de adicionar a entrada no changelog | Adicione `## [X.Y.Z] - YYYY-MM-DD` no topo |
+| `Required SimHub DLL not found in extracted archive` | Estrutura interna do zip mudou (raríssimo) | Atualize `SIMHUB_VERSION`/`SIMHUB_URL` nos dois workflows para uma versão compatível |
+| Tests falham na CI mas passam local | Diferença de runner Windows vs sua máquina | Olhe o artifact `build-artifacts-vX.Y.Z` na run que falhou para baixar a DLL e reproduzir local |
+| `softprops/action-gh-release` falha com 403 | Permission `contents: write` ausente | Já está declarada no workflow; checar settings do repo (Settings → Actions → Workflow permissions: Read and write) |
+
+---
+
+## Quem está fora desse pipeline
+
+- **ConfuserEx (obfuscation):** o build local opcionalmente obfuscava o DLL via `tools\ConfuserEx\Confuser.CLI.exe`. O workflow do CI não roda obfuscation por padrão. Se quiser adicionar, baixe o ConfuserEx no step de install e copie para `tools/ConfuserEx/`. O `Build-Package.ps1` já procura nesse path.
+- **Install local em SimHub (`Release.ps1` step 8):** óbvio, não roda no CI. Só faz sentido na sua máquina.

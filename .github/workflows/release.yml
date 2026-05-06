@@ -1,0 +1,247 @@
+name: Release
+
+# Triggered when a tag like v1.1.30 is pushed.
+# Builds the plugin, runs tests, generates the Inno Setup installer
+# and publishes a GitHub Release with the installer + .simhubplugin attached.
+#
+# Pre-requisites:
+# - Tag name must match the version inside src/.../AssemblyInfo.cs and CHANGELOG.md
+# - CHANGELOG.md must have a "## [X.Y.Z]" entry whose body is used as release notes
+#
+# To trigger from any machine (Mac/Linux/Windows):
+#   git tag v1.1.30
+#   git push origin v1.1.30
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (without leading v, e.g. 1.1.30). Leave empty to use AssemblyInfo."
+        required: false
+        type: string
+
+permissions:
+  contents: write  # needed to create GitHub Releases
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    env:
+      SIMHUB_VERSION: 9.11.11
+      SIMHUB_URL: https://www.simhubdash.com/official/SimHub.9.11.11.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so CHANGELOG context works
+
+      - name: Resolve target version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $manualInput = "${{ inputs.version }}"
+          if ($manualInput) {
+            $version = $manualInput
+          } elseif ($tag -match '^v(\d+\.\d+\.\d+)$') {
+            $version = $Matches[1]
+          } else {
+            $asm = Get-Content "src/Overtake.SimHub.Plugin/Properties/AssemblyInfo.cs" -Raw
+            if ($asm -match 'AssemblyVersion\("(\d+\.\d+\.\d+)') { $version = $Matches[1] } else { throw "Could not derive version" }
+          }
+          Write-Host "Resolved version: $version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Verify version files match tag
+        shell: pwsh
+        run: |
+          $expected = "${{ steps.version.outputs.version }}"
+          $errors = @()
+
+          $asm = Get-Content "src/Overtake.SimHub.Plugin/Properties/AssemblyInfo.cs" -Raw
+          if ($asm -notmatch "AssemblyVersion\(`"$([regex]::Escape($expected))\.0`"\)") {
+            $errors += "AssemblyInfo.cs: AssemblyVersion does not match $expected.0"
+          }
+
+          $vj = Get-Content "version.json" -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($vj.version -ne $expected) {
+            $errors += "version.json: version is '$($vj.version)', expected '$expected'"
+          }
+          $expectedUrl = "https://github.com/${{ github.repository }}/releases/download/v$expected/Overtake.SimHub.Plugin-v$expected-Setup.exe"
+          if ($vj.installerUrl -ne $expectedUrl) {
+            $errors += "version.json: installerUrl is '$($vj.installerUrl)', expected '$expectedUrl'"
+          }
+          if ([string]::IsNullOrWhiteSpace($vj.releaseNotes)) {
+            $errors += "version.json: releaseNotes is empty"
+          }
+
+          $cl = Get-Content CHANGELOG.md -Raw -Encoding UTF8
+          if ($cl -notmatch "(?m)^## \[$([regex]::Escape($expected))\]") {
+            $errors += "CHANGELOG.md: no '## [$expected]' entry"
+          }
+
+          $iss = Get-ChildItem "dist" -Recurse -Filter "installer.iss" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($iss) {
+            $issContent = Get-Content $iss.FullName -Raw
+            if ($issContent -notmatch "MyAppVersion `"$([regex]::Escape($expected))`"") {
+              $errors += "$($iss.FullName): MyAppVersion does not match $expected"
+            }
+          }
+
+          if ($errors.Count -gt 0) {
+            foreach ($e in $errors) { Write-Host "::error::$e" }
+            Write-Host ""
+            Write-Host "Bump these files BEFORE creating the tag, then re-run the release."
+            exit 1
+          }
+          Write-Host "All version files match tag v$expected."
+
+      - name: Cache SimHub binaries
+        id: simhub-cache
+        uses: actions/cache@v4
+        with:
+          path: simhub
+          key: simhub-${{ env.SIMHUB_VERSION }}-v3
+
+      - name: Download + extract SimHub (only if not cached)
+        if: steps.simhub-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path simhub | Out-Null
+          $zip = "$env:RUNNER_TEMP\SimHub.zip"
+          Write-Host "Downloading $env:SIMHUB_URL ..."
+          Invoke-WebRequest -Uri $env:SIMHUB_URL -OutFile $zip
+          Write-Host "Extracting ..."
+          Expand-Archive -Path $zip -DestinationPath simhub -Force
+          # Sanity check: the DLLs the .csproj references must exist
+          foreach ($dll in @('SimHub.Plugins.dll','GameReaderCommon.dll','SimHub.Logging.dll','log4net.dll','MahApps.Metro.dll','MahApps.Metro.IconPacks.Material.dll','WoteverCommon.dll')) {
+            if (-not (Test-Path "simhub/$dll")) {
+              Write-Host "::error::Required SimHub DLL not found in extracted archive: $dll"
+              exit 1
+            }
+          }
+          Write-Host "SimHub extracted OK."
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress --version=6.2.2 -y
+          # Surface ISCC.exe in PATH for downstream steps
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup install failed: $iscc not found" }
+          "C:\Program Files (x86)\Inno Setup 6" >> $env:GITHUB_PATH
+
+      - name: Build (Release)
+        shell: pwsh
+        env:
+          SIMHUB_INSTALL_PATH: ${{ github.workspace }}\simhub\
+        run: |
+          $proj = "src/Overtake.SimHub.Plugin/Overtake.SimHub.Plugin.csproj"
+          # Skip the PostBuild XCOPY (writes to SimHub install dir)
+          msbuild $proj /p:Configuration=Release /p:PostBuildEvent= /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "Build failed (exit $LASTEXITCODE)" }
+          $dll = "src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll"
+          if (-not (Test-Path $dll)) { throw "DLL not produced: $dll" }
+          $size = [math]::Round((Get-Item $dll).Length / 1024, 1)
+          Write-Host "Build OK ($size KB)"
+
+      - name: Run tests
+        shell: pwsh
+        env:
+          SIMHUB_INSTALL_PATH: ${{ github.workspace }}\simhub\
+        run: |
+          $dll = "src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll"
+          $failed = $false
+          foreach ($script in @('scripts/Test-Parsers.ps1','scripts/Test-SessionStore.ps1','scripts/Test-Finalizer.ps1','scripts/Test-OtkSecurity.ps1')) {
+            if (-not (Test-Path $script)) { Write-Host "::warning::$script not found, skipping"; continue }
+            Write-Host ""
+            Write-Host "=== $script ===" -ForegroundColor Cyan
+            & pwsh -ExecutionPolicy Bypass -File $script -DllPath $dll
+            if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Host "::error::$script failed" }
+          }
+          if ($failed) { throw "One or more test suites failed" }
+
+      - name: Build installer + package
+        id: pack
+        shell: pwsh
+        env:
+          SIMHUB_INSTALL_PATH: ${{ github.workspace }}\simhub\
+        run: |
+          # The Build-Package script handles obfuscation skip, ISCC, .simhubplugin and version.json
+          & pwsh -ExecutionPolicy Bypass -File scripts/Build-Package.ps1 -SkipTests
+          if ($LASTEXITCODE -ne 0) { throw "Build-Package failed (exit $LASTEXITCODE)" }
+
+          $version = "${{ steps.version.outputs.version }}"
+          $installer = Get-ChildItem "dist" -Filter "*Setup*.exe" -ErrorAction Stop |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw "Installer EXE not found in dist/" }
+          Write-Host "Installer: $($installer.Name) ($([math]::Round($installer.Length/1024,1)) KB)"
+
+          $simhubplugin = Get-ChildItem "dist" -Filter "*.simhubplugin" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $distZip = Get-ChildItem "dist" -Filter "OvertakeTelemetry-v$version.zip" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          "installer=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+          if ($simhubplugin) { "simhubplugin=$($simhubplugin.FullName)" >> $env:GITHUB_OUTPUT }
+          if ($distZip) { "distzip=$($distZip.FullName)" >> $env:GITHUB_OUTPUT }
+          "installerName=$($installer.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $changelog = Get-Content CHANGELOG.md -Raw -Encoding UTF8
+          $escaped = [regex]::Escape($version)
+          if ($changelog -match "(?ms)## \[$escaped\].*?\n(.*?)(?=\n## \[|\z)") {
+            $body = $Matches[1].Trim()
+          } else {
+            Write-Host "::warning::No [$version] section found in CHANGELOG.md"
+            $body = "Release v$version"
+          }
+          # Save to file for the release step (avoids GITHUB_OUTPUT escaping issues)
+          $bodyFile = "$env:RUNNER_TEMP\release-body.md"
+          $body | Set-Content -Path $bodyFile -Encoding UTF8
+          "bodyFile=$bodyFile" >> $env:GITHUB_OUTPUT
+          Write-Host "Release notes ($($body.Length) chars):"
+          Write-Host $body
+
+      - name: Upload build artifacts (debug)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts-v${{ steps.version.outputs.version }}
+          path: |
+            src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll
+            dist/*Setup*.exe
+            dist/*.simhubplugin
+            dist/OvertakeTelemetry-v*.zip
+            version.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Overtake Telemetry ${{ steps.version.outputs.tag }}
+          body_path: ${{ steps.notes.outputs.bodyFile }}
+          draft: false
+          prerelease: false
+          files: |
+            ${{ steps.pack.outputs.installer }}
+            ${{ steps.pack.outputs.simhubplugin }}
+            ${{ steps.pack.outputs.distzip }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -266,26 +266,38 @@ Chaves: `KeyStore` armazena via XOR split (`partA ^ mask`). Após ConfuserEx, fi
 
 ## Release process
 
+A partir da v1.1.30 o release é **automatizado via GitHub Actions** (`.github/workflows/release.yml`). Funciona de qualquer SO (Mac, Linux, Windows).
+
+```bash
+# A partir de qualquer máquina: tag + push dispara o workflow
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+O workflow valida que os 4 arquivos de versão batem com a tag, baixa o SimHub (cache), builda, roda os 3 test suites, gera o instalador Inno Setup e cria a GitHub Release com os artefatos anexados.
+
+Caminho legado (Windows local) continua funcionando:
+
 ```powershell
-# Teste local (build + test + package)
+# Build local (build + test + package)
 .\scripts\Build-Package.ps1
 
-# Release completo (bump + build + test + git + GitHub Release)
+# Release completo local (bump + build + test + git + GitHub Release via gh CLI)
 .\scripts\Release.ps1 -Version "X.Y.Z"
-
-# Release sem push (teste local)
-.\scripts\Release.ps1 -Version "X.Y.Z" -NoPush
 ```
 
 Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
-### Arquivos de versão
+### Arquivos de versão (todos precisam ser bumpados ANTES de criar a tag)
 
 | Arquivo | Campo |
 |---------|-------|
 | `Properties/AssemblyInfo.cs` | `AssemblyVersion`, `AssemblyFileVersion` |
-| `CHANGELOG.md` | Entrada `## [X.Y.Z]` com notas |
+| `CHANGELOG.md` | Entrada `## [X.Y.Z] - YYYY-MM-DD` no topo |
 | `version.json` | `version`, `released`, `releaseNotes`, `installerUrl` |
+| `dist/v1.1.19/installer.iss` | `#define MyAppVersion "X.Y.Z"` |
+
+O workflow valida cada um e falha cedo se algum estiver fora de sincronia.
 
 ---
 

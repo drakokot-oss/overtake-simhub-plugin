@@ -1,0 +1,78 @@
+name: CI
+
+# Build + run tests on every push to main and on every PR.
+# Does NOT publish anything — pushing a v*.*.* tag is what triggers Release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    env:
+      SIMHUB_VERSION: 9.11.11
+      SIMHUB_URL: https://www.simhubdash.com/official/SimHub.9.11.11.zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache SimHub binaries
+        id: simhub-cache
+        uses: actions/cache@v4
+        with:
+          path: simhub
+          key: simhub-${{ env.SIMHUB_VERSION }}-v3
+
+      - name: Download + extract SimHub (only if not cached)
+        if: steps.simhub-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path simhub | Out-Null
+          $zip = "$env:RUNNER_TEMP\SimHub.zip"
+          Invoke-WebRequest -Uri $env:SIMHUB_URL -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath simhub -Force
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release)
+        shell: pwsh
+        env:
+          SIMHUB_INSTALL_PATH: ${{ github.workspace }}\simhub\
+        run: |
+          $proj = "src/Overtake.SimHub.Plugin/Overtake.SimHub.Plugin.csproj"
+          msbuild $proj /p:Configuration=Release /p:PostBuildEvent= /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "Build failed (exit $LASTEXITCODE)" }
+          if (-not (Test-Path "src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll")) {
+            throw "DLL not produced"
+          }
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $dll = "src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll"
+          $failed = $false
+          foreach ($script in @('scripts/Test-Parsers.ps1','scripts/Test-SessionStore.ps1','scripts/Test-Finalizer.ps1','scripts/Test-OtkSecurity.ps1')) {
+            if (-not (Test-Path $script)) { continue }
+            Write-Host ""
+            Write-Host "=== $script ===" -ForegroundColor Cyan
+            & pwsh -ExecutionPolicy Bypass -File $script -DllPath $dll
+            if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Host "::error::$script failed" }
+          }
+          if ($failed) { throw "One or more test suites failed" }
+
+      - name: Upload built DLL (PR debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-dll-${{ github.run_number }}
+          path: src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll
+          if-no-files-found: warn
+          retention-days: 7
