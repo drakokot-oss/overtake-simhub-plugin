@@ -2,6 +2,22 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.30] - 2026-05-06
+
+### Fixed
+- **Online race — pilotos reais que abandonavam antes da primeira volta eram filtrados (UNAcapeleto / Las Vegas):** os filtros de overflow (carIdx ≥ `participantsPeakNumActive` + 0 laps) introduzidos em v1.1.29 só verificavam `HumanCarIdxs[carIdx]` da sessão atual. Quando um humano entrava na quali, abandonava no início da race e seu slot caía no range overflow com 0 laps, ele era removido por engano. Agora, o filtro também checa `lobbyNameMap` e `bestKnownTags`/`bestKnownTagsByNet` (cross-session): se houver evidência positiva de que o `(rn, tid)` pertence a um humano conhecido, o slot é PRESERVADO como DNF — nunca filtrado
+- **Online qualifying — Driver_X dentro do range ativo com flag AI stale (LV quali Driver_18):** `IsPhantomEntry` foi expandido para também filtrar slots online com tag genérica + 0 laps quando NÃO há evidência positiva (lobby/bestKnown/wasHuman), mesmo dentro do range ativo. Cobre o caso onde `AiControlled` foi true em pacotes iniciais e flipou para false depois (stale flag), o que escapava do filtro v1.1.29
+
+### Changed
+- `IsPhantomEntry`, `ShouldSkipFcAiGridFillerRow` e os 3 pontos de `SessionStore` (`ResolveNamesFromLobby`, `IngestFinalClassification` main + post-FC loops) agora compartilham o mesmo princípio: **evidência positiva primeiro**. Se o slot tem nome conhecido em lobby/bestKnown ou foi confirmado humano, NUNCA filtra. Só aplica heurísticas de phantom (overflow, AI flag, generic tag) quando não há nenhuma evidência positiva. Elimina falsos positivos em todos os 5 filter points
+- Novo helper `IsKnownRealPlayer(sess, store, carIdx, slot)` em `LeagueFinalizer` centraliza a checagem de evidência positiva
+
+### Note
+- **`Driver_X` / `Car_X` que ainda aparecem (ex.: Driver_8 em Las Vegas) NÃO são bug:** acontecem quando o jogador real configurou `showOnlineNames=OFF` E o lobby do F1 25 também recebeu o nome dele como `"Player"` (genérico). É uma limitação do jogo — sem nome real em nenhum pacote, o plugin não tem como inferi-lo. O slot é preservado nos resultados (com o tag `Driver_X`) porque ele tem laps válidas
+
+### Added
+- Test 14 em `Test-Finalizer.ps1`: simula UNAcapeleto-style scenario (lobby tem o nome, ci no overflow, 0 laps, slot virou AI) e verifica que o piloto é preservado nos resultados
+
 ## [1.1.29] - 2026-05-04
 
 ### Fixed

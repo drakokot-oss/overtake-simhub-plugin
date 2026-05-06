@@ -124,38 +124,55 @@ Reconstrói resultados a partir da telemetria:
 
 ## Filtragem de pilotos fantasma
 
-Cinco camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais.
+Cinco camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais. **Princípio fundamental (v1.1.30): evidência positiva primeiro.** Antes de aplicar qualquer heurística de phantom (overflow, AI flag, generic tag), todos os filtros checam se há evidência positiva de que o slot pertence a um piloto real. Se sim, NUNCA filtra.
 
 ### Conceito-chave: overflow slot
 
-`participantsPeakNumActive` é o pico de `NumActiveCars` (packet 4) durante a sessão. **Slots com `carIdx >= peak` são "overflow"** — o jogo preenche essas posições do array de 22 com placeholders/AI fillers, mas elas nunca foram ocupadas por pilotos reais ativos. Esses slots aparecem no FC (packet 8) com `Position > 0` mas `NumLaps = 0` porque o array do FC sempre tem 22 entradas.
+`participantsPeakNumActive` é o pico de `NumActiveCars` (packet 4) durante a sessão. **Slots com `carIdx >= peak` são "overflow"** — o jogo preenche essas posições do array de 22 com placeholders/AI fillers, mas elas nunca foram ocupadas por pilotos reais ativos. Esses slots aparecem no FC (packet 8) com `Position > 0` mas `NumLaps = 0` porque o array do FC sempre tem 22 entradas. **Exceção (v1.1.30):** um humano que entrou no lobby, apareceu na quali, abandonou no início da race e cujo slot caiu no range overflow ainda é REAL. O filtro deve preservá-lo via lobby/bestKnown.
+
+### Evidência positiva — o que protege um slot de ser filtrado
+
+Em qualquer filtro de phantom, o slot é considerado um piloto real (e portanto **nunca** filtrado) se QUALQUER UM dos seguintes for verdadeiro:
+
+1. `dr.Laps.Count > 0` (telemetria capturou voltas)
+2. `sess.HumanCarIdxs[carIdx] == true` (já foi confirmado humano nesta sessão via Participants packet com `AiControlled=false` + `Platform != 255`)
+3. `lobbyNameMap[rn_tid]` retorna nome não-genérico (jogador presente no lobby)
+4. `bestKnownTags[rn_tid]` retorna nome não-genérico (jogador conhecido em alguma sessão da captura)
+5. `bestKnownTagsByNet[netId_tid]` retorna nome não-genérico (jogador conhecido por network-id, robusto a colisões de raceNumber em Custom MyTeam)
+
+`SessionStore.LookupBestKnownTagForEntry(slot)` consulta 3, 4 e 5 com a prioridade correta (net-key → rn-key se não-ambígua → teamId-only). `LeagueFinalizer.IsKnownRealPlayer(sess, store, carIdx, slot)` combina 2 + lookup acima.
 
 ### 1. ResolveNamesFromLobby (durante Participants ingestion) — `SessionStore`
 
-- Skip overflow + AI-controlled (sessão online)
-- Skip placeholder em overflow se `wasHuman = false`
+- Resolve nome via `ResolveLobbyName(team)` PRIMEIRO; se conseguir nome real, slot é preservado mesmo com AI flag ou em overflow
+- Skip apenas quando: `team.AiControlled` + `!hasKnownName` + `!confirmedHuman`
+- Skip placeholder em overflow apenas se `!wasHuman` E `!hasKnownName`
 
 ### 2. IngestFinalClassification main loop (durante FC ingestion) — `SessionStore`
 
-- Skip overflow + 0 laps + `wasHuman = false` (sessão online)
+- Skip overflow + 0 laps apenas se `!confirmedHuman` E `!hasKnownName` (lobby lookup)
 
 ### 3. IngestFinalClassification post-FC registration (após FC) — `SessionStore`
 
-- Skip overflow + `wasHuman = false` (sessão online)
+- Skip overflow apenas se `!wasHuman` E `!hasKnownName`
 
 ### 4. IsPhantomEntry / RemovePhantomDrivers (pré-finalização) — `LeagueFinalizer`
 
 Remove de `sess.Drivers` antes do processamento FC:
-- AI-controlled + 0 laps = grid filler (offline ou online)
-- Generic tag + 0 laps + sem team válido = slot vazio
-- **Online:** generic + 0 laps + overflow + `wasHuman = false`
+- Drivers com `Laps.Count > 0` **nunca** são filtrados
+- **Guard `IsKnownRealPlayer` aplicado primeiro** (online): se conhecido em lobby/bestKnown ou wasHuman, preserva
+- AI-controlled + 0 laps = grid filler (filtra)
+- Generic tag + 0 laps + sem team válido = slot vazio (filtra)
+- **Online:** generic + 0 laps (sem evidência positiva) → phantom (cobre tanto overflow quanto AI flag stale dentro do range ativo)
 
 ### 5. ShouldSkipFcAiGridFillerRow (durante FC loop) — `LeagueFinalizer`
 
 Filtra linhas FC que não representam pilotos reais:
+- Pula se Math.Max(fcLaps, telemLaps) > 0
+- Pula se `confirmedHuman` (HumanCarIdxs)
+- **Guard `IsKnownRealPlayer` aplicado primeiro** (online): se conhecido em lobby/bestKnown, preserva
+- **Online (sem evidência positiva):** generic + 0 laps + 0 bestLap → filtra (cobre overflow E within-range com AI stale)
 - **Offline:** AI-controlled ou roster heuristic + 0 laps
-- **Online:** generic + 0 laps + 0 bestLap + não confirmado humano + ausente de lobbyMap/bestKnownTags
-- **Online (overflow):** generic + carIdx >= peak + 0 bestLap
 
 ### 6. RemovePhantomDuplicateSeats (pós-RetroResolve) — `LeagueFinalizer`
 
@@ -166,10 +183,14 @@ Remove fantasmas de reconexão:
 ### Segurança (invariantes)
 
 - Pilotos com nome real (não genérico) **nunca** são filtrados
-- Pilotos com `HumanCarIdxs[carIdx] = true` **nunca** são filtrados (todos os filtros checam `wasHuman`)
-- Pilotos com laps > 0 **nunca** são filtrados
-- Pilotos com `raceNumber_teamId` no `lobbyNameMap` ou `bestKnownTags` **nunca** são filtrados pelo FC filter
-- Sessões offline (`NetworkGame == 0`) não são afetadas pelos filtros adicionados em v1.1.29
+- Pilotos com `HumanCarIdxs[carIdx] = true` **nunca** são filtrados
+- Pilotos com `Laps.Count > 0` **nunca** são filtrados
+- Pilotos com `(rn, tid)` em **`lobbyNameMap`**, **`bestKnownTags`** ou **`bestKnownTagsByNet`** (network-id) **nunca** são filtrados — incluindo ABANDONOS no início da race (v1.1.30)
+- Sessões offline (`NetworkGame == 0`) não são afetadas pelos filtros adicionados em v1.1.29/v1.1.30
+
+### Limitação conhecida: showOnlineNames=OFF + lobby também sem nome real
+
+Quando um jogador real liga o jogo com `showOnlineNames=OFF` E o lobby do F1 25 também recebeu o nome dele como `"Player"` (genérico — comportamento aleatório do jogo), o plugin não tem como inferir o nome real desse jogador. Ele aparecerá como `Driver_X` ou `Car_X` nos resultados, mas o slot é PRESERVADO porque tem laps válidas. Isso NÃO é um phantom — é um jogador real sem identificação visível.
 
 ---
 
@@ -269,6 +290,19 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 ---
 
 ## Problemas conhecidos resolvidos
+
+### v1.1.30
+
+| Problema | Causa raiz | Correção |
+|----------|-----------|----------|
+| Pilotos reais que abandonavam a corrida antes da primeira volta eram filtrados (UNAcapeleto / Las Vegas) | Os filtros de overflow + 0 laps da v1.1.29 só checavam `HumanCarIdxs[carIdx]` da sessão atual. Quando um humano entrava na quali em ci=overflow, abandonava a race com 0 laps e o slot ficava AI-controlled, era filtrado por engano | Adicionado guard `IsKnownRealPlayer(sess, store, carIdx, slot)` em todos os 5 filter points: checa lobbyMap, bestKnownTags e bestKnownTagsByNet (cross-session). Se há evidência positiva, o slot é PRESERVADO |
+| Driver_X dentro do range ativo com flag AI stale (Driver_18 LV quali) | `IsPhantomEntry` v1.1.29 só filtrava overflow (carIdx ≥ peak). Slots dentro do range ativo com tag genérica + AI flag stale escapavam | `IsPhantomEntry` expandido: online + generic + 0 laps + `!IsKnownRealPlayer` → phantom (mesmo dentro do range ativo) |
+
+**Validação contra OTKs reais (v1.1.30):**
+- LasVegas Quali (peak=19): UNAcapeleto preservado em P11 (lobby tem 74_3); Driver_18 (rn=31, tid=7, AI stale) filtrado
+- LasVegas Race (peak=19): UNAcapeleto preservado como DNF (lobby tem 74_3, ci=19 no overflow, 0 laps)
+- Miami v1.1.29 SprintShootout (peak=14): Driver_17/Driver_18 filtrados (não estão no lobby, generic, 0 laps)
+- Driver_8 / Car_X com laps > 0: sempre preservados (jogador real com showOnlineNames=OFF + lobby também sem nome real, limitação do jogo)
 
 ### v1.1.29
 

@@ -1160,13 +1160,26 @@ namespace Overtake.SimHub.Plugin.Store
                 var team = kvp.Value;
                 if (team == null || team.TeamId == 255) continue;
 
-                // Online: skip overflow AI filler slots (carIdx beyond the active
-                // participant range). These are empty grid positions the game fills
-                // with placeholder data — never real drivers.
-                if (sess.NetworkGame == 1
+                // Try to resolve via lobby/bestKnown maps first — this is positive
+                // evidence that the slot is a real player. If we get a real name,
+                // never skip the slot regardless of AiControlled or overflow status.
+                string resolved = ResolveLobbyName(team);
+                bool hasKnownName = !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved);
+
+                bool wasHuman;
+                bool confirmedHuman = sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) && wasHuman;
+                bool overflow = sess.NetworkGame == 1
                     && sess.ParticipantsPeakNumActive > 0
-                    && carIdx >= sess.ParticipantsPeakNumActive
-                    && team.AiControlled)
+                    && carIdx >= sess.ParticipantsPeakNumActive;
+
+                // Online: skip AI filler slots that are NOT confirmed real players.
+                // Real players (with lobby/bestKnown name or confirmed human) are
+                // preserved even if the AI flag is set (e.g. host migration, late
+                // connect/disconnect cycles, slot-reassignment artifacts).
+                if (sess.NetworkGame == 1
+                    && team.AiControlled
+                    && !hasKnownName
+                    && !confirmedHuman)
                     continue;
 
                 string existingTag;
@@ -1175,22 +1188,17 @@ namespace Overtake.SimHub.Plugin.Store
                 if (!string.IsNullOrEmpty(existingTag) && !IsGenericTag(existingTag))
                     continue;
 
-                string resolved = ResolveLobbyName(team);
                 if (string.IsNullOrEmpty(resolved))
                 {
                     DiagLobbyFailed++;
                     // Still register with placeholder if no tag at all — ensures
                     // LapData/SessionHistory capture starts immediately.
-                    // Skip overflow slots in online sessions — they are grid fillers
-                    // even when AiControlled is stale/false.
+                    // Skip overflow slots in online sessions when there is no
+                    // positive evidence (lobby/bestKnown/wasHuman) — they are
+                    // grid fillers even when AiControlled is stale/false.
                     if (string.IsNullOrEmpty(existingTag))
                     {
-                        bool overflow = sess.NetworkGame == 1
-                            && sess.ParticipantsPeakNumActive > 0
-                            && carIdx >= sess.ParticipantsPeakNumActive;
-                        bool wasHuman;
-                        if (overflow
-                            && (!sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) || !wasHuman))
+                        if (overflow && !confirmedHuman && !hasKnownName)
                             continue;
 
                         string placeholder = "Driver_" + carIdx;
@@ -1615,13 +1623,25 @@ namespace Overtake.SimHub.Plugin.Store
                 // Online: skip overflow slots with 0 laps that were never occupied by
                 // a real driver. The game fills grid positions beyond the active
                 // participant count with AI placeholder data in qualifying FCs.
+                // CRITICAL: only skip when there is NO positive evidence of a real
+                // player (lobby map, bestKnown, networkId-key, wasHuman). A human
+                // who joins the lobby and disconnects before completing a lap
+                // would be classified DNF — never filtered.
                 if (sess.NetworkGame == 1
                     && sess.ParticipantsPeakNumActive > 0
                     && carIdx >= sess.ParticipantsPeakNumActive
                     && row.NumLaps == 0)
                 {
                     bool wasHuman;
-                    if (!sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) || !wasHuman)
+                    bool confirmedHuman = sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) && wasHuman;
+                    bool hasKnownName = false;
+                    ParticipantEntry slot;
+                    if (sess.TeamByCarIdx.TryGetValue(carIdx, out slot) && slot != null && slot.TeamId != 255)
+                    {
+                        string knownName = ResolveLobbyName(slot);
+                        hasKnownName = !string.IsNullOrEmpty(knownName) && !IsGenericTag(knownName);
+                    }
+                    if (!confirmedHuman && !hasKnownName)
                         continue;
                 }
 
@@ -1754,7 +1774,8 @@ namespace Overtake.SimHub.Plugin.Store
             }
 
             // Register cars from TeamByCarIdx that still lack tags.
-            // Skip overflow AI filler slots in online sessions.
+            // Skip overflow AI filler slots in online sessions only when there
+            // is NO positive evidence of a real player (lobby/bestKnown/wasHuman).
             for (int ci = 0; ci < 22; ci++)
             {
                 if (sess.TagsByCarIdx.ContainsKey(ci)) continue;
@@ -1762,16 +1783,19 @@ namespace Overtake.SimHub.Plugin.Store
                 if (!sess.TeamByCarIdx.TryGetValue(ci, out team)) continue;
                 if (team == null || team.TeamId == 255) continue;
 
+                string resolved = ResolveLobbyName(team);
+                bool hasKnownName = !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved);
+
                 if (sess.NetworkGame == 1
                     && sess.ParticipantsPeakNumActive > 0
-                    && ci >= sess.ParticipantsPeakNumActive)
+                    && ci >= sess.ParticipantsPeakNumActive
+                    && !hasKnownName)
                 {
                     bool wasHuman;
                     if (!sess.HumanCarIdxs.TryGetValue(ci, out wasHuman) || !wasHuman)
                         continue;
                 }
 
-                string resolved = ResolveLobbyName(team);
                 if (!string.IsNullOrEmpty(resolved))
                 {
                     bool isDup = false;
