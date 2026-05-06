@@ -36,7 +36,33 @@ namespace Overtake.SimHub.Plugin.Finalizer
             return int.TryParse(tag.Substring(prefix.Length), out idx) ? idx : -1;
         }
 
-        private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess)
+        /// <summary>
+        /// Returns true when the slot has positive evidence of being a real player:
+        /// known in lobbyMap, bestKnownTags (rn-key), bestKnownTagsByNet (network-id key),
+        /// or carIdx was confirmed human in this session. Use this BEFORE applying
+        /// any phantom/overflow filter to avoid accidentally dropping real players who
+        /// disconnected before completing a lap.
+        /// </summary>
+        private static bool IsKnownRealPlayer(SessionRun sess, SessionStore store, int carIdx, ParticipantEntry slot)
+        {
+            // Per-session evidence: confirmed human via Participants packet
+            bool wasHuman;
+            if (sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) && wasHuman)
+                return true;
+
+            if (slot == null || slot.TeamId == 255)
+                return false;
+
+            // Check ALL name maps (lobby, bestKnownTags rn-key, bestKnownTagsByNet)
+            // through the public store API, which already implements priority order.
+            string resolved = store != null ? store.LookupBestKnownTagForEntry(slot) : null;
+            if (!string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                return true;
+
+            return false;
+        }
+
+        private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess, SessionStore store)
         {
             if (string.IsNullOrEmpty(tag))
                 return true;
@@ -57,6 +83,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             bool hasValidTeam = teamInfo != null && teamInfo.TeamId != 255;
 
+            // POSITIVE EVIDENCE FIRST: if known in lobby/bestKnown or was confirmed
+            // human in this session, this slot represents a real player who simply
+            // didn't complete a lap (e.g. disconnected/retired before lap 1).
+            // Never filter such slots — they should appear as DNF in the results.
+            if (sess.NetworkGame == 1 && IsKnownRealPlayer(sess, store, dr.CarIdx, teamInfo))
+                return false;
+
             // AI-controlled + 0 laps = grid filler, regardless of tag name.
             // In showOnlineNames=OFF lobbies, AI fillers get real F1 driver names
             // (VERSTAPPEN, LECLERC, etc.) instead of generic tags. Requiring
@@ -70,17 +103,17 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (IsGenericTag(tag) && !hasValidTeam)
                 return true;
 
-            // Online: generic tag + 0 laps + carIdx beyond active range = overflow
-            // grid filler. Catches entries where AiControlled was stale/incorrect.
-            if (sess.NetworkGame == 1
-                && IsGenericTag(tag)
-                && sess.ParticipantsPeakNumActive > 0
-                && dr.CarIdx >= sess.ParticipantsPeakNumActive)
-            {
-                bool wasHuman;
-                if (!sess.HumanCarIdxs.TryGetValue(dr.CarIdx, out wasHuman) || !wasHuman)
-                    return true;
-            }
+            // Online: generic tag + 0 laps + no positive evidence = phantom.
+            // Covers two scenarios:
+            //   1) carIdx in overflow range (>= peakNumActive) — AI grid filler
+            //      that the game padded the FC array with.
+            //   2) carIdx within active range but never produced a name and the
+            //      AiControlled flag went stale to false in a later packet
+            //      (LV quali Driver_18 example: ci=18, peak=19, AI flag was true
+            //      in initial packets but flipped, so the within-range check
+            //      catches it via lack of lobby/bestKnown evidence).
+            if (sess.NetworkGame == 1 && IsGenericTag(tag))
+                return true;
 
             return false;
         }
@@ -150,35 +183,25 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 if (confirmedHuman)
                     return false;
 
-                // Overflow slot: carIdx beyond the active participant range with
-                // 0 laps = grid filler the game added to pad the FC array.
+                // POSITIVE EVIDENCE FIRST: known in lobby or any bestKnown map?
+                // Includes network-id key (issue #1 fix) — covers humans who
+                // disconnected before completing a lap (would be DNF, not phantom).
+                if (IsKnownRealPlayer(sess, store, row.CarIdx, slotInfo))
+                    return false;
+
+                // No positive evidence — apply phantom heuristics:
+                // 1) generic + 0 laps + 0 best-lap + carIdx is overflow → grid filler
                 int peakNa = sess.ParticipantsPeakNumActive;
                 if (peakNa > 0 && row.CarIdx >= peakNa
                     && IsGenericTag(tag) && row.BestLapTimeMs == 0)
                     return true;
 
+                // 2) generic + 0 laps + 0 best-lap + not overflow → also phantom
+                //    (slot inside active range but never produced a name or telemetry,
+                //    e.g. AI grid filler that took an active slot). Already verified
+                //    above that no lobby/bestKnown evidence exists.
                 if (IsGenericTag(tag) && row.BestLapTimeMs == 0)
-                {
-                    string lk = slotInfo != null
-                        ? string.Format("{0}_{1}", slotInfo.RaceNumber, slotInfo.TeamId)
-                        : null;
-
-                    bool inLobby = false, inBkt = false;
-                    if (lk != null)
-                    {
-                        var lobbyMap = store.DebugLobbyMap;
-                        var bkt = store.DebugBestKnownTags;
-                        string lobbyName;
-                        if (lobbyMap.TryGetValue(lk, out lobbyName) && !string.IsNullOrEmpty(lobbyName) && !IsGenericTag(lobbyName))
-                            inLobby = true;
-                        string bktName;
-                        if (bkt.TryGetValue(lk, out bktName) && !string.IsNullOrEmpty(bktName) && !IsGenericTag(bktName))
-                            inBkt = true;
-                    }
-
-                    if (!inLobby && !inBkt)
-                        return true;
-                }
+                    return true;
 
                 return false;
             }
@@ -326,12 +349,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
         /// <summary>
         /// Remove phantom drivers before FC processing (Python parity). Cleans TagsByCarIdx entries for removed tags.
         /// </summary>
-        private static void RemovePhantomDrivers(SessionRun sess)
+        private static void RemovePhantomDrivers(SessionRun sess, SessionStore store)
         {
             var phantomTags = new List<string>();
             foreach (var kvp in sess.Drivers)
             {
-                if (IsPhantomEntry(kvp.Key, kvp.Value, sess))
+                if (IsPhantomEntry(kvp.Key, kvp.Value, sess, store))
                     phantomTags.Add(kvp.Key);
             }
             foreach (string t in phantomTags)
@@ -839,7 +862,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             RetroResolveNames(sess, store);
 
             // Drop AI+0-lap phantoms before FC (Python parity); strip stale TagsByCarIdx
-            RemovePhantomDrivers(sess);
+            RemovePhantomDrivers(sess, store);
 
             // Remove ghost duplicate seats: generic 0-lap entries whose raceNumber_teamId
             // is already owned by a real-named driver (carIdx slot reassignment artifact).
@@ -1070,7 +1093,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     string tag = dkvp.Key;
                     if (resultTags.Contains(tag)) continue;
                     DriverRun dr = dkvp.Value;
-                    if (IsPhantomEntry(tag, dr, sess)) continue;
+                    if (IsPhantomEntry(tag, dr, sess, store)) continue;
 
                     ParticipantEntry teamInfo;
                     sess.TeamByCarIdx.TryGetValue(dr.CarIdx, out teamInfo);
@@ -1110,10 +1133,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                        || stName.IndexOf("Sprint", StringComparison.OrdinalIgnoreCase) >= 0;
 
             if (resultsOut.Count == 0 && isRace && sess.Drivers.Count > 0)
-                resultsOut = BuildRaceFallbackResults(sess, bestByTag, idxToTag, previousSessions, globalTeamByTag);
+                resultsOut = BuildRaceFallbackResults(sess, store, bestByTag, idxToTag, previousSessions, globalTeamByTag);
 
             if (resultsOut.Count == 0 && isQuali && sess.Drivers.Count > 0)
-                resultsOut = BuildQualiFallbackResults(sess, bestByTag, globalTeamByTag);
+                resultsOut = BuildQualiFallbackResults(sess, store, bestByTag, globalTeamByTag);
 
             // Fill in missing grid positions: qualifying results -> LapData GridPosition -> sequential
             if (isRace)
@@ -1272,7 +1295,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 {
                     string tag = dkvp.Key;
                     DriverRun dr = dkvp.Value;
-                    if (IsPhantomEntry(tag, dr, sess)) continue;
+                    if (IsPhantomEntry(tag, dr, sess, store)) continue;
                     driversOut[tag] = FinalizeDriver(tag, dr, sess, idxToTag, globalTeamByTag);
                 }
             }
@@ -1783,7 +1806,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
         }
 
         private static List<Dictionary<string, object>> BuildRaceFallbackResults(
-            SessionRun sess, Dictionary<string, int> bestByTag,
+            SessionRun sess, SessionStore store, Dictionary<string, int> bestByTag,
             Dictionary<int, string> idxToTag, List<object> previousSessions,
             Dictionary<string, ParticipantEntry> globalTeamByTag = null)
         {
@@ -1832,7 +1855,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             {
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
-                if (IsPhantomEntry(tag, dr, sess)) continue;
+                if (IsPhantomEntry(tag, dr, sess, store)) continue;
 
                 int nLaps = EffectiveLapCount(dr);
                 int totalMs = 0;
@@ -1890,7 +1913,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
         }
 
         private static List<Dictionary<string, object>> BuildQualiFallbackResults(
-            SessionRun sess, Dictionary<string, int> bestByTag,
+            SessionRun sess, SessionStore store, Dictionary<string, int> bestByTag,
             Dictionary<string, ParticipantEntry> globalTeamByTag = null)
         {
             var entries = new List<Dictionary<string, object>>();
@@ -1898,7 +1921,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             {
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
-                if (IsPhantomEntry(tag, dr, sess)) continue;
+                if (IsPhantomEntry(tag, dr, sess, store)) continue;
 
                 int bestMs;
                 bestByTag.TryGetValue(tag, out bestMs);

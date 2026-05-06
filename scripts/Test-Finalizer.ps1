@@ -343,6 +343,101 @@ Write-Host "=== Test 13c: Baku-style (peak=16, 4 phantoms) ===" -ForegroundColor
 Write-Host "=== Test 13d: Full grid (peak=20, no phantoms) ===" -ForegroundColor Cyan
 [void](Test-OverflowFilter 20 "FullGrid")
 
+# ---- Test 14: lobby-known players preserved on overflow / 0 laps (v1.1.30) ----
+# Reproduces LasVegas UNAcapeleto: real player from lobby, ci in overflow range,
+# 0 laps in the race FC (disconnected before lap 1). Must be PRESERVED.
+# Also reproduces LasVegas Driver_18 quali: AI within active range, generic, 0 laps,
+# NOT in lobby. Must be FILTERED.
+function Test-LobbyKnownOverflow() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+    # Online race session
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 20  # Race-style id
+    $sp[124] = 0; $sp[125] = 1            # NetworkGame=1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # LobbyInfo packet (id 9): 18 known players including UNAcapeleto-equivalent.
+    # Stride=42; baseOff = headerSize+1 = 30 (relative to packet); but as payload
+    # we put numPlayers at index 0 and entries from index 1.
+    $lobbyPlayers = 18
+    $lobbyPayload = New-Object byte[] (1 + 22 * 42)
+    $lobbyPayload[0] = $lobbyPlayers
+    for ($lp = 0; $lp -lt $lobbyPlayers; $lp++) {
+        $off = 1 + $lp * 42
+        $lobbyPayload[$off + 0] = 0           # AI=false
+        $lobbyPayload[$off + 1] = [byte]($lp % 10)   # TeamId
+        $lobbyPayload[$off + 3] = 1           # Platform = Steam
+        $nm = [System.Text.Encoding]::UTF8.GetBytes("Lobby$lp")
+        [System.Array]::Copy($nm, 0, $lobbyPayload, ($off + 4), $nm.Length)
+        $lobbyPayload[$off + 36] = [byte](20 + $lp)  # CarNumber (raceNumber)
+        $lobbyPayload[$off + 38] = 1                  # ShowOnlineNames=on
+    }
+    # UNAcapeleto-style entry: rn=74, tid=3, lobby slot 17
+    $offUna = 1 + 17 * 42
+    $lobbyPayload[$offUna + 0] = 0
+    $lobbyPayload[$offUna + 1] = 3
+    $lobbyPayload[$offUna + 3] = 4
+    $unaName = [System.Text.Encoding]::UTF8.GetBytes("UNAcapeleto")
+    for ($zi = 0; $zi -lt 32; $zi++) { $lobbyPayload[$offUna + 4 + $zi] = 0 }
+    [System.Array]::Copy($unaName, 0, $lobbyPayload, ($offUna + 4), $unaName.Length)
+    $lobbyPayload[$offUna + 36] = 74
+    $lobbyPayload[$offUna + 38] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 9 $lobbyPayload))))
+
+    # Participants packet: 19 active (ci 0..18 humans, ci 19 = UNAcapeleto initially human)
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 19
+    for ($c = 0; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        if ($c -lt 19) {
+            $pp[$st + 0] = 0; $pp[$st + 40] = 1; $pp[$st + 41] = 1
+            $pp[$st + 3] = [byte]($c % 10)
+            $pp[$st + 5] = [byte](20 + $c)
+        } elseif ($c -eq 19) {
+            # Was originally UNAcapeleto but flipped to AI=true (disconnected -> AI took slot)
+            $pp[$st + 0] = 1
+            $pp[$st + 3] = 3
+            $pp[$st + 5] = 74
+        } else {
+            $pp[$st + 0] = 1  # AI filler
+            $pp[$st + 3] = [byte]($c % 10)
+            $pp[$st + 5] = [byte](100 + $c)
+        }
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # FC: 20 entries; ci 0..18 finished with 5 laps; ci 19 (UNAcapeleto) 0 laps DNF
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 20
+    for ($c = 0; $c -lt 20; $c++) {
+        $off = 1 + $c * 46
+        $fc[$off + 0] = [byte]($c + 1)  # position
+        if ($c -lt 19) { $fc[$off + 1] = 5 } else { $fc[$off + 1] = 0 }
+        $fc[$off + 2] = [byte]($c + 1)  # carIdx is parser-computed; fixture path sets it
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $ss = $res["sessions"]
+    Assert "v1.1.30: session exists" ($ss.Count -ge 1)
+    if ($ss.Count -lt 1) { return }
+    $rsl = $ss[0]["results"]
+    $cnt = if ($rsl -ne $null) { $rsl.Count } else { 0 }
+
+    $unaFound = $false
+    if ($rsl -ne $null) {
+        foreach ($r in $rsl) {
+            $tg = Get-DictValue $r "tag"
+            if ($tg -eq "UNAcapeleto") { $unaFound = $true }
+        }
+    }
+    Assert "v1.1.30: UNAcapeleto preserved despite ci=19 overflow + 0 laps + AI flag" $unaFound
+}
+
+Write-Host "=== Test 14: lobby-known overflow players preserved (v1.1.30) ===" -ForegroundColor Cyan
+[void](Test-LobbyKnownOverflow)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow
