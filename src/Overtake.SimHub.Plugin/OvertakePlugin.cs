@@ -96,6 +96,17 @@ namespace Overtake.SimHub.Plugin
             if (_settings.ForwardPort == 0)
                 _settings.ForwardPort = 20777;
 
+            // v1.1.31 — settings schema migration: existing users come from v1.1.30 with
+            // SettingsSchemaVersion=0 (missing in saved JSON). Apply intended defaults for
+            // newly added fields and bump version so we don't migrate again on next launch.
+            if (_settings.SettingsSchemaVersion < 1)
+            {
+                _settings.AutoCleanAfterExport = true;
+                _settings.SettingsSchemaVersion = 1;
+                global::SimHub.Logging.Current.Info(
+                    "[Overtake] Migrated settings schema 0 -> 1 (AutoCleanAfterExport=on)");
+            }
+
             _store = new SessionStore();
 
             _receiver = new UdpReceiver();
@@ -195,7 +206,37 @@ namespace Overtake.SimHub.Plugin
                 _raceSendAtMs = 0;
                 _raceFcFirstMs = 0;
                 _autoExportArmed = false;
-                TryAutoExport();
+                bool exportOk = TryAutoExport();
+                // Camada 2 — auto-rotate AFTER successful auto-export so the next event
+                // starts in a fresh capture even if the user never clicks "Nova sessão".
+                // Disabled if AutoCleanAfterExport=false in settings.
+                if (exportOk && _settings.AutoCleanAfterExport)
+                {
+                    BeginNewCaptureSession();
+                    global::SimHub.Logging.Current.Info(
+                        "[Overtake] Capture auto-cleaned after export (AutoCleanAfterExport=on)");
+                }
+            }
+
+            // Camada 1 — react to AutoRotateRequested raised by SessionStore on track change.
+            // The very first Session packet of the new event was rejected by the store
+            // (so the new track doesn't pollute the old capture). Now we close out the
+            // old capture (export if not already exported) and start fresh.
+            if (_store.AutoRotateRequested)
+            {
+                string reason = _store.AutoRotateReason ?? "track change";
+                global::SimHub.Logging.Current.Info(
+                    string.Format("[Overtake] Auto-rotate triggered: {0}", reason));
+
+                if (_settings.AutoExportJson && _store.Sessions.Count > 0)
+                {
+                    bool exportOk = TryAutoExport();
+                    if (exportOk)
+                        global::SimHub.Logging.Current.Info(
+                            "[Overtake] Auto-rotate: previous capture exported");
+                }
+                BeginNewCaptureSession();
+                _store.ClearAutoRotateRequest();
             }
         }
 
@@ -358,7 +399,7 @@ namespace Overtake.SimHub.Plugin
             }
         }
 
-        private void TryAutoExport()
+        private bool TryAutoExport()
         {
             try
             {
@@ -378,11 +419,14 @@ namespace Overtake.SimHub.Plugin
                     _settings.LastExportPath = path;
                     this.SaveCommonSettings("OvertakeSettings", _settings);
                     global::SimHub.Logging.Current.Info(string.Format("[Overtake] Auto-exported to {0}", path));
+                    return true;
                 }
+                return false;
             }
             catch (Exception ex)
             {
                 global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-export failed: {0}", ex.Message));
+                return false;
             }
         }
 
@@ -476,40 +520,27 @@ namespace Overtake.SimHub.Plugin
         }
 
         /// <summary>
-        /// Only auto-export after the LAST Race of the weekend.
-        /// In a sprint weekend (FP → SprintShootout → SprintRace → Qualifying → MainRace),
-        /// the Sprint Race uses sessionTypeId=15 and the Main Race uses sessionTypeId=16,
-        /// but both map to "Race" in Lookups.  We detect a sprint weekend by the
-        /// presence of a SprintShootout/Sprint session and only treat the second
-        /// Race as terminal.  Sprint-only lobbies can use the manual Export button.
+        /// A session is "terminal" (eligible to trigger auto-export) when it is the
+        /// LAST race of the weekend.
+        ///
+        /// Lookups already maps Sprint Race (id=13) to name "Sprint" and the Main Race
+        /// to name "Race" (ids 10, 11, 15, 16, 19, 25, 26, 29, 30, 36 — F1 25 emits
+        /// different IDs depending on game mode). Anything classified as "Sprint" by
+        /// Lookups is intentionally NOT terminal because a Main Race is expected after.
+        /// "Race" entries are always terminal.
+        ///
+        /// v1.1.31: previous logic required raceCount >= 2 whenever a SprintShootout
+        /// existed in the capture, which broke captures of "Sprint Format" lobbies that
+        /// do NOT include a Sprint Race (e.g. Baku 2026-05-07: SS → OSQ → Race only).
+        /// That caused auto-export to never fire for those weekends, which combined
+        /// with no auto-rotation produced cross-event captures (Baku + Monaco issue).
         /// </summary>
         private bool IsTerminalSession(byte id)
         {
             string name;
             if (!Finalizer.Lookups.SessionType.TryGetValue(id, out name))
                 return false;
-            if (name != "Race")
-                return false;
-
-            bool hasSprintShootout = false;
-            int raceCount = 0;
-            foreach (var sess in _store.Sessions.Values)
-            {
-                if (!sess.SessionType.HasValue) continue;
-                string sn;
-                if (Finalizer.Lookups.SessionType.TryGetValue(sess.SessionType.Value, out sn))
-                {
-                    if (sn == "SprintShootout" || sn == "Sprint")
-                        hasSprintShootout = true;
-                    if (sn == "Race")
-                        raceCount++;
-                }
-            }
-
-            if (hasSprintShootout && raceCount <= 1)
-                return false;
-
-            return true;
+            return name == "Race";
         }
 
         private static string SessionTypeName(byte id)

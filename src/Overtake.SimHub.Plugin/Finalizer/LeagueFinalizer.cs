@@ -62,6 +62,67 @@ namespace Overtake.SimHub.Plugin.Finalizer
             return false;
         }
 
+        /// <summary>
+        /// Camada 5 (v1.1.31) — last line of defense against cross-event captures.
+        /// If <paramref name="store"/>.Sessions has 2+ distinct trackIds, mutates the store
+        /// in place to keep only the sessions whose trackId matches the most recently active
+        /// session. Adds a [POST-HOC] note to <paramref name="store"/>.Notes describing the
+        /// drop. No-op when the capture is single-track (the common path).
+        ///
+        /// This is a safety net — Camadas 1 (track-change rotation) and 2 (rotation after
+        /// auto-export) should already prevent the multi-track scenario from reaching
+        /// Finalize. But if both fail (e.g. user disabled AutoExport AND AutoCleanAfterExport),
+        /// the export still won't contain two events.
+        /// </summary>
+        public static bool ApplyMultiTrackGuard(SessionStore store)
+        {
+            if (store == null || store.Sessions == null || store.Sessions.Count < 2)
+                return false;
+
+            int latestTrackId = -1;
+            long latestTs = 0;
+            var trackIds = new HashSet<int>();
+            foreach (var sess in store.Sessions.Values)
+            {
+                if (sess == null || !sess.TrackId.HasValue) continue;
+                trackIds.Add(sess.TrackId.Value);
+                if (sess.LastPacketMs > latestTs)
+                {
+                    latestTs = sess.LastPacketMs;
+                    latestTrackId = sess.TrackId.Value;
+                }
+            }
+            if (trackIds.Count < 2 || latestTrackId < 0)
+                return false;
+
+            var keysToDrop = new List<string>();
+            var droppedTrackIds = new HashSet<int>();
+            foreach (var kvp in store.Sessions)
+            {
+                if (!kvp.Value.TrackId.HasValue) continue;
+                if (kvp.Value.TrackId.Value != latestTrackId)
+                {
+                    keysToDrop.Add(kvp.Key);
+                    droppedTrackIds.Add(kvp.Value.TrackId.Value);
+                }
+            }
+            if (keysToDrop.Count == 0)
+                return false;
+
+            foreach (var k in keysToDrop)
+                store.Sessions.Remove(k);
+
+            string droppedList = string.Join(",", droppedTrackIds);
+            string note = string.Format(
+                "[POST-HOC] Multi-track capture detected (tracks: {0}). Kept trackId={1} only; "
+                + "dropped {2} session(s) from track(s) {3}. Auto-rotation either failed or "
+                + "was disabled — investigate.",
+                string.Join(",", trackIds), latestTrackId, keysToDrop.Count, droppedList);
+            if (store.Notes != null && store.Notes.Count < 500)
+                store.Notes.Add(note);
+            return true;
+        }
+
         private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess, SessionStore store)
         {
             if (string.IsNullOrEmpty(tag))
@@ -647,6 +708,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
         public static Dictionary<string, object> Finalize(SessionStore store)
         {
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+            // Camada 5 (v1.1.31) — defense-in-depth: if the capture spans multiple tracks
+            // (auto-rotation in OvertakePlugin/SessionStore failed or was bypassed), keep
+            // only the latest track's sessions. Logged in _debug.notes for transparency.
+            ApplyMultiTrackGuard(store);
 
             store.LastExportedNameKeyConflicts = store.SnapshotNameKeyConflicts();
             store.ApplyFullMyTeamLobbyMergeIfNeeded();

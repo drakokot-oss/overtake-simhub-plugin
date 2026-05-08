@@ -6,7 +6,21 @@ namespace Overtake.SimHub.Plugin
         public int ForwardPort;
         public string OutputFolder;
         public bool AutoExportJson;
+
+        // Camada 2 (v1.1.31): when true, the SessionStore is wiped right after a successful
+        // auto-export so the next race starts in a clean capture. Pair with AutoExportJson.
+        // Stays opt-out (defaults to true) — narrators/streamers benefit the most because they
+        // rarely click "Nova sessão" between back-to-back events. Power users who export
+        // manually mid-event can disable it.
+        public bool AutoCleanAfterExport;
+
         public string LastExportPath;
+
+        // Settings schema version. Used by OvertakePlugin.Init to migrate saved settings
+        // when new fields are introduced (so missing-from-save fields like AutoCleanAfterExport
+        // get the intended default, not C# zero-value).
+        // 0 = pre-v1.1.31, 1 = v1.1.31 (added AutoCleanAfterExport).
+        public int SettingsSchemaVersion;
 
         public OvertakeSettings()
         {
@@ -14,7 +28,9 @@ namespace Overtake.SimHub.Plugin
             ForwardPort = 20777;
             OutputFolder = "";
             AutoExportJson = true;
+            AutoCleanAfterExport = true;
             LastExportPath = "";
+            SettingsSchemaVersion = 1;
         }
     }
 }

@@ -2,6 +2,35 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.31] - 2026-05-08
+
+### Fixed
+- **Captura cruzando dois eventos no mesmo `.otk` (Monaco_20260507 — Baku + Monaco):** quando um narrador transmitia corridas seguidas sem clicar em "Nova sessão" entre elas, o plugin acumulava todas no mesmo arquivo. O OTK final continha 5 sessões de 2 fins de semana diferentes (Baku SS+OSQ+Race + Monaco Quali+Race), com 36 pilotos no `participants[]` global. Agora a captura é dividida automaticamente em 4 camadas independentes
+- **Auto-export não disparava em fim de semana com SprintShootout sem SprintRace (ex.: Baku 2026-05-07: SS → OSQ → Race apenas):** `IsTerminalSession` exigia `raceCount >= 2` quando havia SprintShootout na captura, partindo do pressuposto de que sempre haveria Sprint Race seguida de Main Race. Lobbies com formato sprint que não rodam a sprint race ficavam sem trigger de export, agravando a contaminação cross-event. Agora `IsTerminalSession` confia no nome retornado por `Lookups.SessionType` (id=13 "Sprint" não dispara; ids 10/15/16 etc. "Race" disparam) — robusto para todas as combinações de fim de semana
+
+### Added
+- **Camada 1 — auto-rotação por troca de pista (`SessionStore.AutoRotateRequested`):** quando um pacote `Session` chega anunciando `trackId` diferente do último visto E a captura atual já tem alguma `Race` com `FinalClassification`, o store recusa o pacote, sinaliza `AutoRotateRequested=true` e o `OvertakePlugin` reage no próximo `DataUpdate` exportando a captura antiga (se `AutoExportJson=on`) e chamando `BeginNewCapture()`. O primeiro pacote do novo evento que sobreviver ao rotate cai numa captura limpa
+- **Camada 2 — auto-clean após auto-export (`OvertakeSettings.AutoCleanAfterExport`):** após cada auto-export bem-sucedido, o store é limpo automaticamente para que a próxima corrida comece do zero. Habilitado por padrão (default `true`); pode ser desabilitado via `OvertakeSettings` para usuários power que preferem múltiplos eventos no mesmo arquivo
+- **Camada 5 (defesa em profundidade) — `LeagueFinalizer.ApplyMultiTrackGuard`:** se mesmo assim a captura chegar ao Finalize com 2+ trackIds distintos (Camadas 1 e 2 desativadas/falharam), o finalizer descarta tudo exceto o trackId mais recente e adiciona uma nota `[POST-HOC]` em `_debug.notes`. O `.otk` final NUNCA contém dois eventos
+- `SessionStore.HasClosedTerminalSession()`: helper público que retorna `true` quando alguma sessão acumulada é Race com FinalClassification (usado pela Camada 1 para diferenciar "captura aberta vs evento fechado")
+- `OvertakeSettings.SettingsSchemaVersion`: marker de versão para migração de settings persistidas. Usuários da v1.1.30 são migrados em silêncio para `AutoCleanAfterExport=true` no primeiro launch da v1.1.31
+- Test 15 em `Test-Finalizer.ps1`: simula a sequência exata do `Monaco_20260507` (Baku Race + FC → Monaco Quali primeiro pacote) e verifica que `AutoRotateRequested` levanta, o pacote do Monaco é rejeitado, e após `BeginNewCapture()` a próxima ingestão cria um store limpo
+- Test 16 em `Test-Finalizer.ps1`: cobre o caso patológico onde Camadas 1 e 2 não dispararam e duas sessões de tracks diferentes chegam ao Finalize. Valida que `ApplyMultiTrackGuard` mantém só Monaco e emite a nota `[POST-HOC] Multi-track capture detected`
+
+### Changed
+- `OvertakePlugin.TryAutoExport()` agora retorna `bool` (true = arquivo gerado e gravado, false = falhou). A Camada 2 só limpa o store quando o export retorna `true`, evitando jogar dados fora se o `.otk` falhar em ser escrito
+- `OvertakePlugin.IsTerminalSession()` simplificado: removida a checagem `hasSprintShootout && raceCount <= 1` (que falhava no caso Baku SS+OSQ+Race). Lookups já diferencia `id=13 "Sprint"` (não terminal) de `id=10/15/16 "Race"` (terminal) — confiamos no name lookup
+- `SessionStore.BeginNewCapture()` agora também chama `ClearAutoRotateRequest()` para limpar o sinal pendente de rotação
+
+### Note
+- O fluxo "narrador transmite múltiplas corridas seguidas" agora gera **um `.otk` por evento** automaticamente. Se a transmissão for Baku Race → Monaco Quali → Monaco Race:
+  - Camada 2 dispara após Baku Race com FC + SEND → exporta `Baku_*.otk` + limpa store
+  - Monaco Quali e Race acumulam em store limpo
+  - Camada 2 dispara após Monaco Race com FC + SEND → exporta `Monaco_*.otk` + limpa store
+- Se a Camada 2 falhar (ex.: nunca chegou FC para Baku), a Camada 1 ainda pega no momento que o trackId mudar de 20 para 5
+- Se ambas falharem, a Camada 5 garante que o arquivo final tem só Monaco
+- Manter o foco no "básico funcionando 100% para todos os casos" antes de revisitar o painel UX (próximo projeto)
+
 ## [1.1.30] - 2026-05-06
 
 ### Fixed

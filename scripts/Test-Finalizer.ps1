@@ -438,6 +438,147 @@ function Test-LobbyKnownOverflow() {
 Write-Host "=== Test 14: lobby-known overflow players preserved (v1.1.30) ===" -ForegroundColor Cyan
 [void](Test-LobbyKnownOverflow)
 
+# ---- Test 15: auto-rotation guard on track change (v1.1.31) ----
+# Reproduces the Monaco_20260507 issue: a single capture received Baku weekend
+# (SS, OSQ, Race with FC) followed by Monaco (Quali, Race). Without rotation, both
+# tracks accumulate in the same store. With Camada 1, the moment a Session packet
+# announces a different trackId AND we already have a closed Race, the store sets
+# AutoRotateRequested=true and refuses to ingest the new track. Camada 5 catches
+# residual multi-track stores at Finalize and drops everything but the latest.
+function Test-AutoRotateOnTrackChange() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # --- Baku Race (track 20), with FC so it counts as a "closed terminal session" ---
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 16; $sp[7] = 20  # sessionType=16 (Race), trackId=20 (Baku)
+    $sp[124] = 0; $sp[125] = 1            # NetworkGame=1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp -sessionUid ([uint64]7000)))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0  # AI=false
+    $pp[5] = 99  # raceNumber
+    $pp[3] = 1   # teamId
+    $pp[40] = 1; $pp[41] = 1
+    $n = [System.Text.Encoding]::UTF8.GetBytes("BakuDriver")
+    [System.Array]::Copy($n, 0, $pp, 8, $n.Length)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp -sessionUid ([uint64]7000)))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 1
+    $fc[1] = 1; $fc[2] = 5; $fc[3] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc -sessionUid ([uint64]7000)))))
+
+    Assert "v1.1.31: HasClosedTerminalSession after Baku FC" `
+        ($storeType.GetMethod("HasClosedTerminalSession").Invoke($st0, $null))
+    Assert "v1.1.31: AutoRotate not yet requested" `
+        (-not [bool]$storeType.GetProperty("AutoRotateRequested").GetValue($st0))
+
+    # --- Monaco Quali first packet (track 5) — must trigger auto-rotate ---
+    $spM = New-Object byte[] 700
+    $spM[0] = 1; $spM[6] = 8; $spM[7] = 5   # sessionType=8 (ShortQualifying), trackId=5 (Monaco)
+    $spM[124] = 0; $spM[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $spM -sessionUid ([uint64]9000)))))
+
+    Assert "v1.1.31: AutoRotate REQUESTED after Monaco track change" `
+        ([bool]$storeType.GetProperty("AutoRotateRequested").GetValue($st0))
+
+    # The Baku store should still hold ONE session (Baku); Monaco's first packet was rejected
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: Monaco packet rejected — store still has 1 session (Baku)" `
+        ($sessDict.Count -eq 1)
+    foreach ($k in $sessDict.Keys) {
+        $tid = Get-Field $sessDict[$k] "TrackId"
+        Assert "v1.1.31: only Baku trackId=20 in store" ($tid -eq 20)
+    }
+
+    # Subsequent Monaco packets (Participants, LapData) sent BEFORE OvertakePlugin handles
+    # the rotation must also be dropped — otherwise they'd corrupt the old (Baku) store.
+    $ppM = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $ppM.Length; $zi++) { $ppM[$zi] = 0 }
+    $ppM[0] = 1; $ppM[1] = 0; $ppM[3] = 2; $ppM[5] = 44; $ppM[40] = 1; $ppM[41] = 1
+    $nm = [System.Text.Encoding]::UTF8.GetBytes("MonacoLeaker")
+    [System.Array]::Copy($nm, 0, $ppM, 8, $nm.Length)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $ppM -sessionUid ([uint64]9000)))))
+
+    $ldM = New-Object byte[] (22 * 57)
+    $ldM[33] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ldM -sessionUid ([uint64]9000)))))
+
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: Subsequent Monaco packets also dropped — still 1 session" `
+        ($sessDict.Count -eq 1)
+    foreach ($k in $sessDict.Keys) {
+        $sess = $sessDict[$k]
+        $drvs = Get-Field $sess "Drivers"
+        # Baku had 1 driver (BakuDriver). MonacoLeaker must NOT appear.
+        $hasLeaker = $drvs.ContainsKey("MonacoLeaker")
+        Assert "v1.1.31: MonacoLeaker NOT leaked into Baku store" (-not $hasLeaker)
+    }
+
+    # Simulate the OvertakePlugin reaction: clear request, BeginNewCapture, then ingest Monaco
+    $storeType.GetMethod("ClearAutoRotateRequest").Invoke($st0, $null)
+    $storeType.GetMethod("BeginNewCapture").Invoke($st0, $null)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $spM -sessionUid ([uint64]9000)))))
+
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: After rotate+ingest, store has fresh Monaco session" `
+        ($sessDict.Count -eq 1)
+    foreach ($k in $sessDict.Keys) {
+        $tid = Get-Field $sessDict[$k] "TrackId"
+        Assert "v1.1.31: store now contains only Monaco trackId=5" ($tid -eq 5)
+    }
+}
+
+Write-Host "=== Test 15: auto-rotate on track change (v1.1.31) ===" -ForegroundColor Cyan
+[void](Test-AutoRotateOnTrackChange)
+
+# ---- Test 16: defense-in-depth multi-track guard at Finalize (Camada 5) ----
+# When auto-rotation didn't happen (e.g. user disabled AutoExport), the LeagueFinalizer
+# drops sessions from all tracks except the most recently active one and emits a
+# [POST-HOC] note in _debug.notes.
+function Test-MultiTrackGuard() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Force two sessions with different trackIds by directly populating Sessions via packets
+    # but skipping the auto-rotate trigger (no FC on the first session).
+    $sp1 = New-Object byte[] 700
+    $sp1[0] = 1; $sp1[6] = 9; $sp1[7] = 20  # OneShotQualifying @ Baku (no FC -> not "closed")
+    $sp1[124] = 0; $sp1[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp1 -sessionUid ([uint64]4000)))))
+
+    $sp2 = New-Object byte[] 700
+    $sp2[0] = 1; $sp2[6] = 10; $sp2[7] = 5  # Race @ Monaco (latest)
+    $sp2[124] = 0; $sp2[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp2 -sessionUid ([uint64]5000)))))
+
+    # Without HasClosedTerminalSession=true, no auto-rotate fires; both sessions stay
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: pre-finalize, store has 2 sessions across 2 tracks" ($sessDict.Count -eq 2)
+
+    # Camada 5 in action: Finalize must keep Monaco only and emit a note
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.31: Finalize output has only 1 session" ($sessions.Count -eq 1)
+    if ($sessions.Count -ge 1) {
+        $tk = Get-DictValue $sessions[0] "track"
+        Assert "v1.1.31: kept session is Monaco (latest)" ((Get-DictValue $tk "name") -eq "Monaco")
+    }
+    $debug = Get-DictValue $res "_debug"
+    $notes = Get-DictValue $debug "notes"
+    $hasNote = $false
+    if ($notes -ne $null) {
+        foreach ($note in $notes) {
+            if ($note -match "Multi-track capture detected") { $hasNote = $true }
+        }
+    }
+    Assert "v1.1.31: [POST-HOC] multi-track note emitted in _debug.notes" $hasNote
+}
+
+Write-Host "=== Test 16: defense-in-depth multi-track guard (v1.1.31) ===" -ForegroundColor Cyan
+[void](Test-MultiTrackGuard)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow
