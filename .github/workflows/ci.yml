@@ -1,0 +1,167 @@
+# Continuous integration: build the plugin and run all unit tests on every
+# pull request and on every push to main. Runs on a Windows runner so we can
+# use real MSBuild against .NET Framework 4.8 with the actual SimHub
+# reference DLLs (downloaded from the official SimHub GitHub release zip).
+#
+# This is the primary safety net before merging — Test 17 (the v1.1.31 cast
+# bug regression) and Tests 15/16 (auto-rotate guards) all run here.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel older in-flight runs of the same branch/PR if a newer push lands.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned SimHub portable build used to satisfy SimHub.Plugins / GameReaderCommon /
+  # MahApps / WoteverCommon / log4net references. Bumping this means re-validating
+  # the plugin against a newer SimHub.Plugins API surface — do it in a separate PR.
+  SIMHUB_VERSION: "9.11.12"
+  SIMHUB_ZIP_URL: "https://github.com/SHWotever/SimHub/releases/download/9.11.12/SimHub.9.11.12.zip"
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore SimHub portable build (cache)
+        id: simhub-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\SimHubPortable
+          key: simhub-portable-${{ env.SIMHUB_VERSION }}
+
+      - name: Download and extract SimHub portable (if cache miss)
+        if: steps.simhub-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'SimHub.zip'
+          Write-Host "Downloading $env:SIMHUB_ZIP_URL"
+          Invoke-WebRequest -Uri $env:SIMHUB_ZIP_URL -OutFile $zip -UseBasicParsing
+          $size = (Get-Item $zip).Length
+          Write-Host "Downloaded $([math]::Round($size/1MB,1)) MB"
+          New-Item -ItemType Directory -Force -Path C:\SimHubPortable | Out-Null
+          Write-Host "Extracting..."
+          Expand-Archive -Path $zip -DestinationPath C:\SimHubPortable -Force
+          Remove-Item $zip -Force
+          # Locate the folder that actually contains SimHub.Plugins.dll — the
+          # zip layout has historically been either flat or nested in a SimHub-X.Y.Z
+          # subfolder; we resolve dynamically and surface what we found for diagnostics.
+          $found = Get-ChildItem C:\SimHubPortable -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            Write-Host "::error::SimHub.Plugins.dll not found in extracted archive."
+            Get-ChildItem C:\SimHubPortable -Recurse | Select-Object -First 50 FullName | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          Write-Host "Found SimHub.Plugins.dll at: $($found.FullName)"
+
+      - name: Resolve SIMHUB_INSTALL_PATH and verify required DLLs
+        id: simhub-path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $found = Get-ChildItem C:\SimHubPortable -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            Write-Host "::error::SimHub.Plugins.dll missing after cache restore."
+            exit 1
+          }
+          # MSBuild expects the path to end with a trailing backslash because
+          # the csproj concatenates "$(SimHubInstallPath)GameReaderCommon.dll".
+          $simHubDir = $found.Directory.FullName
+          if (-not $simHubDir.EndsWith('\')) { $simHubDir = $simHubDir + '\' }
+          Write-Host "SimHub install path: $simHubDir"
+          $required = @('SimHub.Plugins.dll','GameReaderCommon.dll','SimHub.Logging.dll','log4net.dll','MahApps.Metro.dll','MahApps.Metro.IconPacks.Material.dll','WoteverCommon.dll')
+          $missing = @()
+          foreach ($r in $required) {
+            $p = Join-Path $simHubDir $r
+            if (-not (Test-Path $p)) { $missing += $r }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::Missing DLLs in SimHub portable: $($missing -join ', ')"
+            exit 1
+          }
+          "SIMHUB_INSTALL_PATH=$simHubDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build (Release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proj = "src\Overtake.SimHub.Plugin\Overtake.SimHub.Plugin.csproj"
+          # The PostBuildEvent in the csproj XCOPYs the DLL into the SimHub
+          # install folder. On the runner that path is read-only / locked, so
+          # we suppress the post-build to avoid MSB3073. We still verify the
+          # produced DLL below.
+          msbuild $proj /p:Configuration=Release /p:SimHubInstallPath="$env:SIMHUB_INSTALL_PATH" /p:PostBuildEvent= /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::MSBuild failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          $dll = "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
+          if (-not (Test-Path $dll)) {
+            Write-Host "::error::Build succeeded but DLL not found at $dll"
+            exit 1
+          }
+          $version = (Get-Item $dll).VersionInfo.FileVersion
+          $size = [math]::Round((Get-Item $dll).Length / 1KB, 1)
+          Write-Host "Built $dll (v$version, $size KB)"
+
+      - name: Run SessionStore tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
+          $output = & powershell -ExecutionPolicy Bypass -File "scripts\Test-SessionStore.ps1" -DllPath $dll 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          $summary = $output | Select-String -Pattern 'PASS:\s*\d+\s+FAIL:\s*(\d+)' | Select-Object -Last 1
+          if (-not $summary) {
+            Write-Host "::error::Could not parse test summary line from Test-SessionStore.ps1"
+            exit 1
+          }
+          $failCount = [int]$summary.Matches[0].Groups[1].Value
+          if ($failCount -gt 0) {
+            Write-Host "::error::Test-SessionStore.ps1 reported $failCount failures"
+            exit 1
+          }
+
+      - name: Run Finalizer tests (includes Test 17 cast bug regression)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
+          $output = & powershell -ExecutionPolicy Bypass -File "scripts\Test-Finalizer.ps1" -DllPath $dll 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          $summary = $output | Select-String -Pattern 'PASS:\s*\d+\s+FAIL:\s*(\d+)' | Select-Object -Last 1
+          if (-not $summary) {
+            Write-Host "::error::Could not parse test summary line from Test-Finalizer.ps1"
+            exit 1
+          }
+          $failCount = [int]$summary.Matches[0].Groups[1].Value
+          if ($failCount -gt 0) {
+            Write-Host "::error::Test-Finalizer.ps1 reported $failCount failures"
+            exit 1
+          }
+
+      - name: Upload built DLL as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Overtake.SimHub.Plugin-${{ github.sha }}
+          path: src/Overtake.SimHub.Plugin/bin/Release/Overtake.SimHub.Plugin.dll
+          retention-days: 14
+          if-no-files-found: error

@@ -42,13 +42,52 @@ Write-Host ""
 
 # Step 1: Build
 Write-Host "[1/4] Building Release..." -ForegroundColor Yellow
-$msbuild = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe"
-if (-not (Test-Path $msbuild)) {
-    Write-Host "ERROR: MSBuild not found at $msbuild" -ForegroundColor Red
+
+# Resolve MSBuild — preferred sources, in order:
+#   1. The first msbuild.exe on PATH (works on GitHub Actions windows runners
+#      after `microsoft/setup-msbuild@v2` and on dev boxes that loaded a VS dev
+#      shell).
+#   2. vswhere.exe (any installed Visual Studio with the MSBuild component).
+#   3. The legacy .NET Framework 4.0 MSBuild on Windows folder (last resort —
+#      cannot build modern .NET Framework projects with WPF / xaml without
+#      Microsoft.Build.Tasks.Core which only ships with VS).
+function Resolve-MSBuild {
+    $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    $vswhere = "$env:ProgramFiles (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $msb = & $vswhere -latest -prerelease -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+        if ($msb) { return $msb }
+    }
+
+    $legacy = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\MSBuild.exe"
+    if (Test-Path $legacy) { return $legacy }
+
+    return $null
+}
+$msbuild = Resolve-MSBuild
+if (-not $msbuild) {
+    Write-Host "ERROR: MSBuild not found. Install Visual Studio Build Tools or run from a Developer PowerShell." -ForegroundColor Red
     exit 1
 }
+Write-Host "  MSBuild: $msbuild" -ForegroundColor DarkGray
 
-$buildOutput = & $msbuild $projFile /p:Configuration=Release /verbosity:minimal 2>&1
+# Honor SIMHUB_INSTALL_PATH from the environment (CI sets this after extracting
+# the SimHub portable build); falls back to the csproj's hardcoded default
+# (C:\Program Files (x86)\SimHub\) for typical local dev boxes.
+$msbuildArgs = @(
+    $projFile,
+    '/p:Configuration=Release',
+    '/p:PostBuildEvent=',     # PostBuild XCOPY targets SimHub install — skip in scripted runs
+    '/verbosity:minimal',
+    '/nologo'
+)
+if ($env:SIMHUB_INSTALL_PATH) {
+    $msbuildArgs += "/p:SimHubInstallPath=$env:SIMHUB_INSTALL_PATH"
+    Write-Host "  SimHub: $env:SIMHUB_INSTALL_PATH" -ForegroundColor DarkGray
+}
+$buildOutput = & $msbuild @msbuildArgs 2>&1
 $buildExitCode = $LASTEXITCODE
 
 # The PostBuildEvent copies to SimHub folder, which fails on machines without SimHub.
@@ -261,19 +300,34 @@ if (-not (Test-Path $batPath)) {
     Write-Host "  Installer: Install-OvertakeTelemetry.bat" -ForegroundColor Gray
 }
 
-# Auto-generate version.json for update checker
+# Refresh version.json for the update checker. Preserve manually-curated
+# releaseNotes when the existing version.json already targets this version —
+# we never want to clobber the human-written changelog summary by accident.
 $semVer = $version -replace '\.0$', ''
 $installerName = if ($installerExe) { $installerExe.Name } else { "Overtake.SimHub.Plugin-v$semVer-Setup.exe" }
+$versionJsonPath = "$repoRoot\version.json"
+$existingNotes = ""
+if (Test-Path $versionJsonPath) {
+    try {
+        $existing = Get-Content $versionJsonPath -Raw | ConvertFrom-Json
+        if ($existing -and $existing.version -eq $semVer -and $existing.releaseNotes) {
+            $existingNotes = [string]$existing.releaseNotes
+        }
+    } catch { }
+}
 $versionJsonObj = [ordered]@{
     version      = $semVer
     released     = (Get-Date -Format "yyyy-MM-dd")
     download     = "https://racehub.overtakef1.com/downloads"
     installerUrl = "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v$semVer/$installerName"
-    releaseNotes = ""
+    releaseNotes = $existingNotes
 }
-$versionJsonPath = "$repoRoot\version.json"
 Set-Content -Path $versionJsonPath -Value ($versionJsonObj | ConvertTo-Json) -Encoding UTF8
-Write-Host "  version.json: v$semVer" -ForegroundColor Gray
+if ([string]::IsNullOrEmpty($existingNotes)) {
+    Write-Host "  version.json: v$semVer (releaseNotes empty — fill in before publishing)" -ForegroundColor DarkYellow
+} else {
+    Write-Host "  version.json: v$semVer (releaseNotes preserved)" -ForegroundColor Gray
+}
 
 # Create distribution ZIP for website download
 $distZipName = "OvertakeTelemetry-v$semVer.zip"
