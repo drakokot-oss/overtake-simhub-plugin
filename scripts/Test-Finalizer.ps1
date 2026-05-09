@@ -579,6 +579,162 @@ function Test-MultiTrackGuard() {
 Write-Host "=== Test 16: defense-in-depth multi-track guard (v1.1.31) ===" -ForegroundColor Cyan
 [void](Test-MultiTrackGuard)
 
+# ---- Test 17: byte-boxing cast bug — "Specified cast is not valid" (v1.1.31 hotfix) ----
+# Reproduces the v1.1.30 regression: when a real player is in sess.Drivers with
+# GridPosition > 0 but is NOT classified by FC (e.g. FC row.Position=0 -> skipped
+# at the "row.Position <= 0 continue" guard), the fallback path at lines 1157-1194
+# adds them to resultsOut. The bug: `(object)dr.GridPosition` boxed the byte field
+# directly, and ComputeAwards / "Most Positions Gained" then did `(int)gridObj`
+# which throws InvalidCastException with the exact message "Specified cast is not
+# valid". The user-facing symptom: auto-export silently failed at race end and
+# manual Export showed the error. Fix: explicit (int) cast at the writer + defensive
+# Convert.ToInt32 at the readers.
+function Test-ByteBoxingCastBug() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Online Race @ Monaco
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 5
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # Participants: 2 active humans, Hamilton (ci=0) + Verstappen (ci=1)
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    # ci=0 Hamilton
+    $pp[1] = 0           # AiControlled=false
+    $pp[4] = 0           # TeamId=Mercedes
+    $pp[6] = 44          # RaceNumber
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+    $pp[41] = 1; $pp[44] = 1   # ShowOnlineNames=on, Platform=Steam
+    # ci=1 Verstappen
+    $pp[58] = 0          # AiControlled=false
+    $pp[61] = 2          # TeamId=Red Bull
+    $pp[63] = 1          # RaceNumber
+    $n1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($n1, 0, $pp, 65, $n1.Length)
+    $pp[98] = 1; $pp[101] = 1
+    for ($c = 2; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp[$st + 3] = 255; $pp[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # LapData: both drivers on grid (GridPosition > 0). Hamilton on lap 1; Verstappen
+    # also lap 1 then will DNF (no further laps recorded) — but his GridPosition byte
+    # is set, which is exactly what later trips the cast bug.
+    $ld1 = New-Object byte[] (22 * 57)
+    $ld1[33] = 1; $ld1[33 + 57] = 1            # currentLapNum
+    $ld1[43] = 1; $ld1[43 + 57] = 2            # gridPosition (BYTE)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld1))))
+
+    # Hamilton completes a couple of laps so he gets bestLap > 0 and Finished status
+    $ld2 = New-Object byte[] (22 * 57)
+    $ld2[33] = 2
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($ld2, 0)
+    [System.BitConverter]::GetBytes([uint16]28000).CopyTo($ld2, 8)
+    [System.BitConverter]::GetBytes([uint16]27000).CopyTo($ld2, 11)
+    $ld2[43] = 1   # preserve grid
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
+
+    # FC packet: ci=0 (Hamilton) Position=1, NumLaps=5, BestLap=83000ms.
+    # ci=1 (Verstappen) Position=0 — the `row.Position <= 0` guard at the FC main
+    # loop SKIPS this row, so Verstappen never enters resultsOut from there. He IS,
+    # however, still in sess.Drivers (ParticipantsData created the bucket with
+    # GridPosition=2 set via LapData). The fallback path at lines 1157-1194 picks
+    # him up, and that's exactly where the byte-boxing happened.
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    # ci=0 Hamilton (offset 1)
+    $fc[1] = 1            # Position=1
+    $fc[2] = 5            # NumLaps=5
+    $fc[3] = 1            # GridPosition (FC row, byte) — explicit (int) at writer, safe
+    $fc[5] = 0            # NumPitStops
+    $fc[6] = 3            # ResultStatus=Finished
+    [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)   # BestLapTimeMs
+    # ci=1 Verstappen (offset 47): Position=0 -> skipped by FC main loop
+    $offV = 1 + 46
+    $fc[$offV + 0] = 0    # Position=0 (key trigger)
+    $fc[$offV + 1] = 0    # NumLaps=0
+    $fc[$offV + 2] = 2    # GridPosition (irrelevant, row skipped)
+    $fc[$offV + 6] = 4    # ResultStatus=DidNotFinish
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    # Sanity: Verstappen must be in sess.Drivers with GridPosition > 0 BEFORE Finalize
+    $sessDict = Get-Field $st0 "Sessions"
+    $verPreFinalize = $false
+    $verGrid = 0
+    foreach ($k in $sessDict.Keys) {
+        $sess = $sessDict[$k]
+        $drvs = Get-Field $sess "Drivers"
+        if ($drvs.ContainsKey("Verstappen")) {
+            $verPreFinalize = $true
+            $verGrid = (Get-Field $drvs["Verstappen"] "GridPosition")
+        }
+    }
+    Assert "v1.1.31 hotfix: pre-Finalize sess.Drivers contains Verstappen (DNF candidate)" $verPreFinalize
+    Assert "v1.1.31 hotfix: Verstappen GridPosition is byte > 0 (cast bug trigger)" ($verGrid -gt 0)
+
+    # The crucial assertion: Finalize MUST NOT throw. Without the fix, this call
+    # throws TargetInvocationException -> InvalidCastException("Specified cast is
+    # not valid.") originating at LeagueFinalizer.ComputeAwards / Most Positions
+    # Gained when (int)gridObj unboxes a Byte.
+    $finalizeThrew = $false
+    $finalizeErr = $null
+    $res = $null
+    try {
+        $res = $finalizeMethod.Invoke($null, @($st0))
+    } catch {
+        $finalizeThrew = $true
+        $finalizeErr = $_
+        # Also unwrap to surface the real cause for diagnostic clarity
+        $inner = $_.Exception
+        while ($inner.InnerException -ne $null) { $inner = $inner.InnerException }
+        Write-Host ("    -> Finalize threw: {0}: {1}" -f $inner.GetType().FullName, $inner.Message) -ForegroundColor Yellow
+    }
+    Assert "v1.1.31 hotfix: Finalize completes without throwing InvalidCastException" (-not $finalizeThrew)
+    if ($finalizeThrew) { return }
+
+    # And the Verstappen fallback row must be present (preserved as DNF), proving
+    # the fallback path actually ran and the byte-boxing site was exercised.
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.31 hotfix: Finalize produced 1 session" ($sessions.Count -eq 1)
+    if ($sessions.Count -lt 1) { return }
+    $rs = Get-DictValue $sessions[0] "results"
+    Assert "v1.1.31 hotfix: results array exists" ($rs -ne $null)
+    if ($rs -eq $null) { return }
+
+    $verRow = $null
+    $hamRow = $null
+    foreach ($r in $rs) {
+        $tg = Get-DictValue $r "tag"
+        if ($tg -eq "Verstappen") { $verRow = $r }
+        if ($tg -eq "Hamilton")   { $hamRow = $r }
+    }
+    Assert "v1.1.31 hotfix: Hamilton classified by FC main loop"  ($hamRow -ne $null)
+    Assert "v1.1.31 hotfix: Verstappen preserved by fallback path (real player, was DNF)" ($verRow -ne $null)
+
+    # And his grid must now be a *plain Int32* boxed, not Byte — directly verifying
+    # the fix at LeagueFinalizer line 1183.
+    if ($verRow -ne $null) {
+        $verGridObj = Get-DictValue $verRow "grid"
+        Assert "v1.1.31 hotfix: Verstappen grid stored as Int32 (not Byte)" `
+            ($verGridObj -ne $null -and $verGridObj.GetType() -eq [int])
+    }
+
+    # Awards must compute "mostPositionsGained" without crashing (was the throw site).
+    $awards = Get-DictValue $sessions[0] "awards"
+    Assert "v1.1.31 hotfix: awards object computed" ($awards -ne $null)
+    if ($awards -ne $null) {
+        Assert "v1.1.31 hotfix: mostPositionsGained key present" ($awards.ContainsKey("mostPositionsGained"))
+    }
+}
+
+Write-Host "=== Test 17: byte-boxing cast bug regression (v1.1.31 hotfix) ===" -ForegroundColor Cyan
+[void](Test-ByteBoxingCastBug)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

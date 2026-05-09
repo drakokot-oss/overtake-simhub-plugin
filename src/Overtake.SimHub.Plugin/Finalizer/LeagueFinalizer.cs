@@ -1180,7 +1180,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
                         { "raceNumber", rnFall },
                         { "teamId", teamInfo != null ? (object)(int)teamInfo.TeamId : null },
                         { "teamName", teamName },
-                        { "grid", dr.GridPosition > 0 ? (object)dr.GridPosition : null },
+                        // CRITICAL: explicit (int) cast — dr.GridPosition is a byte
+                        // and boxing it directly as object yields a Byte, which then
+                        // cannot be unboxed via (int)gridObj downstream and throws
+                        // InvalidCastException in ComputeAwards. Was the source of
+                        // "Specified cast is not valid" reported in v1.1.30.
+                        { "grid", dr.GridPosition > 0 ? (object)(int)dr.GridPosition : null },
                         { "numLaps", EffectiveLapCount(dr) },
                         { "bestLapTimeMs", bestMs > 0 ? (object)bestMs : null },
                         { "bestLapTime", bestMs > 0 ? MsToStr(bestMs) : "" },
@@ -2100,8 +2105,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 object gridObj, posObj, statusObj;
                 if (!r.TryGetValue("grid", out gridObj) || gridObj == null) continue;
                 if (!r.TryGetValue("position", out posObj) || posObj == null) continue;
-                int grid = (int)gridObj;
-                int pos = (int)posObj;
+                // Use Convert.ToInt32 instead of (int)cast: callers may have boxed
+                // these as Byte/UInt16/etc. (see grid byte boxing fix at the FC
+                // fallback path). Convert.ToInt32 accepts any IConvertible and
+                // never throws InvalidCastException here.
+                int grid, pos;
+                try { grid = Convert.ToInt32(gridObj); pos = Convert.ToInt32(posObj); }
+                catch { continue; }
                 if (grid <= 0 || pos <= 0) continue;
                 int gained = grid - pos;
                 r.TryGetValue("status", out statusObj);
@@ -2155,7 +2165,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 bool classifiedLapped = r.TryGetValue("classifiedLapped", out clObj) && clObj is bool && (bool)clObj;
                 string s = statusObj != null ? statusObj.ToString() : "";
                 if ((s == "Finished" || s == "FinishedOrUnknown" || classifiedLapped) && posObj != null)
-                    finishedPositions.Add((int)posObj);
+                {
+                    try { finishedPositions.Add(Convert.ToInt32(posObj)); }
+                    catch { /* ignore non-numeric entries */ }
+                }
             }
             finishedPositions.Sort();
             int cutoff = finishedPositions.Count > 0 ? finishedPositions[finishedPositions.Count / 2] : 999;
@@ -2167,7 +2180,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 r.TryGetValue("tag", out tagObj);
                 r.TryGetValue("position", out posObj);
                 if (tagObj != null && posObj != null)
-                    posByTag[tagObj.ToString()] = (int)posObj;
+                {
+                    try { posByTag[tagObj.ToString()] = Convert.ToInt32(posObj); }
+                    catch { /* ignore non-numeric entries */ }
+                }
             }
 
             Dictionary<string, object> best = null;
