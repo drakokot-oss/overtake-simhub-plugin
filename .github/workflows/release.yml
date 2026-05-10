@@ -280,14 +280,31 @@ jobs:
           $crprojTmp = Join-Path $binDir "_confuser.crproj"
           Set-Content -Path $crprojTmp -Value $crprojContent -Encoding UTF8
 
-          # ConfuserEx CLI prompts "Press any key to continue..." at the end which
-          # blows up under non-interactive PowerShell ("Cannot read keys when ...
-          # console input has been redirected"). Pipe NUL to stdin to satisfy the
-          # ReadKey without leaving a dangling prompt.
-          $cmd = "& '$($cli.FullName)' '$crprojTmp' < NUL 2>&1"
-          $output = cmd /c $cmd
-          $confuserExit = $LASTEXITCODE
-          $output | ForEach-Object { Write-Host "  $_" }
+          # ConfuserEx CLI prompts "Press any key to continue..." at the end
+          # which blows up under non-interactive PowerShell ("Cannot read keys
+          # when ... console input has been redirected from a file. Try
+          # Console.Read."). Use Start-Process with RedirectStandardInput
+          # pointing at an empty file so ReadKey gets EOF instead of throwing,
+          # and capture stdout/stderr to log files we then echo to the runner.
+          $stdin  = Join-Path $env:RUNNER_TEMP '_confuser_stdin.txt'
+          $stdout = Join-Path $env:RUNNER_TEMP '_confuser_stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP '_confuser_stderr.log'
+          Set-Content -Path $stdin -Value '' -NoNewline -Encoding ASCII
+          $proc = Start-Process -FilePath $cli.FullName `
+            -ArgumentList @("`"$crprojTmp`"") `
+            -RedirectStandardInput $stdin `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -Wait -NoNewWindow -PassThru
+          $confuserExit = $proc.ExitCode
+          if (Test-Path $stdout) {
+            Get-Content $stdout | ForEach-Object { Write-Host "  $_" }
+          }
+          if ((Test-Path $stderr) -and ((Get-Item $stderr).Length -gt 0)) {
+            Write-Host "--- ConfuserEx stderr ---"
+            Get-Content $stderr | ForEach-Object { Write-Host "  $_" }
+          }
+          Remove-Item $stdin, $stdout, $stderr -Force -ErrorAction SilentlyContinue
 
           # Always clean up staged refs, even if Confuser fails — we don't want
           # them to slip into the installer payload on a partial run.
