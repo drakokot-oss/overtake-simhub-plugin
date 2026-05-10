@@ -246,6 +246,32 @@ jobs:
           $confuserOut = Join-Path $binDir "Confused"
           if (Test-Path $confuserOut) { Remove-Item $confuserOut -Recurse -Force }
 
+          # ConfuserEx (via dnlib) walks the input DLL's references and resolves
+          # each one. Our SimHub references all have <Private>False</Private> so
+          # they are NOT copied into bin\Release at build time (we don't want to
+          # ship them in the installer). For obfuscation we temporarily stage
+          # them next to our DLL so dnlib can resolve the type graph; then we
+          # remove them again before the installer step picks files up.
+          $simHubDir = $env:SIMHUB_INSTALL_PATH
+          $stagedRefs = @(
+            'SimHub.Plugins.dll','GameReaderCommon.dll','SimHub.Logging.dll',
+            'log4net.dll','MahApps.Metro.dll','MahApps.Metro.IconPacks.Material.dll',
+            'MahApps.Metro.IconPacks.Core.dll','WoteverCommon.dll'
+          )
+          $stagedPaths = @()
+          foreach ($r in $stagedRefs) {
+            $src = Join-Path $simHubDir $r
+            if (Test-Path $src) {
+              $dst = Join-Path $binDir $r
+              if (-not (Test-Path $dst)) {
+                Copy-Item $src $dst -Force
+                $stagedPaths += $dst
+              }
+            }
+          }
+          Write-Host "Staged $($stagedPaths.Count) reference DLL(s) for obfuscation:"
+          foreach ($p in $stagedPaths) { Write-Host "  $p" }
+
           $crprojRaw = Get-Content "confuser.crproj" -Raw
           $crprojContent = $crprojRaw `
             -replace '\{outputDir\}', $confuserOut `
@@ -254,8 +280,25 @@ jobs:
           $crprojTmp = Join-Path $binDir "_confuser.crproj"
           Set-Content -Path $crprojTmp -Value $crprojContent -Encoding UTF8
 
-          & $cli.FullName $crprojTmp 2>&1 | ForEach-Object { Write-Host "  $_" }
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ConfuserEx failed"; exit 1 }
+          # ConfuserEx CLI prompts "Press any key to continue..." at the end which
+          # blows up under non-interactive PowerShell ("Cannot read keys when ...
+          # console input has been redirected"). Pipe NUL to stdin to satisfy the
+          # ReadKey without leaving a dangling prompt.
+          $cmd = "& '$($cli.FullName)' '$crprojTmp' < NUL 2>&1"
+          $output = cmd /c $cmd
+          $confuserExit = $LASTEXITCODE
+          $output | ForEach-Object { Write-Host "  $_" }
+
+          # Always clean up staged refs, even if Confuser fails — we don't want
+          # them to slip into the installer payload on a partial run.
+          foreach ($p in $stagedPaths) {
+            if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+          }
+
+          if ($confuserExit -ne 0) {
+            Write-Host "::error::ConfuserEx failed (exit $confuserExit)"
+            exit 1
+          }
           $obfuscated = Join-Path $confuserOut $dllName
           if (-not (Test-Path $obfuscated)) {
             Write-Host "::error::ConfuserEx ran but produced no output DLL"
