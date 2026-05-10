@@ -43,12 +43,12 @@ Write-Host ""
 # Step 1: Build
 Write-Host "[1/4] Building Release..." -ForegroundColor Yellow
 
-# Resolve MSBuild — preferred sources, in order:
+# Resolve MSBuild - preferred sources, in order:
 #   1. The first msbuild.exe on PATH (works on GitHub Actions windows runners
 #      after `microsoft/setup-msbuild@v2` and on dev boxes that loaded a VS dev
 #      shell).
 #   2. vswhere.exe (any installed Visual Studio with the MSBuild component).
-#   3. The legacy .NET Framework 4.0 MSBuild on Windows folder (last resort —
+#   3. The legacy .NET Framework 4.0 MSBuild on Windows folder (last resort -
 #      cannot build modern .NET Framework projects with WPF / xaml without
 #      Microsoft.Build.Tasks.Core which only ships with VS).
 function Resolve-MSBuild {
@@ -79,7 +79,7 @@ Write-Host "  MSBuild: $msbuild" -ForegroundColor DarkGray
 $msbuildArgs = @(
     $projFile,
     '/p:Configuration=Release',
-    '/p:PostBuildEvent=',     # PostBuild XCOPY targets SimHub install — skip in scripted runs
+    '/p:PostBuildEvent=',     # PostBuild XCOPY targets SimHub install - skip in scripted runs
     '/verbosity:minimal',
     '/nologo'
 )
@@ -91,7 +91,7 @@ $buildOutput = & $msbuild @msbuildArgs 2>&1
 $buildExitCode = $LASTEXITCODE
 
 # The PostBuildEvent copies to SimHub folder, which fails on machines without SimHub.
-# We only care if the DLL was produced — filter out PostBuild XCOPY errors (MSB3073).
+# We only care if the DLL was produced - filter out PostBuild XCOPY errors (MSB3073).
 $realErrors = $buildOutput | Select-String ": error " | Where-Object { $_ -notmatch "MSB3073" }
 if ($realErrors.Count -gt 0) {
     Write-Host "BUILD FAILED:" -ForegroundColor Red
@@ -301,7 +301,7 @@ if (-not (Test-Path $batPath)) {
 }
 
 # Refresh version.json for the update checker. Preserve manually-curated
-# releaseNotes when the existing version.json already targets this version —
+# releaseNotes when the existing version.json already targets this version -
 # we never want to clobber the human-written changelog summary by accident.
 $semVer = $version -replace '\.0$', ''
 $installerName = if ($installerExe) { $installerExe.Name } else { "Overtake.SimHub.Plugin-v$semVer-Setup.exe" }
@@ -324,7 +324,7 @@ $versionJsonObj = [ordered]@{
 }
 Set-Content -Path $versionJsonPath -Value ($versionJsonObj | ConvertTo-Json) -Encoding UTF8
 if ([string]::IsNullOrEmpty($existingNotes)) {
-    Write-Host "  version.json: v$semVer (releaseNotes empty — fill in before publishing)" -ForegroundColor DarkYellow
+    Write-Host "  version.json: v$semVer (releaseNotes empty - fill in before publishing)" -ForegroundColor DarkYellow
 } else {
     Write-Host "  version.json: v$semVer (releaseNotes preserved)" -ForegroundColor Gray
 }

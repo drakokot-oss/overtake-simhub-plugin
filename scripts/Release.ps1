@@ -146,7 +146,7 @@ foreach ($artifact in @($dllPath, $versionJsonPath)) {
     }
 }
 
-# Find the installer .exe (newest in dist/ — avoid picking an old *Setup*.exe)
+# Find the installer .exe (newest in dist/ - avoid picking an old *Setup*.exe)
 $installerExe = Get-ChildItem "$repoRoot\dist" -Filter "*Setup*.exe" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1

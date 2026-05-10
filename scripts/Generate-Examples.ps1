@@ -432,7 +432,7 @@ function BuildFullJson($cfg) {
 }
 
 # ══════════════════════════════════════════
-# RACE 1: Monza — Dry, Clean, No SC
+# RACE 1: Monza - Dry, Clean, No SC
 # ══════════════════════════════════════════
 Write-Host "Generating Race 1: Monza (dry, clean)..." -ForegroundColor Cyan
 $rng = New-Object System.Random(101)
@@ -458,7 +458,7 @@ Set-Content -Path "$OutDir\Monza_20260215_200000_A1B2C3.json" -Value $monzaJson 
 Write-Host "  OK" -ForegroundColor Green
 
 # ══════════════════════════════════════════
-# RACE 2: Spa — Rain, Full SC + VSC, Wing Damage
+# RACE 2: Spa - Rain, Full SC + VSC, Wing Damage
 # ══════════════════════════════════════════
 Write-Host "Generating Race 2: Spa (rain, SC + VSC, wing damage)..." -ForegroundColor Cyan
 $rng = New-Object System.Random(202)
@@ -500,7 +500,7 @@ Set-Content -Path "$OutDir\Spa_20260216_150000_D4E5F6.json" -Value $spaJson -Enc
 Write-Host "  OK" -ForegroundColor Green
 
 # ══════════════════════════════════════════
-# RACE 3: Monaco — Dry→Rain, Red Flag, Chaos
+# RACE 3: Monaco - Dry->Rain, Red Flag, Chaos
 # ══════════════════════════════════════════
 Write-Host "Generating Race 3: Monaco (dry to rain, red flag, chaos)..." -ForegroundColor Cyan
 $rng = New-Object System.Random(303)
@@ -545,7 +545,7 @@ Set-Content -Path "$OutDir\Monaco_20260217_180000_G7H8I9.json" -Value $monacoJso
 Write-Host "  OK" -ForegroundColor Green
 
 # ══════════════════════════════════════════
-# RACE 4: Jeddah — Night, Multiple VSC, DT + Stop-Go
+# RACE 4: Jeddah - Night, Multiple VSC, DT + Stop-Go
 # ══════════════════════════════════════════
 Write-Host "Generating Race 4: Jeddah (night, VSCs, DT + stop-go penalties)..." -ForegroundColor Cyan
 $rng = New-Object System.Random(404)

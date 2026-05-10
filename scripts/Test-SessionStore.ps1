@@ -105,7 +105,7 @@ Assert "WeatherTimeline has entry" ((Get-Field $sess "WeatherTimeline").Count -g
 Write-Host "=== Test 3: Ingest Participants ===" -ForegroundColor Cyan
 $partPayload = New-Object byte[] 1256
 for ($zi = 0; $zi -lt $partPayload.Length; $zi++) { $partPayload[$zi] = 0 }
-# (avoid junk teamId in slots 2..21 — TeamByCarIdx + ResolveNames would add extra TagsByCarIdx entries)
+# (avoid junk teamId in slots 2..21 - TeamByCarIdx + ResolveNames would add extra TagsByCarIdx entries)
 $partPayload[0] = 2
 # ParticipantsData.Parse: human + ShowOnlineNames=0 => placeholder Driver_i (game parity).
 # Use human + ShowOnlineNames=1 and Platform!=255 so tags stay Hamilton/Verstappen and bestKnownTags stay reliable.

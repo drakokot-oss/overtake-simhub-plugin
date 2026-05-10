@@ -24,8 +24,17 @@ function Get-DictValue($dict, $key) {
     if ($dict -eq $null) { return $null }
     $out = $null
     $found = $dict.TryGetValue($key, [ref]$out)
-    if ($found) { return $out }
-    return $null
+    if (-not $found) { return $null }
+    # PowerShell function returns auto-enumerate IEnumerable. For collections
+    # (List<object>, arrays, etc.) this unrolls a 1-item list into the single
+    # contained item, so callers see a Dictionary instead of a List of 1, and
+    # `.Count` then returns the dict's key count. Wrapping with the unary
+    # comma operator forces a 1-element array around the value, preventing
+    # the pipeline from unrolling. We only do this for IList because Dictionary
+    # does not implement it and scalars must remain scalars (so `-eq` keeps
+    # its usual semantics).
+    if ($out -is [System.Collections.IList]) { return ,$out }
+    return $out
 }
 
 $storeType = $asm.GetType("Overtake.SimHub.Plugin.Store.SessionStore")
@@ -475,7 +484,7 @@ function Test-AutoRotateOnTrackChange() {
     Assert "v1.1.31: AutoRotate not yet requested" `
         (-not [bool]$storeType.GetProperty("AutoRotateRequested").GetValue($st0))
 
-    # --- Monaco Quali first packet (track 5) — must trigger auto-rotate ---
+    # --- Monaco Quali first packet (track 5) - must trigger auto-rotate ---
     $spM = New-Object byte[] 700
     $spM[0] = 1; $spM[6] = 8; $spM[7] = 5   # sessionType=8 (ShortQualifying), trackId=5 (Monaco)
     $spM[124] = 0; $spM[125] = 1
@@ -486,7 +495,7 @@ function Test-AutoRotateOnTrackChange() {
 
     # The Baku store should still hold ONE session (Baku); Monaco's first packet was rejected
     $sessDict = Get-Field $st0 "Sessions"
-    Assert "v1.1.31: Monaco packet rejected — store still has 1 session (Baku)" `
+    Assert "v1.1.31: Monaco packet rejected - store still has 1 session (Baku)" `
         ($sessDict.Count -eq 1)
     foreach ($k in $sessDict.Keys) {
         $tid = Get-Field $sessDict[$k] "TrackId"
@@ -494,7 +503,7 @@ function Test-AutoRotateOnTrackChange() {
     }
 
     # Subsequent Monaco packets (Participants, LapData) sent BEFORE OvertakePlugin handles
-    # the rotation must also be dropped — otherwise they'd corrupt the old (Baku) store.
+    # the rotation must also be dropped - otherwise they'd corrupt the old (Baku) store.
     $ppM = New-Object byte[] 1256
     for ($zi = 0; $zi -lt $ppM.Length; $zi++) { $ppM[$zi] = 0 }
     $ppM[0] = 1; $ppM[1] = 0; $ppM[3] = 2; $ppM[5] = 44; $ppM[40] = 1; $ppM[41] = 1
@@ -507,7 +516,7 @@ function Test-AutoRotateOnTrackChange() {
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ldM -sessionUid ([uint64]9000)))))
 
     $sessDict = Get-Field $st0 "Sessions"
-    Assert "v1.1.31: Subsequent Monaco packets also dropped — still 1 session" `
+    Assert "v1.1.31: Subsequent Monaco packets also dropped - still 1 session" `
         ($sessDict.Count -eq 1)
     foreach ($k in $sessDict.Keys) {
         $sess = $sessDict[$k]
@@ -579,7 +588,7 @@ function Test-MultiTrackGuard() {
 Write-Host "=== Test 16: defense-in-depth multi-track guard (v1.1.31) ===" -ForegroundColor Cyan
 [void](Test-MultiTrackGuard)
 
-# ---- Test 17: byte-boxing cast bug — "Specified cast is not valid" (v1.1.31 hotfix) ----
+# ---- Test 17: byte-boxing cast bug - "Specified cast is not valid" (v1.1.31 hotfix) ----
 # Reproduces the v1.1.30 regression: when a real player is in sess.Drivers with
 # GridPosition > 0 but is NOT classified by FC (e.g. FC row.Position=0 -> skipped
 # at the "row.Position <= 0 continue" guard), the fallback path at lines 1157-1194
@@ -623,7 +632,7 @@ function Test-ByteBoxingCastBug() {
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
 
     # LapData: both drivers on grid (GridPosition > 0). Hamilton on lap 1; Verstappen
-    # also lap 1 then will DNF (no further laps recorded) — but his GridPosition byte
+    # also lap 1 then will DNF (no further laps recorded) - but his GridPosition byte
     # is set, which is exactly what later trips the cast bug.
     $ld1 = New-Object byte[] (22 * 57)
     $ld1[33] = 1; $ld1[33 + 57] = 1            # currentLapNum
@@ -640,7 +649,7 @@ function Test-ByteBoxingCastBug() {
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
 
     # FC packet: ci=0 (Hamilton) Position=1, NumLaps=5, BestLap=83000ms.
-    # ci=1 (Verstappen) Position=0 — the `row.Position <= 0` guard at the FC main
+    # ci=1 (Verstappen) Position=0 - the `row.Position <= 0` guard at the FC main
     # loop SKIPS this row, so Verstappen never enters resultsOut from there. He IS,
     # however, still in sess.Drivers (ParticipantsData created the bucket with
     # GridPosition=2 set via LapData). The fallback path at lines 1157-1194 picks
@@ -650,7 +659,7 @@ function Test-ByteBoxingCastBug() {
     # ci=0 Hamilton (offset 1)
     $fc[1] = 1            # Position=1
     $fc[2] = 5            # NumLaps=5
-    $fc[3] = 1            # GridPosition (FC row, byte) — explicit (int) at writer, safe
+    $fc[3] = 1            # GridPosition (FC row, byte) - explicit (int) at writer, safe
     $fc[5] = 0            # NumPitStops
     $fc[6] = 3            # ResultStatus=Finished
     [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)   # BestLapTimeMs
@@ -716,7 +725,7 @@ function Test-ByteBoxingCastBug() {
     Assert "v1.1.31 hotfix: Hamilton classified by FC main loop"  ($hamRow -ne $null)
     Assert "v1.1.31 hotfix: Verstappen preserved by fallback path (real player, was DNF)" ($verRow -ne $null)
 
-    # And his grid must now be a *plain Int32* boxed, not Byte — directly verifying
+    # And his grid must now be a *plain Int32* boxed, not Byte - directly verifying
     # the fix at LeagueFinalizer line 1183.
     if ($verRow -ne $null) {
         $verGridObj = Get-DictValue $verRow "grid"

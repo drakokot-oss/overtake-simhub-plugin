@@ -80,13 +80,23 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 return false;
 
             int latestTrackId = -1;
-            long latestTs = 0;
+            long latestTs = -1;
             var trackIds = new HashSet<int>();
+            // We use `>=` (not `>`) so that ties on LastPacketMs are broken by
+            // iteration order. Dictionary<,> iterates in insertion order, so the
+            // later-inserted session wins on tie. This matters in two cases:
+            //   (a) tests where two Session packets are ingested back-to-back
+            //       within the same millisecond (Windows timer is ~15ms by default).
+            //   (b) production captures where the new event's first packet shares
+            //       a ms with the previous event's last packet.
+            // Initial latestTs = -1 (not 0) so any session with LastPacketMs == 0
+            // (no packets ever ingested into it past creation) still becomes a
+            // candidate winner instead of being silently skipped.
             foreach (var sess in store.Sessions.Values)
             {
                 if (sess == null || !sess.TrackId.HasValue) continue;
                 trackIds.Add(sess.TrackId.Value);
-                if (sess.LastPacketMs > latestTs)
+                if (sess.LastPacketMs >= latestTs)
                 {
                     latestTs = sess.LastPacketMs;
                     latestTrackId = sess.TrackId.Value;
