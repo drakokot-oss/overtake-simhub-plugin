@@ -1,0 +1,376 @@
+# Release pipeline. Triggered by pushing a tag matching v*.*.* — for example
+# `git tag v1.1.31 && git push origin v1.1.31`.
+#
+# Pipeline:
+#   1. Verify the tag matches the version baked into AssemblyInfo.cs and
+#      version.json (refuse to release if they disagree — common foot-gun).
+#   2. Build the plugin (Release).
+#   3. Run all unit tests (last line of defense — the same tests CI ran on the PR).
+#   4. Obfuscate the DLL with ConfuserEx (downloaded and cached).
+#   5. Compile the Inno Setup installer EXE (Inno Setup 6 installed via choco).
+#   6. Create a GitHub Release with the installer EXE attached and the
+#      release notes pulled from the matching CHANGELOG.md section.
+#
+# What you do as a maintainer (Mac):
+#   - Bump AssemblyInfo.cs / CHANGELOG.md / version.json on a feature branch
+#   - Open a PR, wait for CI green, merge to main
+#   - From main: git tag vX.Y.Z && git push origin vX.Y.Z
+#   - This workflow does the rest.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (must already exist on origin, e.g. v1.1.31)'
+        required: true
+        type: string
+
+env:
+  # The SimHub release ZIP wraps a single SimHubSetup_X.Y.Z.exe (Inno Setup
+  # installer), not a portable layout. We extract, then run silent into
+  # SIMHUB_INSTALL_DIR. Same strategy as ci.yml — keep them in lockstep.
+  SIMHUB_VERSION: "9.11.12"
+  SIMHUB_ZIP_URL: "https://github.com/SHWotever/SimHub/releases/download/9.11.12/SimHub.9.11.12.zip"
+  SIMHUB_INSTALL_DIR: "C:\\SimHubInstall"
+  CONFUSEREX_VERSION: "1.6.0"
+  CONFUSEREX_ZIP_URL: "https://github.com/mkaring/ConfuserEx/releases/download/v1.6.0/ConfuserEx-CLI.zip"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    permissions:
+      contents: write   # required to create the GitHub Release and upload assets
+
+    steps:
+      - name: Resolve target ref
+        id: resolve-ref
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $tag = '${{ github.event.inputs.tag }}'
+          } else {
+            $tag = $env:GITHUB_REF -replace '^refs/tags/',''
+          }
+          if (-not $tag.StartsWith('v')) {
+            Write-Host "::error::Tag must start with 'v' (got: $tag)"
+            exit 1
+          }
+          $version = $tag.Substring(1)
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            Write-Host "::error::Tag must be in vX.Y.Z form (got: $tag)"
+            exit 1
+          }
+          "TAG_NAME=$tag"     | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Releasing tag=$tag version=$version"
+
+      - name: Checkout repo at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+          fetch-depth: 1
+
+      - name: Verify version consistency (AssemblyInfo / version.json / tag)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = $env:RELEASE_VERSION
+
+          $asmRaw = Get-Content "src\Overtake.SimHub.Plugin\Properties\AssemblyInfo.cs" -Raw
+          if ($asmRaw -notmatch 'AssemblyVersion\("(\d+\.\d+\.\d+)') {
+            Write-Host "::error::Could not parse AssemblyVersion from AssemblyInfo.cs"
+            exit 1
+          }
+          $asmVer = $Matches[1]
+          if ($asmVer -ne $expected) {
+            Write-Host "::error::AssemblyInfo.cs says $asmVer but tag is $expected. Bump AssemblyInfo before tagging."
+            exit 1
+          }
+
+          $vjson = Get-Content "version.json" -Raw | ConvertFrom-Json
+          if ($vjson.version -ne $expected) {
+            Write-Host "::error::version.json says $($vjson.version) but tag is $expected. Bump version.json before tagging."
+            exit 1
+          }
+
+          $changelog = Get-Content "CHANGELOG.md" -Raw
+          if ($changelog -notmatch "(?ms)## \[$([regex]::Escape($expected))\]") {
+            Write-Host "::error::CHANGELOG.md has no '## [$expected]' section. Add release notes before tagging."
+            exit 1
+          }
+          Write-Host "Version consistency OK: $expected"
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore SimHub install (cache)
+        id: simhub-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SIMHUB_INSTALL_DIR }}
+          key: simhub-install-${{ env.SIMHUB_VERSION }}-v2
+
+      - name: Download and silent-install SimHub (if cache miss)
+        if: steps.simhub-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'SimHub.zip'
+          Write-Host "Downloading $env:SIMHUB_ZIP_URL"
+          Invoke-WebRequest -Uri $env:SIMHUB_ZIP_URL -OutFile $zip -UseBasicParsing
+
+          $extractDir = Join-Path $env:RUNNER_TEMP 'SimHubExtract'
+          if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $extractDir -Force
+          Remove-Item $zip -Force
+
+          $setup = Get-ChildItem $extractDir -Recurse -Filter 'SimHubSetup_*.exe' | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::SimHubSetup_*.exe not found in archive."
+            Get-ChildItem $extractDir -Recurse | Select-Object -First 50 FullName | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Force -Path $env:SIMHUB_INSTALL_DIR | Out-Null
+          $logPath = Join-Path $env:RUNNER_TEMP 'simhub-install.log'
+          $installArgs = @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=$env:SIMHUB_INSTALL_DIR",
+            "/LOG=$logPath"
+          )
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -NoNewWindow -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "::error::SimHub installer exited with code $($proc.ExitCode)"
+            if (Test-Path $logPath) {
+              Get-Content $logPath -Tail 80 | ForEach-Object { Write-Host "  $_" }
+            }
+            exit 1
+          }
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            Write-Host "::error::Installer succeeded but SimHub.Plugins.dll not found under $env:SIMHUB_INSTALL_DIR"
+            exit 1
+          }
+          Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Resolve SIMHUB_INSTALL_PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) { Write-Host "::error::SimHub.Plugins.dll missing"; exit 1 }
+          $simHubDir = $found.Directory.FullName
+          if (-not $simHubDir.EndsWith('\')) { $simHubDir = $simHubDir + '\' }
+          "SIMHUB_INSTALL_PATH=$simHubDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "SIMHUB_INSTALL_PATH=$simHubDir"
+
+      - name: Build (Release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          msbuild "src\Overtake.SimHub.Plugin\Overtake.SimHub.Plugin.csproj" /p:Configuration=Release /p:SimHubInstallPath="$env:SIMHUB_INSTALL_PATH" /p:PostBuildEvent= /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
+          $version = (Get-Item $dll).VersionInfo.FileVersion
+          if ($version -notlike "$env:RELEASE_VERSION*") {
+            Write-Host "::error::Built DLL version $version doesn't match tag $env:RELEASE_VERSION"
+            exit 1
+          }
+          Write-Host "Built DLL v$version"
+
+      - name: Run SessionStore tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = & powershell -ExecutionPolicy Bypass -File "scripts\Test-SessionStore.ps1" -DllPath "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          $summary = $output | Select-String -Pattern 'PASS:\s*\d+\s+FAIL:\s*(\d+)' | Select-Object -Last 1
+          if (-not $summary -or [int]$summary.Matches[0].Groups[1].Value -gt 0) {
+            Write-Host "::error::SessionStore tests failed — refusing to release"
+            exit 1
+          }
+
+      - name: Run Finalizer tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = & powershell -ExecutionPolicy Bypass -File "scripts\Test-Finalizer.ps1" -DllPath "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          $summary = $output | Select-String -Pattern 'PASS:\s*\d+\s+FAIL:\s*(\d+)' | Select-Object -Last 1
+          if (-not $summary -or [int]$summary.Matches[0].Groups[1].Value -gt 0) {
+            Write-Host "::error::Finalizer tests failed — refusing to release"
+            exit 1
+          }
+
+      - name: Restore ConfuserEx (cache)
+        id: confuser-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\Tools\ConfuserEx
+          key: confuserex-cli-${{ env.CONFUSEREX_VERSION }}
+
+      - name: Download and extract ConfuserEx (if cache miss)
+        if: steps.confuser-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'ConfuserEx.zip'
+          Invoke-WebRequest -Uri $env:CONFUSEREX_ZIP_URL -OutFile $zip -UseBasicParsing
+          New-Item -ItemType Directory -Force -Path C:\Tools\ConfuserEx | Out-Null
+          Expand-Archive -Path $zip -DestinationPath C:\Tools\ConfuserEx -Force
+          Remove-Item $zip -Force
+          $cli = Get-ChildItem C:\Tools\ConfuserEx -Recurse -Filter 'Confuser.CLI.exe' | Select-Object -First 1
+          if (-not $cli) { Write-Host "::error::Confuser.CLI.exe missing"; exit 1 }
+          if ($cli.FullName -ne 'C:\Tools\ConfuserEx\Confuser.CLI.exe') {
+            Copy-Item $cli.Directory.FullName + '\*' 'C:\Tools\ConfuserEx\' -Force -Recurse
+          }
+
+      - name: Obfuscate DLL with ConfuserEx
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cli = Get-ChildItem C:\Tools\ConfuserEx -Recurse -Filter 'Confuser.CLI.exe' | Select-Object -First 1
+          if (-not $cli) { Write-Host "::error::Confuser.CLI.exe not found in cache"; exit 1 }
+
+          $binDir = "src\Overtake.SimHub.Plugin\bin\Release"
+          $dllName = "Overtake.SimHub.Plugin.dll"
+          $dllPath = Join-Path $binDir $dllName
+          $confuserOut = Join-Path $binDir "Confused"
+          if (Test-Path $confuserOut) { Remove-Item $confuserOut -Recurse -Force }
+
+          $crprojRaw = Get-Content "confuser.crproj" -Raw
+          $crprojContent = $crprojRaw `
+            -replace '\{outputDir\}', $confuserOut `
+            -replace '\{baseDir\}', (Resolve-Path $binDir).Path `
+            -replace '\{dllPath\}', $dllName
+          $crprojTmp = Join-Path $binDir "_confuser.crproj"
+          Set-Content -Path $crprojTmp -Value $crprojContent -Encoding UTF8
+
+          & $cli.FullName $crprojTmp 2>&1 | ForEach-Object { Write-Host "  $_" }
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ConfuserEx failed"; exit 1 }
+          $obfuscated = Join-Path $confuserOut $dllName
+          if (-not (Test-Path $obfuscated)) {
+            Write-Host "::error::ConfuserEx ran but produced no output DLL"
+            exit 1
+          }
+          Copy-Item $obfuscated $dllPath -Force
+          Remove-Item $crprojTmp -Force
+          Remove-Item $confuserOut -Recurse -Force
+          Write-Host "Obfuscated DLL applied: $((Get-Item $dllPath).Length) bytes"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup -y --no-progress
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe","C:\Program Files\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { Write-Host "::error::ISCC.exe not found after choco install"; exit 1 }
+          "ISCC_PATH=$($iscc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Prepare installer.iss for current version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $issDir = "dist\v$version"
+          $issPath = Join-Path $issDir "installer.iss"
+
+          if (-not (Test-Path $issPath)) {
+            # Generate from the latest existing installer.iss as template
+            $latest = Get-ChildItem dist -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^v(\d+)\.(\d+)\.(\d+)$' } |
+              Sort-Object @{Expression={[version]($_.Name -replace '^v','')}} -Descending | Select-Object -First 1
+            if (-not $latest) {
+              Write-Host "::error::No dist\v* template installer.iss found"
+              exit 1
+            }
+            $templateIss = Join-Path $latest.FullName "installer.iss"
+            New-Item -ItemType Directory -Force -Path $issDir | Out-Null
+            $issText = Get-Content $templateIss -Raw
+            $issText = $issText -replace '#define MyAppVersion ".*?"', "#define MyAppVersion `"$version`""
+            $issText = $issText -replace '; Version .*', "; Version $version"
+            Set-Content -Path $issPath -Value $issText -Encoding UTF8 -NoNewline
+            Write-Host "Generated $issPath from template $templateIss"
+          } else {
+            # Force the version on disk to match the tag, in case someone forgot to bump
+            $issText = Get-Content $issPath -Raw
+            $issText = $issText -replace '#define MyAppVersion ".*?"', "#define MyAppVersion `"$version`""
+            Set-Content -Path $issPath -Value $issText -Encoding UTF8 -NoNewline
+            Write-Host "Updated existing $issPath"
+          }
+
+          # The .iss expects the DLL at files\Overtake.SimHub.Plugin.dll alongside it
+          $filesDir = Join-Path $issDir "files"
+          New-Item -ItemType Directory -Force -Path $filesDir | Out-Null
+          Copy-Item "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll" (Join-Path $filesDir "Overtake.SimHub.Plugin.dll") -Force
+
+      - name: Compile Inno Setup installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $issPath = "dist\v$version\installer.iss"
+          & "$env:ISCC_PATH" $issPath
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ISCC failed"; exit 1 }
+          $installer = Get-ChildItem "dist\v$version" -Filter "*Setup*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { Write-Host "::error::Installer EXE not found after ISCC"; exit 1 }
+          $expectedName = "Overtake.SimHub.Plugin-v$version-Setup.exe"
+          if ($installer.Name -ne $expectedName) {
+            Write-Host "::warning::Installer named $($installer.Name), expected $expectedName"
+          }
+          "INSTALLER_PATH=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "INSTALLER_NAME=$($installer.Name)"     | Out-File -FilePath $env:GITHUB_ENV -Append
+          $sizeMB = [math]::Round($installer.Length/1MB, 2)
+          Write-Host "Installer ready: $($installer.Name) ($sizeMB MB)"
+
+      - name: Extract release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $changelog = Get-Content "CHANGELOG.md" -Raw
+          # Capture lines from the matching ## [version] header up to (but not
+          # including) the next ## header.
+          $pattern = "(?ms)^## \[$([regex]::Escape($version))\][^\r\n]*\r?\n(.*?)(?=^## \[)"
+          $match = [regex]::Match($changelog, $pattern)
+          if (-not $match.Success) {
+            Write-Host "::error::No CHANGELOG.md section found for version $version"
+            exit 1
+          }
+          $notes = $match.Groups[1].Value.Trim()
+          # Append a footer with installer download size for context.
+          $size = [math]::Round((Get-Item $env:INSTALLER_PATH).Length/1MB, 2)
+          $notes = $notes + "`r`n`r`n---`r`n`r`nInstaller: ``$env:INSTALLER_NAME`` ($size MB) — Windows x64 + SimHub 9.x"
+          $outPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          Set-Content -Path $outPath -Value $notes -Encoding UTF8
+          "RELEASE_NOTES_PATH=$outPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "--- Release notes preview ---"
+          $preview = $notes.Substring(0, [Math]::Min(500, $notes.Length))
+          Write-Host $preview
+          if ($notes.Length -gt 500) { Write-Host "...(truncated, full notes will be on the Release page)" }
+
+      - name: Create GitHub Release with installer attached
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: v${{ env.RELEASE_VERSION }}
+          body_path: ${{ env.RELEASE_NOTES_PATH }}
+          files: ${{ env.INSTALLER_PATH }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+
+      - name: Upload installer also as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.INSTALLER_NAME }}
+          path: ${{ env.INSTALLER_PATH }}
+          retention-days: 90
+          if-no-files-found: error

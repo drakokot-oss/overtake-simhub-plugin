@@ -24,8 +24,17 @@ function Get-DictValue($dict, $key) {
     if ($dict -eq $null) { return $null }
     $out = $null
     $found = $dict.TryGetValue($key, [ref]$out)
-    if ($found) { return $out }
-    return $null
+    if (-not $found) { return $null }
+    # PowerShell function returns auto-enumerate IEnumerable. For collections
+    # (List<object>, arrays, etc.) this unrolls a 1-item list into the single
+    # contained item, so callers see a Dictionary instead of a List of 1, and
+    # `.Count` then returns the dict's key count. Wrapping with the unary
+    # comma operator forces a 1-element array around the value, preventing
+    # the pipeline from unrolling. We only do this for IList because Dictionary
+    # does not implement it and scalars must remain scalars (so `-eq` keeps
+    # its usual semantics).
+    if ($out -is [System.Collections.IList]) { return ,$out }
+    return $out
 }
 
 $storeType = $asm.GetType("Overtake.SimHub.Plugin.Store.SessionStore")
@@ -437,6 +446,303 @@ function Test-LobbyKnownOverflow() {
 
 Write-Host "=== Test 14: lobby-known overflow players preserved (v1.1.30) ===" -ForegroundColor Cyan
 [void](Test-LobbyKnownOverflow)
+
+# ---- Test 15: auto-rotation guard on track change (v1.1.31) ----
+# Reproduces the Monaco_20260507 issue: a single capture received Baku weekend
+# (SS, OSQ, Race with FC) followed by Monaco (Quali, Race). Without rotation, both
+# tracks accumulate in the same store. With Camada 1, the moment a Session packet
+# announces a different trackId AND we already have a closed Race, the store sets
+# AutoRotateRequested=true and refuses to ingest the new track. Camada 5 catches
+# residual multi-track stores at Finalize and drops everything but the latest.
+function Test-AutoRotateOnTrackChange() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # --- Baku Race (track 20), with FC so it counts as a "closed terminal session" ---
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 16; $sp[7] = 20  # sessionType=16 (Race), trackId=20 (Baku)
+    $sp[124] = 0; $sp[125] = 1            # NetworkGame=1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp -sessionUid ([uint64]7000)))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0  # AI=false
+    $pp[5] = 99  # raceNumber
+    $pp[3] = 1   # teamId
+    $pp[40] = 1; $pp[41] = 1
+    $n = [System.Text.Encoding]::UTF8.GetBytes("BakuDriver")
+    [System.Array]::Copy($n, 0, $pp, 8, $n.Length)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp -sessionUid ([uint64]7000)))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 1
+    $fc[1] = 1; $fc[2] = 5; $fc[3] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc -sessionUid ([uint64]7000)))))
+
+    Assert "v1.1.31: HasClosedTerminalSession after Baku FC" `
+        ($storeType.GetMethod("HasClosedTerminalSession").Invoke($st0, $null))
+    Assert "v1.1.31: AutoRotate not yet requested" `
+        (-not [bool]$storeType.GetProperty("AutoRotateRequested").GetValue($st0))
+
+    # --- Monaco Quali first packet (track 5) - must trigger auto-rotate ---
+    $spM = New-Object byte[] 700
+    $spM[0] = 1; $spM[6] = 8; $spM[7] = 5   # sessionType=8 (ShortQualifying), trackId=5 (Monaco)
+    $spM[124] = 0; $spM[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $spM -sessionUid ([uint64]9000)))))
+
+    Assert "v1.1.31: AutoRotate REQUESTED after Monaco track change" `
+        ([bool]$storeType.GetProperty("AutoRotateRequested").GetValue($st0))
+
+    # The Baku store should still hold ONE session (Baku); Monaco's first packet was rejected
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: Monaco packet rejected - store still has 1 session (Baku)" `
+        ($sessDict.Count -eq 1)
+    foreach ($k in $sessDict.Keys) {
+        $tid = Get-Field $sessDict[$k] "TrackId"
+        Assert "v1.1.31: only Baku trackId=20 in store" ($tid -eq 20)
+    }
+
+    # Subsequent Monaco packets (Participants, LapData) sent BEFORE OvertakePlugin handles
+    # the rotation must also be dropped - otherwise they'd corrupt the old (Baku) store.
+    $ppM = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $ppM.Length; $zi++) { $ppM[$zi] = 0 }
+    $ppM[0] = 1; $ppM[1] = 0; $ppM[3] = 2; $ppM[5] = 44; $ppM[40] = 1; $ppM[41] = 1
+    $nm = [System.Text.Encoding]::UTF8.GetBytes("MonacoLeaker")
+    [System.Array]::Copy($nm, 0, $ppM, 8, $nm.Length)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $ppM -sessionUid ([uint64]9000)))))
+
+    $ldM = New-Object byte[] (22 * 57)
+    $ldM[33] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ldM -sessionUid ([uint64]9000)))))
+
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: Subsequent Monaco packets also dropped - still 1 session" `
+        ($sessDict.Count -eq 1)
+    foreach ($k in $sessDict.Keys) {
+        $sess = $sessDict[$k]
+        $drvs = Get-Field $sess "Drivers"
+        # Baku had 1 driver (BakuDriver). MonacoLeaker must NOT appear.
+        $hasLeaker = $drvs.ContainsKey("MonacoLeaker")
+        Assert "v1.1.31: MonacoLeaker NOT leaked into Baku store" (-not $hasLeaker)
+    }
+
+    # Simulate the OvertakePlugin reaction: clear request, BeginNewCapture, then ingest Monaco
+    $storeType.GetMethod("ClearAutoRotateRequest").Invoke($st0, $null)
+    $storeType.GetMethod("BeginNewCapture").Invoke($st0, $null)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $spM -sessionUid ([uint64]9000)))))
+
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: After rotate+ingest, store has fresh Monaco session" `
+        ($sessDict.Count -eq 1)
+    foreach ($k in $sessDict.Keys) {
+        $tid = Get-Field $sessDict[$k] "TrackId"
+        Assert "v1.1.31: store now contains only Monaco trackId=5" ($tid -eq 5)
+    }
+}
+
+Write-Host "=== Test 15: auto-rotate on track change (v1.1.31) ===" -ForegroundColor Cyan
+[void](Test-AutoRotateOnTrackChange)
+
+# ---- Test 16: defense-in-depth multi-track guard at Finalize (Camada 5) ----
+# When auto-rotation didn't happen (e.g. user disabled AutoExport), the LeagueFinalizer
+# drops sessions from all tracks except the most recently active one and emits a
+# [POST-HOC] note in _debug.notes.
+function Test-MultiTrackGuard() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Force two sessions with different trackIds by directly populating Sessions via packets
+    # but skipping the auto-rotate trigger (no FC on the first session).
+    $sp1 = New-Object byte[] 700
+    $sp1[0] = 1; $sp1[6] = 9; $sp1[7] = 20  # OneShotQualifying @ Baku (no FC -> not "closed")
+    $sp1[124] = 0; $sp1[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp1 -sessionUid ([uint64]4000)))))
+
+    $sp2 = New-Object byte[] 700
+    $sp2[0] = 1; $sp2[6] = 10; $sp2[7] = 5  # Race @ Monaco (latest)
+    $sp2[124] = 0; $sp2[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp2 -sessionUid ([uint64]5000)))))
+
+    # Without HasClosedTerminalSession=true, no auto-rotate fires; both sessions stay
+    $sessDict = Get-Field $st0 "Sessions"
+    Assert "v1.1.31: pre-finalize, store has 2 sessions across 2 tracks" ($sessDict.Count -eq 2)
+
+    # Camada 5 in action: Finalize must keep Monaco only and emit a note
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.31: Finalize output has only 1 session" ($sessions.Count -eq 1)
+    if ($sessions.Count -ge 1) {
+        $tk = Get-DictValue $sessions[0] "track"
+        Assert "v1.1.31: kept session is Monaco (latest)" ((Get-DictValue $tk "name") -eq "Monaco")
+    }
+    $debug = Get-DictValue $res "_debug"
+    $notes = Get-DictValue $debug "notes"
+    $hasNote = $false
+    if ($notes -ne $null) {
+        foreach ($note in $notes) {
+            if ($note -match "Multi-track capture detected") { $hasNote = $true }
+        }
+    }
+    Assert "v1.1.31: [POST-HOC] multi-track note emitted in _debug.notes" $hasNote
+}
+
+Write-Host "=== Test 16: defense-in-depth multi-track guard (v1.1.31) ===" -ForegroundColor Cyan
+[void](Test-MultiTrackGuard)
+
+# ---- Test 17: byte-boxing cast bug - "Specified cast is not valid" (v1.1.31 hotfix) ----
+# Reproduces the v1.1.30 regression: when a real player is in sess.Drivers with
+# GridPosition > 0 but is NOT classified by FC (e.g. FC row.Position=0 -> skipped
+# at the "row.Position <= 0 continue" guard), the fallback path at lines 1157-1194
+# adds them to resultsOut. The bug: `(object)dr.GridPosition` boxed the byte field
+# directly, and ComputeAwards / "Most Positions Gained" then did `(int)gridObj`
+# which throws InvalidCastException with the exact message "Specified cast is not
+# valid". The user-facing symptom: auto-export silently failed at race end and
+# manual Export showed the error. Fix: explicit (int) cast at the writer + defensive
+# Convert.ToInt32 at the readers.
+function Test-ByteBoxingCastBug() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Online Race @ Monaco
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 5
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # Participants: 2 active humans, Hamilton (ci=0) + Verstappen (ci=1)
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    # ci=0 Hamilton
+    $pp[1] = 0           # AiControlled=false
+    $pp[4] = 0           # TeamId=Mercedes
+    $pp[6] = 44          # RaceNumber
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+    $pp[41] = 1; $pp[44] = 1   # ShowOnlineNames=on, Platform=Steam
+    # ci=1 Verstappen
+    $pp[58] = 0          # AiControlled=false
+    $pp[61] = 2          # TeamId=Red Bull
+    $pp[63] = 1          # RaceNumber
+    $n1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($n1, 0, $pp, 65, $n1.Length)
+    $pp[98] = 1; $pp[101] = 1
+    for ($c = 2; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp[$st + 3] = 255; $pp[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # LapData: both drivers on grid (GridPosition > 0). Hamilton on lap 1; Verstappen
+    # also lap 1 then will DNF (no further laps recorded) - but his GridPosition byte
+    # is set, which is exactly what later trips the cast bug.
+    $ld1 = New-Object byte[] (22 * 57)
+    $ld1[33] = 1; $ld1[33 + 57] = 1            # currentLapNum
+    $ld1[43] = 1; $ld1[43 + 57] = 2            # gridPosition (BYTE)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld1))))
+
+    # Hamilton completes a couple of laps so he gets bestLap > 0 and Finished status
+    $ld2 = New-Object byte[] (22 * 57)
+    $ld2[33] = 2
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($ld2, 0)
+    [System.BitConverter]::GetBytes([uint16]28000).CopyTo($ld2, 8)
+    [System.BitConverter]::GetBytes([uint16]27000).CopyTo($ld2, 11)
+    $ld2[43] = 1   # preserve grid
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
+
+    # FC packet: ci=0 (Hamilton) Position=1, NumLaps=5, BestLap=83000ms.
+    # ci=1 (Verstappen) Position=0 - the `row.Position <= 0` guard at the FC main
+    # loop SKIPS this row, so Verstappen never enters resultsOut from there. He IS,
+    # however, still in sess.Drivers (ParticipantsData created the bucket with
+    # GridPosition=2 set via LapData). The fallback path at lines 1157-1194 picks
+    # him up, and that's exactly where the byte-boxing happened.
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    # ci=0 Hamilton (offset 1)
+    $fc[1] = 1            # Position=1
+    $fc[2] = 5            # NumLaps=5
+    $fc[3] = 1            # GridPosition (FC row, byte) - explicit (int) at writer, safe
+    $fc[5] = 0            # NumPitStops
+    $fc[6] = 3            # ResultStatus=Finished
+    [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)   # BestLapTimeMs
+    # ci=1 Verstappen (offset 47): Position=0 -> skipped by FC main loop
+    $offV = 1 + 46
+    $fc[$offV + 0] = 0    # Position=0 (key trigger)
+    $fc[$offV + 1] = 0    # NumLaps=0
+    $fc[$offV + 2] = 2    # GridPosition (irrelevant, row skipped)
+    $fc[$offV + 6] = 4    # ResultStatus=DidNotFinish
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    # Sanity: Verstappen must be in sess.Drivers with GridPosition > 0 BEFORE Finalize
+    $sessDict = Get-Field $st0 "Sessions"
+    $verPreFinalize = $false
+    $verGrid = 0
+    foreach ($k in $sessDict.Keys) {
+        $sess = $sessDict[$k]
+        $drvs = Get-Field $sess "Drivers"
+        if ($drvs.ContainsKey("Verstappen")) {
+            $verPreFinalize = $true
+            $verGrid = (Get-Field $drvs["Verstappen"] "GridPosition")
+        }
+    }
+    Assert "v1.1.31 hotfix: pre-Finalize sess.Drivers contains Verstappen (DNF candidate)" $verPreFinalize
+    Assert "v1.1.31 hotfix: Verstappen GridPosition is byte > 0 (cast bug trigger)" ($verGrid -gt 0)
+
+    # The crucial assertion: Finalize MUST NOT throw. Without the fix, this call
+    # throws TargetInvocationException -> InvalidCastException("Specified cast is
+    # not valid.") originating at LeagueFinalizer.ComputeAwards / Most Positions
+    # Gained when (int)gridObj unboxes a Byte.
+    $finalizeThrew = $false
+    $finalizeErr = $null
+    $res = $null
+    try {
+        $res = $finalizeMethod.Invoke($null, @($st0))
+    } catch {
+        $finalizeThrew = $true
+        $finalizeErr = $_
+        # Also unwrap to surface the real cause for diagnostic clarity
+        $inner = $_.Exception
+        while ($inner.InnerException -ne $null) { $inner = $inner.InnerException }
+        Write-Host ("    -> Finalize threw: {0}: {1}" -f $inner.GetType().FullName, $inner.Message) -ForegroundColor Yellow
+    }
+    Assert "v1.1.31 hotfix: Finalize completes without throwing InvalidCastException" (-not $finalizeThrew)
+    if ($finalizeThrew) { return }
+
+    # And the Verstappen fallback row must be present (preserved as DNF), proving
+    # the fallback path actually ran and the byte-boxing site was exercised.
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.31 hotfix: Finalize produced 1 session" ($sessions.Count -eq 1)
+    if ($sessions.Count -lt 1) { return }
+    $rs = Get-DictValue $sessions[0] "results"
+    Assert "v1.1.31 hotfix: results array exists" ($rs -ne $null)
+    if ($rs -eq $null) { return }
+
+    $verRow = $null
+    $hamRow = $null
+    foreach ($r in $rs) {
+        $tg = Get-DictValue $r "tag"
+        if ($tg -eq "Verstappen") { $verRow = $r }
+        if ($tg -eq "Hamilton")   { $hamRow = $r }
+    }
+    Assert "v1.1.31 hotfix: Hamilton classified by FC main loop"  ($hamRow -ne $null)
+    Assert "v1.1.31 hotfix: Verstappen preserved by fallback path (real player, was DNF)" ($verRow -ne $null)
+
+    # And his grid must now be a *plain Int32* boxed, not Byte - directly verifying
+    # the fix at LeagueFinalizer line 1183.
+    if ($verRow -ne $null) {
+        $verGridObj = Get-DictValue $verRow "grid"
+        Assert "v1.1.31 hotfix: Verstappen grid stored as Int32 (not Byte)" `
+            ($verGridObj -ne $null -and $verGridObj.GetType() -eq [int])
+    }
+
+    # Awards must compute "mostPositionsGained" without crashing (was the throw site).
+    $awards = Get-DictValue $sessions[0] "awards"
+    Assert "v1.1.31 hotfix: awards object computed" ($awards -ne $null)
+    if ($awards -ne $null) {
+        Assert "v1.1.31 hotfix: mostPositionsGained key present" ($awards.ContainsKey("mostPositionsGained"))
+    }
+}
+
+Write-Host "=== Test 17: byte-boxing cast bug regression (v1.1.31 hotfix) ===" -ForegroundColor Cyan
+[void](Test-ByteBoxingCastBug)
 
 # ---- Summary ----
 Write-Host ""

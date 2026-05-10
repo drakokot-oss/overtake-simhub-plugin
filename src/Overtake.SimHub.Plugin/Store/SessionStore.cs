@@ -107,6 +107,20 @@ namespace Overtake.SimHub.Plugin.Store
         // raceNumber_teamId keys can be reused by different players in different lobbies.
         private int? _lastTrackId;
 
+        // Camada 1 — Auto-rotation signal for the OvertakePlugin layer.
+        // Set when a Session packet for a NEW trackId arrives AFTER the current capture
+        // already contains a closed terminal session (Race with FinalClassification).
+        // OvertakePlugin sees this in DataUpdate, exports the closed capture, then calls
+        // BeginNewCapture so the new track's data lands in a fresh store.
+        public bool AutoRotateRequested { get; private set; }
+        public string AutoRotateReason { get; private set; }
+
+        public void ClearAutoRotateRequest()
+        {
+            AutoRotateRequested = false;
+            AutoRotateReason = null;
+        }
+
         public SessionStore()
         {
             StartedAtMs = NowMs();
@@ -164,6 +178,29 @@ namespace Overtake.SimHub.Plugin.Store
             DiagFcRegistered = 0;
             DiagLobbyInfoReceived = 0;
             DiagLobbyInfoPlayers = 0;
+
+            ClearAutoRotateRequest();
+        }
+
+        /// <summary>
+        /// Returns true when the current capture already contains at least one Race-style
+        /// session that received FinalClassification (i.e. the previous event is closed).
+        /// Used by the auto-rotation logic to decide whether to split captures on track change.
+        /// </summary>
+        public bool HasClosedTerminalSession()
+        {
+            foreach (var sess in Sessions.Values)
+            {
+                if (sess == null || sess.FinalClassification == null) continue;
+                if (!sess.SessionType.HasValue) continue;
+                string name;
+                if (Finalizer.Lookups.SessionType.TryGetValue(sess.SessionType.Value, out name)
+                    && name == "Race")
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static long NowMs()
@@ -364,6 +401,35 @@ namespace Overtake.SimHub.Plugin.Store
             LastPacketMs = nowMs;
             Connected = true;
             var header = parsed.Header;
+
+            // Camada 1 — Auto-rotation guard:
+            // Step 1: when a Session packet announces a NEW trackId AND the current capture
+            // already has a closed Race, raise the rotation flag BEFORE any new-event data
+            // leaks into the old store.
+            if (!AutoRotateRequested
+                && header.PacketId == 1
+                && parsed.Session != null
+                && parsed.Session.TrackId >= 0
+                && _lastTrackId.HasValue
+                && _lastTrackId.Value != parsed.Session.TrackId
+                && HasClosedTerminalSession())
+            {
+                AutoRotateRequested = true;
+                AutoRotateReason = string.Format(
+                    "trackId {0}->{1} after closed race",
+                    _lastTrackId.Value, parsed.Session.TrackId);
+                if (Notes.Count < 500)
+                    Notes.Add(string.Format(
+                        "AUTO-ROTATE requested: {0}. Plugin will export old capture and start fresh.",
+                        AutoRotateReason));
+            }
+
+            // Step 2: while a rotation is pending, drop EVERY packet so the new event
+            // doesn't pollute the closed capture. OvertakePlugin's DataUpdate sees the flag
+            // after this DataUpdate's dequeue loop ends and triggers export+BeginNewCapture,
+            // clearing the flag. The next DataUpdate iteration ingests the new event cleanly.
+            if (AutoRotateRequested)
+                return;
 
             if (header.SessionUid != 0)
             {

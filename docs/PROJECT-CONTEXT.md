@@ -225,6 +225,55 @@ SEND (fim sessão Race)
 
 **SSTA (nova sessão)** reseta flags se export não foi armado, prevenindo export duplicado.
 
+`IsTerminalSession` (a partir da v1.1.31) confia exclusivamente em `Lookups.SessionType[id] == "Race"`:
+- `id=13 "Sprint"` → não terminal (espera-se a Main Race em seguida)
+- `id=10/11/15/16/19/25/26/29/30/36 "Race"` → terminal
+- A heurística antiga `hasSprintShootout && raceCount <= 1` foi removida porque quebrava em fins de semana com SprintShootout sem SprintRace (Baku 2026-05-07).
+
+---
+
+## Auto-rotação de captura (v1.1.31)
+
+Para impedir que duas corridas/eventos diferentes caiam no mesmo `.otk`, a captura é fechada automaticamente em 3 momentos independentes (defesa em camadas):
+
+### Camada 1 — troca de pista (`SessionStore.AutoRotateRequested`)
+
+No início de `Ingest`, antes de criar qualquer `SessionRun` para o pacote novo:
+
+```
+SE pacote = Session (id=1)
+   E parsed.Session.TrackId != _lastTrackId
+   E HasClosedTerminalSession() == true (já existe Race com FC na captura atual)
+ENTÃO
+   AutoRotateRequested = true
+   AutoRotateReason = "trackId X->Y after closed race"
+   RETURN  (pacote é descartado intencionalmente)
+```
+
+`OvertakePlugin.DataUpdate` consulta a flag depois de drenar a fila e:
+1. Chama `TryAutoExport()` se `AutoExportJson=on`
+2. Chama `BeginNewCaptureSession()` (limpa store + flags)
+3. Chama `_store.ClearAutoRotateRequest()`
+
+O próximo pacote do novo evento é ingerido em uma captura fresh.
+
+### Camada 2 — após auto-export (`OvertakeSettings.AutoCleanAfterExport`)
+
+Após cada `TryAutoExport()` que retorne `true`, se `AutoCleanAfterExport=on` (default), `BeginNewCaptureSession()` é chamado imediatamente. Cobre o cenário "narrador transmite Baku Race → Quali Monaco" sem clicar em "Nova sessão".
+
+`SettingsSchemaVersion` em `OvertakeSettings` migra silenciosamente usuários da v1.1.30 para `AutoCleanAfterExport=true` no primeiro launch da v1.1.31.
+
+### Camada 5 — defesa em profundidade no Finalizer (`LeagueFinalizer.ApplyMultiTrackGuard`)
+
+Se Camadas 1 e 2 falharem (ex.: `AutoExportJson=off` E `AutoCleanAfterExport=off`), `Finalize` detecta `Sessions[]` com 2+ trackIds distintos e descarta tudo exceto o trackId do `LastPacketMs` mais recente. Adiciona uma nota `[POST-HOC] Multi-track capture detected ...` em `_debug.notes`. **O `.otk` final NUNCA contém dois eventos.**
+
+### Quando NÃO rotaciona
+
+- `_lastTrackId` ainda é null (primeira sessão da captura)
+- `trackId` igual ao anterior (Practice → Quali → Race do mesmo fim de semana)
+- `HasClosedTerminalSession()` retorna false (nenhuma Race com FC ainda)
+- Camada 5 só ativa se houver 2+ trackIds **e** `LastPacketMs` permitir desempate
+
 ---
 
 ## Modo espectador
@@ -290,6 +339,24 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 ---
 
 ## Problemas conhecidos resolvidos
+
+### v1.1.31
+
+| Problema | Causa raiz | Correção |
+|----------|-----------|----------|
+| **Export falhando com `Specified cast is not valid`** (regressão crítica reportada por usuário em produção da v1.1.30) — auto-export silenciosamente falhava no fim da corrida e o botão manual de export mostrava o erro na UI | `LeagueFinalizer.cs` linha 1183 boxava `dr.GridPosition` (campo `byte` em `DriverRun`) diretamente como `object` no fallback de drivers presentes em `sess.Drivers` mas não classificados pelo FC main loop. `ComputeAwards` / "Most Positions Gained" depois fazia `(int)gridObj` em um `Byte` boxed → `InvalidCastException`. Bug latente desde v1.1.12 mas só virou reprodutível com a v1.1.30 porque o "positive evidence first" passou a preservar muito mais pilotos reais que abandonaram cedo (eles caem nesse fallback) | (1) Fix do escritor: `(object)(int)dr.GridPosition` para boxar como `Int32` (paridade com a linha 1127 do FC main loop). (2) Defesa em profundidade nos leitores: `Convert.ToInt32(...)` em `ComputeAwards` e `ComputeMostConsistent` — aceita qualquer `IConvertible` e nunca mais quebra o export inteiro por boxing errado de um único campo numérico |
+| Captura cruzando dois eventos no mesmo `.otk` (Monaco_20260507: Baku SS+OSQ+Race + Monaco Quali+Race no mesmo arquivo, 36 participantes globais) | (1) `CheckLobbyChange` só limpava caches de nome quando trackId mudava — nunca dividia a captura. (2) Após auto-export, o store NÃO era limpo. (3) Para um narrador transmitindo várias corridas seguidas, "Nova sessão" raramente é clicado | 4 camadas independentes: Camada 1 (`SessionStore.AutoRotateRequested` + reação no `OvertakePlugin.DataUpdate`), Camada 2 (`OvertakeSettings.AutoCleanAfterExport=true` por padrão), Camada 3 (`IsTerminalSession` simplificado), Camada 5 (`LeagueFinalizer.ApplyMultiTrackGuard` como defesa em profundidade) |
+| Auto-export não disparava em fim de semana com SprintShootout sem SprintRace (Baku 2026-05-07: SS → OSQ → Race). Sem export, sem auto-clean, captura ficava aberta para o próximo evento | `IsTerminalSession` exigia `raceCount >= 2` quando havia SprintShootout, partindo do pressuposto inválido de que SprintShootout sempre teria SprintRace seguida de Main Race | Removido o gating por `raceCount`. Agora confia em `Lookups.SessionType[id]`: id=13 "Sprint" não dispara, ids 10/15/16 etc. "Race" disparam — robusto para todas as combinações de fim de semana |
+
+**Validação manual (v1.1.31):**
+- Test 15 simula a sequência exata Baku Race + FC → Monaco Quali primeiro pacote: `AutoRotateRequested` levanta, pacote do Monaco é rejeitado, `BeginNewCapture()` limpa store, próxima ingestão cai em captura fresh
+- Test 16 simula Camadas 1 e 2 desativadas: 2 sessões com trackIds diferentes chegam ao `Finalize`; `ApplyMultiTrackGuard` mantém só Monaco e emite `[POST-HOC] Multi-track capture detected` em `_debug.notes`
+- Test 17 reproduz o byte-boxing cast bug — Hamilton finished + Verstappen DNF (FC `Position=0`, presente em `sess.Drivers` com `GridPosition>0`). Sem o fix, `Finalize` lança `InvalidCastException("Specified cast is not valid.")`. Com o fix, o resultado contém os 2 pilotos, o `grid` do Verstappen é boxed como `Int32`, e `awards.mostPositionsGained` é computado normalmente
+- Arquivo `Monaco_20260507_232047_4B9264_FIXED.otk` gerado manualmente (post-hoc filter via Python) confirmou que a estrutura corrigida abre normalmente no site
+
+**Princípio de codificação para evitar regressões similares:**
+- Sempre que uma `Dictionary<string, object>` armazenar valores numéricos vindos de `byte`/`uint`/`ushort`, **boxar com cast explícito para `int`** (`(object)(int)x`) — boxing direto de tipos primitivos não-`int` cria armadilhas para qualquer leitor que faça `(int)dictValue`. Fingerprint do bug: `InvalidCastException("Specified cast is not valid.")`
+- Quando o leitor não pode garantir o tipo exato (vier de fonte heterogênea), usar `Convert.ToInt32(obj)` — aceita `Byte`/`UInt32`/`Int16`/etc. transparentemente
 
 ### v1.1.30
 

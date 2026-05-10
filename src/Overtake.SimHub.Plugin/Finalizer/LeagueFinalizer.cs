@@ -62,6 +62,77 @@ namespace Overtake.SimHub.Plugin.Finalizer
             return false;
         }
 
+        /// <summary>
+        /// Camada 5 (v1.1.31) — last line of defense against cross-event captures.
+        /// If <paramref name="store"/>.Sessions has 2+ distinct trackIds, mutates the store
+        /// in place to keep only the sessions whose trackId matches the most recently active
+        /// session. Adds a [POST-HOC] note to <paramref name="store"/>.Notes describing the
+        /// drop. No-op when the capture is single-track (the common path).
+        ///
+        /// This is a safety net — Camadas 1 (track-change rotation) and 2 (rotation after
+        /// auto-export) should already prevent the multi-track scenario from reaching
+        /// Finalize. But if both fail (e.g. user disabled AutoExport AND AutoCleanAfterExport),
+        /// the export still won't contain two events.
+        /// </summary>
+        public static bool ApplyMultiTrackGuard(SessionStore store)
+        {
+            if (store == null || store.Sessions == null || store.Sessions.Count < 2)
+                return false;
+
+            int latestTrackId = -1;
+            long latestTs = -1;
+            var trackIds = new HashSet<int>();
+            // We use `>=` (not `>`) so that ties on LastPacketMs are broken by
+            // iteration order. Dictionary<,> iterates in insertion order, so the
+            // later-inserted session wins on tie. This matters in two cases:
+            //   (a) tests where two Session packets are ingested back-to-back
+            //       within the same millisecond (Windows timer is ~15ms by default).
+            //   (b) production captures where the new event's first packet shares
+            //       a ms with the previous event's last packet.
+            // Initial latestTs = -1 (not 0) so any session with LastPacketMs == 0
+            // (no packets ever ingested into it past creation) still becomes a
+            // candidate winner instead of being silently skipped.
+            foreach (var sess in store.Sessions.Values)
+            {
+                if (sess == null || !sess.TrackId.HasValue) continue;
+                trackIds.Add(sess.TrackId.Value);
+                if (sess.LastPacketMs >= latestTs)
+                {
+                    latestTs = sess.LastPacketMs;
+                    latestTrackId = sess.TrackId.Value;
+                }
+            }
+            if (trackIds.Count < 2 || latestTrackId < 0)
+                return false;
+
+            var keysToDrop = new List<string>();
+            var droppedTrackIds = new HashSet<int>();
+            foreach (var kvp in store.Sessions)
+            {
+                if (!kvp.Value.TrackId.HasValue) continue;
+                if (kvp.Value.TrackId.Value != latestTrackId)
+                {
+                    keysToDrop.Add(kvp.Key);
+                    droppedTrackIds.Add(kvp.Value.TrackId.Value);
+                }
+            }
+            if (keysToDrop.Count == 0)
+                return false;
+
+            foreach (var k in keysToDrop)
+                store.Sessions.Remove(k);
+
+            string droppedList = string.Join(",", droppedTrackIds);
+            string note = string.Format(
+                "[POST-HOC] Multi-track capture detected (tracks: {0}). Kept trackId={1} only; "
+                + "dropped {2} session(s) from track(s) {3}. Auto-rotation either failed or "
+                + "was disabled — investigate.",
+                string.Join(",", trackIds), latestTrackId, keysToDrop.Count, droppedList);
+            if (store.Notes != null && store.Notes.Count < 500)
+                store.Notes.Add(note);
+            return true;
+        }
+
         private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess, SessionStore store)
         {
             if (string.IsNullOrEmpty(tag))
@@ -648,6 +719,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
         {
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+            // Camada 5 (v1.1.31) — defense-in-depth: if the capture spans multiple tracks
+            // (auto-rotation in OvertakePlugin/SessionStore failed or was bypassed), keep
+            // only the latest track's sessions. Logged in _debug.notes for transparency.
+            ApplyMultiTrackGuard(store);
+
             store.LastExportedNameKeyConflicts = store.SnapshotNameKeyConflicts();
             store.ApplyFullMyTeamLobbyMergeIfNeeded();
 
@@ -1114,7 +1190,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
                         { "raceNumber", rnFall },
                         { "teamId", teamInfo != null ? (object)(int)teamInfo.TeamId : null },
                         { "teamName", teamName },
-                        { "grid", dr.GridPosition > 0 ? (object)dr.GridPosition : null },
+                        // CRITICAL: explicit (int) cast — dr.GridPosition is a byte
+                        // and boxing it directly as object yields a Byte, which then
+                        // cannot be unboxed via (int)gridObj downstream and throws
+                        // InvalidCastException in ComputeAwards. Was the source of
+                        // "Specified cast is not valid" reported in v1.1.30.
+                        { "grid", dr.GridPosition > 0 ? (object)(int)dr.GridPosition : null },
                         { "numLaps", EffectiveLapCount(dr) },
                         { "bestLapTimeMs", bestMs > 0 ? (object)bestMs : null },
                         { "bestLapTime", bestMs > 0 ? MsToStr(bestMs) : "" },
@@ -2034,8 +2115,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 object gridObj, posObj, statusObj;
                 if (!r.TryGetValue("grid", out gridObj) || gridObj == null) continue;
                 if (!r.TryGetValue("position", out posObj) || posObj == null) continue;
-                int grid = (int)gridObj;
-                int pos = (int)posObj;
+                // Use Convert.ToInt32 instead of (int)cast: callers may have boxed
+                // these as Byte/UInt16/etc. (see grid byte boxing fix at the FC
+                // fallback path). Convert.ToInt32 accepts any IConvertible and
+                // never throws InvalidCastException here.
+                int grid, pos;
+                try { grid = Convert.ToInt32(gridObj); pos = Convert.ToInt32(posObj); }
+                catch { continue; }
                 if (grid <= 0 || pos <= 0) continue;
                 int gained = grid - pos;
                 r.TryGetValue("status", out statusObj);
@@ -2089,7 +2175,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 bool classifiedLapped = r.TryGetValue("classifiedLapped", out clObj) && clObj is bool && (bool)clObj;
                 string s = statusObj != null ? statusObj.ToString() : "";
                 if ((s == "Finished" || s == "FinishedOrUnknown" || classifiedLapped) && posObj != null)
-                    finishedPositions.Add((int)posObj);
+                {
+                    try { finishedPositions.Add(Convert.ToInt32(posObj)); }
+                    catch { /* ignore non-numeric entries */ }
+                }
             }
             finishedPositions.Sort();
             int cutoff = finishedPositions.Count > 0 ? finishedPositions[finishedPositions.Count / 2] : 999;
@@ -2101,7 +2190,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 r.TryGetValue("tag", out tagObj);
                 r.TryGetValue("position", out posObj);
                 if (tagObj != null && posObj != null)
-                    posByTag[tagObj.ToString()] = (int)posObj;
+                {
+                    try { posByTag[tagObj.ToString()] = Convert.ToInt32(posObj); }
+                    catch { /* ignore non-numeric entries */ }
+                }
             }
 
             Dictionary<string, object> best = null;

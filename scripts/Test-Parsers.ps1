@@ -1,4 +1,4 @@
-# Test-Parsers.ps1 — Validates C# packet parsers against known binary data
+# Test-Parsers.ps1 - Validates C# packet parsers against known binary data
 # Loads the built DLL, constructs fake packets, and verifies parsed output.
 
 param(
