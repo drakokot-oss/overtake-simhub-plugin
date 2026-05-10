@@ -1,0 +1,218 @@
+---
+description: Official release pipeline for overtake-simhub-plugin (Mac-driven, GitHub Actions builds the .exe)
+alwaysApply: true
+---
+
+# Release Pipeline (Mac-driven, CI/CD does the build)
+
+When the user asks to "release", "lançar release", "publicar release", "subir
+versão" or anything semantically equivalent for this repo, follow this exact
+flow. The Windows machine is NOT used; everything runs from the Mac via `gh`
+CLI plus the GitHub Actions workflows in `.github/workflows/`.
+
+## Hard rules (NEVER skip these)
+
+- ALWAYS bump version in **all three** sources before tagging:
+  - `src/Overtake.SimHub.Plugin/Properties/AssemblyInfo.cs` (`AssemblyVersion`
+    + `AssemblyFileVersion`, both must match the new `X.Y.Z.0`).
+  - `version.json` (`version: "X.Y.Z"`, `released: "<today>"`,
+    `installerUrl` updated to the new tag).
+  - `CHANGELOG.md` — add a `## [X.Y.Z] - YYYY-MM-DD` section with the new
+    notes. `release.yml` refuses to release without this section.
+- NEVER commit directly to `main` for code changes. Open a PR (workflow
+  hotfixes inside `.github/workflows/*.yml` are the only OK exception, and
+  only when needed to unstick a release that is already in flight).
+- NEVER push a tag without CI green on the merged commit.
+- NEVER amend / force-push the tag once `release.yml` has started. If the
+  release fails, fix forward (re-run via `workflow_dispatch` with the same
+  tag) or bump to the next patch version.
+- ALWAYS use the inline author identity for git commits:
+  `GIT_AUTHOR_NAME="drakokot" GIT_AUTHOR_EMAIL="drakokot@gmail.com" GIT_COMMITTER_NAME="drakokot" GIT_COMMITTER_EMAIL="drakokot@gmail.com"`.
+  The repo has no local `git config user.*` set — without these env vars,
+  `git commit` aborts with "Author identity unknown".
+- NEVER touch `git config`. NEVER use `git push --force` against `main` or
+  any released tag.
+
+## Step-by-step pipeline
+
+### 1. Sanity-check the working state
+
+```bash
+cd /Users/wagner/Documents/plugin/overtake-simhub-plugin
+git fetch --all --prune
+git status -sb
+git log -1 --oneline origin/main
+gh auth status   # must show drakokot-oss with 'repo' AND 'workflow' scopes
+```
+
+If `gh auth status` is not authenticated, STOP and ask the user to run
+`gh auth login` (HTTPS, browser flow). The pipeline cannot proceed without
+this.
+
+### 2. Bump the three version sources on a feature branch
+
+```bash
+git checkout main && git pull --ff-only
+git checkout -b release/vX.Y.Z
+```
+
+Edit:
+- `AssemblyInfo.cs`: both `AssemblyVersion` and `AssemblyFileVersion` to
+  `"X.Y.Z.0"`.
+- `version.json`: `version`, `released`, `installerUrl` (the URL must point
+  at `Overtake.SimHub.Plugin-vX.Y.Z-Setup.exe`). Preserve `releaseNotes` if
+  the user has already curated them; otherwise compose a short markdown
+  summary.
+- `CHANGELOG.md`: insert a new `## [X.Y.Z] - YYYY-MM-DD` block at the top
+  (under the `# Changelog` header). Use the existing `### Fixed / ### Added
+  / ### Changed` shape; mirror the `## [1.1.31]` block as a template.
+
+When editing `AssemblyInfo.cs`, use ASCII characters only for
+`AssemblyDescription` and `AssemblyCopyright`. Some editors mangle UTF-8
+em-dashes (—) and the © symbol into multi-round mojibake (`ÃƒÆ’...`); we
+already cleaned this once and don't want it back.
+
+### 3. Open the PR
+
+```bash
+git add -A
+GIT_AUTHOR_NAME="drakokot" GIT_AUTHOR_EMAIL="drakokot@gmail.com" \
+GIT_COMMITTER_NAME="drakokot" GIT_COMMITTER_EMAIL="drakokot@gmail.com" \
+git commit -m "vX.Y.Z: <one-line summary>"
+git push -u origin release/vX.Y.Z
+gh pr create --base main --head release/vX.Y.Z \
+  --title "vX.Y.Z: <one-line summary>" \
+  --body "$(cat <<'EOF'
+## Summary
+<bullets matching CHANGELOG entry>
+
+## Test plan
+- [ ] CI green on Windows runner (build + Test-SessionStore + Test-Finalizer)
+- [ ] After merge: tag vX.Y.Z fires release.yml -> .exe on Releases page
+EOF
+)"
+```
+
+### 4. Wait for CI to pass
+
+```bash
+gh pr checks <PR-NUMBER> --repo drakokot-oss/overtake-simhub-plugin
+# Then watch the run id from the previous output:
+gh run watch <RUN-ID> --repo drakokot-oss/overtake-simhub-plugin --exit-status
+```
+
+Expected duration: ~3 minutes (cache warm) or ~10 minutes (cache cold —
+SimHub portable + ConfuserEx download). Test counts must end with
+`PASS: 67   FAIL: 0` (SessionStore) and `PASS: 91   FAIL: 0` (Finalizer,
+or higher; Test 17 added 5+ new asserts).
+
+If CI fails, STOP. Investigate the logs:
+```bash
+gh run view <RUN-ID> --repo drakokot-oss/overtake-simhub-plugin --log-failed
+```
+
+### 5. Squash-merge the PR
+
+```bash
+gh pr merge <PR-NUMBER> --repo drakokot-oss/overtake-simhub-plugin \
+  --squash --delete-branch \
+  --subject "vX.Y.Z: <one-line summary> (#<PR-NUMBER>)" \
+  --body "Squash of N commits. See PR #<PR-NUMBER>."
+```
+
+### 6. Tag and push (this fires release.yml)
+
+```bash
+git checkout main && git pull --ff-only
+GIT_AUTHOR_NAME="drakokot" GIT_AUTHOR_EMAIL="drakokot@gmail.com" \
+GIT_COMMITTER_NAME="drakokot" GIT_COMMITTER_EMAIL="drakokot@gmail.com" \
+git tag -a vX.Y.Z -m "Release vX.Y.Z
+
+<short summary>"
+git push origin vX.Y.Z
+```
+
+### 7. Watch release.yml
+
+```bash
+gh run list --repo drakokot-oss/overtake-simhub-plugin --workflow release.yml --limit 1
+gh run watch <RUN-ID> --repo drakokot-oss/overtake-simhub-plugin --exit-status
+```
+
+Expected duration: ~5–10 min. The pipeline does: verify versions, build
+(Release), tests, ConfuserEx (silent install of SimHub via Inno Setup,
+stage SimHub refs into bin\Release for dnlib resolution, ignore
+Confuser.CLI's post-obfuscation `Console.ReadKey` exit code, assert success
+by output DLL presence), Inno Setup compile, GitHub Release upload.
+
+If `release.yml` fails AFTER the commit/tag are already pushed, prefer to
+fix forward by editing `.github/workflows/release.yml` on `main` and
+re-running with the SAME tag via:
+```bash
+gh workflow run release.yml --repo drakokot-oss/overtake-simhub-plugin \
+  --ref main -f tag=vX.Y.Z
+```
+
+The `workflow_dispatch` always reads the YAML from `main` (so your fix
+applies) but checks out the repo at the tag (so the source the .exe is
+built from stays exactly what was reviewed).
+
+### 8. Verify the public artifacts
+
+```bash
+gh release view vX.Y.Z --repo drakokot-oss/overtake-simhub-plugin \
+  --json name,tagName,publishedAt,url,assets
+curl -sIL https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/vX.Y.Z/Overtake.SimHub.Plugin-vX.Y.Z-Setup.exe \
+  | grep -E '^(HTTP|Content-Length|Location)'
+curl -s https://raw.githubusercontent.com/drakokot-oss/overtake-simhub-plugin/main/version.json \
+  | head -3
+```
+
+Expected: HTTP/2 302 (asset redirect) -> HTTP/2 200 (S3), Content-Length
+~2.3 MB, and `version.json` on `main` shows `"version": "X.Y.Z"`.
+
+### 9. Report back to the user
+
+Include in the final reply:
+- Release URL: `https://github.com/drakokot-oss/overtake-simhub-plugin/releases/tag/vX.Y.Z`
+- Installer URL: `https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/vX.Y.Z/Overtake.SimHub.Plugin-vX.Y.Z-Setup.exe`
+- Installer size + SHA256 (from the asset metadata).
+- Confirmation that the in-plugin auto-updater will detect the new version
+  on the user's installations.
+
+## Failure-mode crib sheet
+
+These are the ones we have already debugged once. If they reappear, fix
+the same way without re-debugging from scratch.
+
+- **`Specified cast is not valid` in export pipeline** -> always Box int
+  via `(object)(int)dr.GridPosition`, never `(object)dr.GridPosition` for
+  byte fields. Defensive readers in `ComputeAwards` and
+  `ComputeMostConsistent` use `Convert.ToInt32(...)`. Test 17 enforces
+  this; if it fails, look there first.
+- **CI `SimHub.Plugins.dll not found`** -> the SHWotever ZIP wraps an Inno
+  Setup `.exe`, not a portable layout. The workflows already silent-install
+  it; check the cache key isn't stale.
+- **CI `dnlib.AssemblyResolveException` in ConfuserEx** -> SimHub refs not
+  staged. The release workflow copies them into `bin\Release` before
+  Confuser; check that block didn't get removed.
+- **CI `& was unexpected at this time`** -> someone tried to invoke
+  Confuser via `cmd /c "&"`. Use `Start-Process` instead.
+- **CI `Cannot read keys when ... console input has been redirected`** ->
+  Confuser's `Console.ReadKey` after success. The workflow already ignores
+  the post-obfuscation exit code and asserts by output DLL presence.
+- **`fatal: unable to auto-detect email address`** -> always pass
+  `GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL / GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL`
+  inline. Do not modify `git config`.
+- **PowerShell scripts failing with `Missing closing '}' / The string is
+  missing the terminator`** -> Unicode em-dashes/smart-quotes in `.ps1`
+  files. PS 5.1 on Windows mangles them. Replace with ASCII (`-`, `'`,
+  `"`, `...`, `->`).
+
+## When NOT to follow this pipeline
+
+- Workflow file edits (`.github/workflows/*.yml`) intended to unstick an
+  already-tagged release: those go directly to `main` (commit + push)
+  followed by `gh workflow run release.yml -f tag=vX.Y.Z`. No PR needed,
+  but document the change clearly in the commit message.
+- Hot patches that bypass tests: do NOT do this. Always require CI green.

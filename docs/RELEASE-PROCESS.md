@@ -1,6 +1,8 @@
 # Overtake Telemetry — Processo de Release
 
 > **A partir da v1.1.31** o processo é orquestrado pelo GitHub Actions e funciona inteiramente do macOS / qualquer máquina com `gh` CLI. O fluxo Windows local com `.\scripts\Release.ps1` continua disponível como alternativa, mas não é mais necessário.
+>
+> **Para o Cursor agent**: o pipeline canônico está em `.cursor/rules/release-workflow.mdc` (auto-carregado em todas as sessões). Quando o usuário pedir "lança a release" ou similar, siga aquela rule — é a fonte de verdade. Esse arquivo (`RELEASE-PROCESS.md`) é a versão para humanos lerem; os dois devem ficar em sincronia.
 
 ## TL;DR — Release a partir do Mac
 
