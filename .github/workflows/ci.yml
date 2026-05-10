@@ -20,11 +20,17 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pinned SimHub portable build used to satisfy SimHub.Plugins / GameReaderCommon /
+  # Pinned SimHub build used to satisfy SimHub.Plugins / GameReaderCommon /
   # MahApps / WoteverCommon / log4net references. Bumping this means re-validating
   # the plugin against a newer SimHub.Plugins API surface — do it in a separate PR.
+  #
+  # NOTE: the asset published at SHWotever/SimHub/releases is a ZIP wrapping a
+  # single Inno Setup installer (SimHubSetup_X.Y.Z.exe), not a portable layout.
+  # We extract the ZIP, then run the .exe with /VERYSILENT /DIR=... to populate
+  # a known directory we can reference from MSBuild.
   SIMHUB_VERSION: "9.11.12"
   SIMHUB_ZIP_URL: "https://github.com/SHWotever/SimHub/releases/download/9.11.12/SimHub.9.11.12.zip"
+  SIMHUB_INSTALL_DIR: "C:\\SimHubInstall"
 
 jobs:
   build-and-test:
@@ -40,14 +46,17 @@ jobs:
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Restore SimHub portable build (cache)
+      - name: Restore SimHub install (cache)
         id: simhub-cache
         uses: actions/cache@v4
         with:
-          path: C:\SimHubPortable
-          key: simhub-portable-${{ env.SIMHUB_VERSION }}
+          path: ${{ env.SIMHUB_INSTALL_DIR }}
+          # v2 cache key: the v1 layout assumed a portable ZIP. The release asset
+          # is now an Inno Setup installer that we run silent into SIMHUB_INSTALL_DIR,
+          # so the cached path layout is different from any v1 cache entry.
+          key: simhub-install-${{ env.SIMHUB_VERSION }}-v2
 
-      - name: Download and extract SimHub portable (if cache miss)
+      - name: Download and silent-install SimHub (if cache miss)
         if: steps.simhub-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
@@ -57,29 +66,62 @@ jobs:
           Invoke-WebRequest -Uri $env:SIMHUB_ZIP_URL -OutFile $zip -UseBasicParsing
           $size = (Get-Item $zip).Length
           Write-Host "Downloaded $([math]::Round($size/1MB,1)) MB"
-          New-Item -ItemType Directory -Force -Path C:\SimHubPortable | Out-Null
-          Write-Host "Extracting..."
-          Expand-Archive -Path $zip -DestinationPath C:\SimHubPortable -Force
+
+          $extractDir = Join-Path $env:RUNNER_TEMP 'SimHubExtract'
+          if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Write-Host "Extracting installer..."
+          Expand-Archive -Path $zip -DestinationPath $extractDir -Force
           Remove-Item $zip -Force
-          # Locate the folder that actually contains SimHub.Plugins.dll — the
-          # zip layout has historically been either flat or nested in a SimHub-X.Y.Z
-          # subfolder; we resolve dynamically and surface what we found for diagnostics.
-          $found = Get-ChildItem C:\SimHubPortable -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $found) {
-            Write-Host "::error::SimHub.Plugins.dll not found in extracted archive."
-            Get-ChildItem C:\SimHubPortable -Recurse | Select-Object -First 50 FullName | ForEach-Object { Write-Host $_.FullName }
+
+          $setup = Get-ChildItem $extractDir -Recurse -Filter 'SimHubSetup_*.exe' | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::SimHubSetup_*.exe not found in archive."
+            Get-ChildItem $extractDir -Recurse | Select-Object -First 50 FullName | ForEach-Object { Write-Host $_.FullName }
             exit 1
           }
-          Write-Host "Found SimHub.Plugins.dll at: $($found.FullName)"
+          Write-Host "Installer: $($setup.FullName) ($([math]::Round($setup.Length/1MB,1)) MB)"
+
+          New-Item -ItemType Directory -Force -Path $env:SIMHUB_INSTALL_DIR | Out-Null
+          $logPath = Join-Path $env:RUNNER_TEMP 'simhub-install.log'
+
+          # Inno Setup silent flags. /DIR overrides the default Program Files
+          # location so we control where the DLLs end up and the cache works.
+          # /SP- skips the welcome dialog. /NORESTART because the runner is
+          # ephemeral. /SUPPRESSMSGBOXES auto-confirms any modal prompts.
+          $installArgs = @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=$env:SIMHUB_INSTALL_DIR",
+            "/LOG=$logPath"
+          )
+          Write-Host "Running silent installer with args: $($installArgs -join ' ')"
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -NoNewWindow -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "::error::SimHub installer exited with code $($proc.ExitCode)"
+            if (Test-Path $logPath) {
+              Write-Host "--- Last 80 lines of $logPath ---"
+              Get-Content $logPath -Tail 80 | ForEach-Object { Write-Host "  $_" }
+            }
+            exit 1
+          }
+
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            Write-Host "::error::Installer succeeded but SimHub.Plugins.dll not found under $env:SIMHUB_INSTALL_DIR"
+            Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse | Select-Object -First 50 FullName | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          Write-Host "Installed. SimHub.Plugins.dll at: $($found.FullName)"
+          Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Resolve SIMHUB_INSTALL_PATH and verify required DLLs
         id: simhub-path
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $found = Get-ChildItem C:\SimHubPortable -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $found) {
-            Write-Host "::error::SimHub.Plugins.dll missing after cache restore."
+            Write-Host "::error::SimHub.Plugins.dll missing under $env:SIMHUB_INSTALL_DIR after cache restore."
             exit 1
           }
           # MSBuild expects the path to end with a trailing backslash because
@@ -94,7 +136,7 @@ jobs:
             if (-not (Test-Path $p)) { $missing += $r }
           }
           if ($missing.Count -gt 0) {
-            Write-Host "::error::Missing DLLs in SimHub portable: $($missing -join ', ')"
+            Write-Host "::error::Missing DLLs in SimHub install dir: $($missing -join ', ')"
             exit 1
           }
           "SIMHUB_INSTALL_PATH=$simHubDir" | Out-File -FilePath $env:GITHUB_ENV -Append

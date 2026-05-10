@@ -31,8 +31,12 @@ on:
         type: string
 
 env:
+  # The SimHub release ZIP wraps a single SimHubSetup_X.Y.Z.exe (Inno Setup
+  # installer), not a portable layout. We extract, then run silent into
+  # SIMHUB_INSTALL_DIR. Same strategy as ci.yml — keep them in lockstep.
   SIMHUB_VERSION: "9.11.12"
   SIMHUB_ZIP_URL: "https://github.com/SHWotever/SimHub/releases/download/9.11.12/SimHub.9.11.12.zip"
+  SIMHUB_INSTALL_DIR: "C:\\SimHubInstall"
   CONFUSEREX_VERSION: "1.6.0"
   CONFUSEREX_ZIP_URL: "https://github.com/mkaring/ConfuserEx/releases/download/v1.6.0/ConfuserEx-CLI.zip"
 
@@ -106,14 +110,14 @@ jobs:
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Restore SimHub portable build (cache)
+      - name: Restore SimHub install (cache)
         id: simhub-cache
         uses: actions/cache@v4
         with:
-          path: C:\SimHubPortable
-          key: simhub-portable-${{ env.SIMHUB_VERSION }}
+          path: ${{ env.SIMHUB_INSTALL_DIR }}
+          key: simhub-install-${{ env.SIMHUB_VERSION }}-v2
 
-      - name: Download and extract SimHub portable (if cache miss)
+      - name: Download and silent-install SimHub (if cache miss)
         if: steps.simhub-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
@@ -121,15 +125,47 @@ jobs:
           $zip = Join-Path $env:RUNNER_TEMP 'SimHub.zip'
           Write-Host "Downloading $env:SIMHUB_ZIP_URL"
           Invoke-WebRequest -Uri $env:SIMHUB_ZIP_URL -OutFile $zip -UseBasicParsing
-          New-Item -ItemType Directory -Force -Path C:\SimHubPortable | Out-Null
-          Expand-Archive -Path $zip -DestinationPath C:\SimHubPortable -Force
+
+          $extractDir = Join-Path $env:RUNNER_TEMP 'SimHubExtract'
+          if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $extractDir -Force
           Remove-Item $zip -Force
+
+          $setup = Get-ChildItem $extractDir -Recurse -Filter 'SimHubSetup_*.exe' | Select-Object -First 1
+          if (-not $setup) {
+            Write-Host "::error::SimHubSetup_*.exe not found in archive."
+            Get-ChildItem $extractDir -Recurse | Select-Object -First 50 FullName | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Force -Path $env:SIMHUB_INSTALL_DIR | Out-Null
+          $logPath = Join-Path $env:RUNNER_TEMP 'simhub-install.log'
+          $installArgs = @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
+            "/DIR=$env:SIMHUB_INSTALL_DIR",
+            "/LOG=$logPath"
+          )
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -NoNewWindow -PassThru
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "::error::SimHub installer exited with code $($proc.ExitCode)"
+            if (Test-Path $logPath) {
+              Get-Content $logPath -Tail 80 | ForEach-Object { Write-Host "  $_" }
+            }
+            exit 1
+          }
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) {
+            Write-Host "::error::Installer succeeded but SimHub.Plugins.dll not found under $env:SIMHUB_INSTALL_DIR"
+            exit 1
+          }
+          Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Resolve SIMHUB_INSTALL_PATH
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $found = Get-ChildItem C:\SimHubPortable -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $found) { Write-Host "::error::SimHub.Plugins.dll missing"; exit 1 }
           $simHubDir = $found.Directory.FullName
           if (-not $simHubDir.EndsWith('\')) { $simHubDir = $simHubDir + '\' }
