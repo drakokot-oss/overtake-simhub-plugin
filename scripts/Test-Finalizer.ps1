@@ -744,6 +744,227 @@ function Test-ByteBoxingCastBug() {
 Write-Host "=== Test 17: byte-boxing cast bug regression (v1.1.31 hotfix) ===" -ForegroundColor Cyan
 [void](Test-ByteBoxingCastBug)
 
+# ---- Test 18: Monaco-style ghost via stale HumanCarIdxs latch (v1.1.32) ----
+# Reproduces Monaco_20260510 ci=19 (Williams #23): F1 25 sent an early Participants
+# packet for an AI grid filler with AiControlled=false + Platform!=255, latching
+# HumanCarIdxs[2]=true. Later packets correctly flipped to AiControlled=true,
+# but the sticky human flag let the slot escape every upstream phantom filter
+# (IsKnownRealPlayer returned true via wasHuman, short-circuiting the AI check
+# in IsPhantomEntry / ShouldSkipFcAiGridFillerRow). The Camada 6 post-filter
+# + IsKnownRealPlayer hardening must drop this row.
+#
+# SAFETY assertion: the same test ALSO ensures Hamilton (real human, real laps)
+# is preserved, proving the v1.1.30 invariant "real players never filtered" still
+# holds under the new logic.
+function Test-MonacoStyleGhost() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Online race @ Monaco (trackId=5)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 5
+    $sp[124] = 0; $sp[125] = 1   # NetworkGame=1 (online)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # FIRST Participants packet: 3 active. ci=0 Hamilton (human),
+    # ci=1 Verstappen (human), ci=2 Williams "AI grid filler" but the F1 25 bug
+    # reports it as AiControlled=false + Platform=Steam (latches HumanCarIdxs[2]=true).
+    $pp1 = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp1.Length; $zi++) { $pp1[$zi] = 0 }
+    $pp1[0] = 3
+    # ci=0 Hamilton: AI=false, team=Mercedes(0), rn=44, name, showOnlineNames=on, platform=Steam
+    $pp1[1] = 0; $pp1[4] = 0; $pp1[6] = 44
+    $hn = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($hn, 0, $pp1, 8, $hn.Length)
+    $pp1[41] = 1; $pp1[44] = 1
+    # ci=1 Verstappen
+    $pp1[58] = 0; $pp1[61] = 2; $pp1[63] = 1
+    $vn = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($vn, 0, $pp1, 65, $vn.Length)
+    $pp1[98] = 1; $pp1[101] = 1
+    # ci=2 BUGGY EARLY PACKET: Williams AI grid filler reported with AI=false + valid platform
+    $pp1[115] = 0    # AiControlled=false  (the F1 25 bug)
+    $pp1[118] = 3    # TeamId=Williams
+    $pp1[120] = 23   # RaceNumber=23
+    # No name (left zero) - simulates AI slot. Platform=Steam to latch HumanCarIdxs[2]=true.
+    $pp1[155] = 0    # ShowOnlineNames=off
+    $pp1[158] = 1    # Platform=Steam (with AI=false → triggers HumanCarIdxs[2]=true latch)
+    for ($c = 3; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp1[$st + 3] = 255; $pp1[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp1))))
+
+    # LapData: only Hamilton + Verstappen actually drive. ci=2 stays at 0 laps.
+    $ld1 = New-Object byte[] (22 * 57)
+    $ld1[33] = 1; $ld1[33 + 57] = 1
+    $ld1[43] = 1; $ld1[43 + 57] = 2
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld1))))
+
+    $ld2 = New-Object byte[] (22 * 57)
+    $ld2[33] = 2; $ld2[33 + 57] = 2
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($ld2, 0)
+    [System.BitConverter]::GetBytes([uint16]28000).CopyTo($ld2, 8)
+    [System.BitConverter]::GetBytes([uint16]27000).CopyTo($ld2, 11)
+    $ld2[43] = 1; $ld2[43 + 57] = 2
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
+
+    # SECOND Participants packet: same 3 slots but ci=2 now CORRECTLY reports
+    # AiControlled=true (the early bug got self-corrected later in the session).
+    # HumanCarIdxs[2] stays true (sticky), but slot.AiControlled is now true.
+    $pp2 = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp2.Length; $zi++) { $pp2[$zi] = $pp1[$zi] }
+    $pp2[115] = 1   # AiControlled=true (corrected)
+    $pp2[158] = 0   # Platform=255 (Unknown)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp2))))
+
+    # FC packet: ci=0 Hamilton P1 5 laps, ci=1 Verstappen P2 5 laps, ci=2 ghost P3 0 laps
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 3
+    # ci=0 Hamilton
+    $fc[1] = 1; $fc[2] = 5; $fc[3] = 1; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)
+    # ci=1 Verstappen
+    $offV = 1 + 46
+    $fc[$offV + 0] = 2; $fc[$offV + 1] = 5; $fc[$offV + 2] = 2; $fc[$offV + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]84000).CopyTo($fc, $offV + 7)
+    # ci=2 ghost: P3, 0 laps, NotClassified - this is the row that must be filtered.
+    $offG = 1 + 2 * 46
+    $fc[$offG + 0] = 3; $fc[$offG + 1] = 0; $fc[$offG + 2] = 3; $fc[$offG + 6] = 6
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.32: session count is 1" ($sessions.Count -eq 1)
+    if ($sessions.Count -lt 1) { return }
+
+    $rs = Get-DictValue $sessions[0] "results"
+    Assert "v1.1.32: results array exists" ($rs -ne $null)
+    if ($rs -eq $null) { return }
+
+    $hamFound = $false; $verFound = $false; $ghostFound = $false
+    foreach ($r in $rs) {
+        $tg = Get-DictValue $r "tag"
+        if ($tg -eq "Hamilton")   { $hamFound = $true }
+        if ($tg -eq "Verstappen") { $verFound = $true }
+        # Ghost would appear as Driver_2 / Car_2 / Car2 (any generic placeholder for ci=2)
+        if ($tg -eq "Driver_2" -or $tg -eq "Car_2" -or $tg -eq "Car2") { $ghostFound = $true }
+    }
+    Assert "v1.1.32: Hamilton preserved (real human, has laps)" $hamFound
+    Assert "v1.1.32: Verstappen preserved (real human, has laps)" $verFound
+    Assert "v1.1.32 GHOST FIX: ci=2 AI grid filler with stale HumanCarIdxs latch is FILTERED" (-not $ghostFound)
+    Assert "v1.1.32: results count is exactly 2 (no ghost)" ($rs.Count -eq 2)
+
+    # The IsKnownRealPlayer hardening typically catches ci=2 upstream
+    # (RemovePhantomDrivers / ShouldSkipFcAiGridFillerRow), so Camada 6 stays
+    # as a defense-in-depth net that doesn't always have to fire. Test 19
+    # specifically guarantees Camada 6 never wrongly drops UNAcapeleto. The
+    # CAMADA-6 note is therefore only ASSERTED if the row actually reached
+    # the post-filter — we do not require it for the test to pass.
+}
+
+Write-Host "=== Test 18: Monaco-style ghost via stale HumanCarIdxs latch (v1.1.32) ===" -ForegroundColor Cyan
+[void](Test-MonacoStyleGhost)
+
+# ---- Test 19: UNAcapeleto-style invariant preservation under v1.1.32 hardening ----
+# CRITICAL safety net: the v1.1.32 IsKnownRealPlayer hardening MUST NOT regress
+# the v1.1.30 fix. A real player who:
+#   - was in the lobby (lobby evidence)
+#   - drove laps in qualifying
+#   - disconnected before lap 1 in the race (0 laps in race)
+#   - had his slot promoted to AI (slot.AiControlled=true at end of race)
+# must STILL be preserved as DNF. Strong lobby evidence wins over the AI flag.
+function Test-RealPlayerLobbyEvidenceVsAi() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Online race @ LasVegas (trackId=20-style)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 20
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # LobbyInfo: 2 players, including UNAcapeleto (rn=74, tid=3)
+    $lobbyPayload = New-Object byte[] (1 + 22 * 42)
+    $lobbyPayload[0] = 2
+    # ci=0 Hamilton lobby slot
+    $lobbyPayload[1 + 0] = 0
+    $lobbyPayload[1 + 1] = 0       # tid Mercedes
+    $lobbyPayload[1 + 3] = 1
+    $hn = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($hn, 0, $lobbyPayload, (1 + 4), $hn.Length)
+    $lobbyPayload[1 + 36] = 44
+    $lobbyPayload[1 + 38] = 1
+    # ci=1 UNAcapeleto lobby slot (rn=74, tid=3)
+    $offUna = 1 + 42
+    $lobbyPayload[$offUna + 0] = 0
+    $lobbyPayload[$offUna + 1] = 3
+    $lobbyPayload[$offUna + 3] = 4
+    $unaName = [System.Text.Encoding]::UTF8.GetBytes("UNAcapeleto")
+    [System.Array]::Copy($unaName, 0, $lobbyPayload, ($offUna + 4), $unaName.Length)
+    $lobbyPayload[$offUna + 36] = 74
+    $lobbyPayload[$offUna + 38] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 9 $lobbyPayload))))
+
+    # Participants: ci=0 Hamilton (human), ci=1 was UNAcapeleto but flipped to AI=true
+    # at end of session (he disconnected, slot got promoted to AI grid filler)
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    # ci=0 Hamilton AI=false
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    [System.Array]::Copy($hn, 0, $pp, 8, $hn.Length)
+    $pp[41] = 1; $pp[44] = 1
+    # ci=1 UNAcapeleto: now AI=true (slot promoted), but lobby still has him!
+    $pp[58] = 1     # AiControlled=true (CONTRADICTION with sticky-human, but lobby wins)
+    $pp[61] = 3     # tid Williams (matches lobby)
+    $pp[63] = 74    # rn=74 (matches lobby)
+    [System.Array]::Copy($unaName, 0, $pp, 65, $unaName.Length)
+    $pp[98] = 1; $pp[101] = 4   # showOnlineNames=on, platform=4
+    for ($c = 2; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp[$st + 3] = 255; $pp[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # LapData: only Hamilton drives (ci=1 abandons at start, 0 laps)
+    $ld1 = New-Object byte[] (22 * 57)
+    $ld1[33] = 1
+    $ld1[43] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld1))))
+
+    $ld2 = New-Object byte[] (22 * 57)
+    $ld2[33] = 2
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($ld2, 0)
+    $ld2[43] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
+
+    # FC: ci=0 Hamilton P1, ci=1 UNAcapeleto P2 0 laps DNF
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    $fc[1] = 1; $fc[2] = 2; $fc[3] = 1; $fc[6] = 3
+    $offU = 1 + 46
+    $fc[$offU + 0] = 2; $fc[$offU + 1] = 0; $fc[$offU + 2] = 2; $fc[$offU + 6] = 4
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.32 invariant: session exists" ($sessions.Count -ge 1)
+    if ($sessions.Count -lt 1) { return }
+    $rs = Get-DictValue $sessions[0] "results"
+    Assert "v1.1.32 invariant: results exist" ($rs -ne $null)
+
+    $unaFound = $false
+    if ($rs -ne $null) {
+        foreach ($r in $rs) {
+            $tg = Get-DictValue $r "tag"
+            if ($tg -eq "UNAcapeleto") { $unaFound = $true }
+        }
+    }
+    Assert "v1.1.32 invariant: UNAcapeleto preserved despite slot.AiControlled=true (lobby evidence wins)" $unaFound
+}
+
+Write-Host "=== Test 19: real player + lobby evidence vs slot.AiControlled (v1.1.32 invariant) ===" -ForegroundColor Cyan
+[void](Test-RealPlayerLobbyEvidenceVsAi)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow
