@@ -261,12 +261,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             bool fcMissing = sess.FinalClassification == null
                 || sess.FinalClassification.Classification == null
-                || sess.FinalClassification.Classification.Count == 0;
+                || sess.FinalClassification.Classification.Length == 0;
             if (!fcMissing) return;
 
             int trackId = sess.TrackId.HasValue ? sess.TrackId.Value : -1;
             string trackName = sess.TrackId.HasValue
-                ? Lookups.LookupOrDefault(Lookups.Track, sess.TrackId.Value, "Track") : "(unknown)";
+                ? Lookups.LookupOrDefault(Lookups.Tracks, sess.TrackId.Value, "Track") : "(unknown)";
             store.Notes.Add(string.Format(
                 "[WARNING] {0} on {1} (trackId={2}) ended without a FinalClassification packet. "
                 + "Results were reconstructed from telemetry (positions are approximations based on "
