@@ -2,6 +2,24 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.32] - 2026-05-10
+
+### Fixed
+- **Carro fantasma persistente em modo espectador (Monaco_20260510_213256_9A0E7F.otk — ci=19 Williams #23):** o piloto IA grid filler aparecia nos resultados de Quali (`Car_19`, status `NotClassified`, 0 voltas) e Race (`Driver_19`, status `DidNotFinish`, 0 voltas, grid=21), inflando o `participants[]` global de 19 humanos reais para 21 entradas. Causa raiz: `SessionStore.HumanCarIdxs[i]` é "sticky" (uma vez marcado true, permanece true para sempre na sessão — comentário no código já alertava). O F1 25 envia, em pacotes Participants iniciais, AI grid fillers com `AiControlled=false` + `Platform!=255`, latcheando `HumanCarIdxs[i]=true` para um slot que nunca foi humano. A guard "positive evidence first" introduzida em v1.1.30 (`IsKnownRealPlayer`) confiava cegamente nesse latch e retornava `true`, fazendo o slot escapar de todas as 5 camadas de filtro phantom (`IsPhantomEntry`, `ShouldSkipFcAiGridFillerRow`, `RemovePhantomDrivers` etc.). Fix em duas camadas: (1) hardening em `IsKnownRealPlayer` requer corroboração antes de honrar o sticky-human flag — evidência forte de lobby/bestKnown OU `slot.AiControlled==false` no momento OU qualquer DriverRun com `Laps.Count>0` para esse `carIdx`; (2) Camada 6 (`ApplyResultsPostFilter`) como rede de segurança final no `resultsOut`
+
+### Added
+- **Camada 6 — `LeagueFinalizer.ApplyResultsPostFilter` (defesa em profundidade no resultsOut):** rede de segurança final que roda depois de FC main loop + fallbacks, mas antes do re-numbering de posições. Descarta linhas que simultaneamente têm `numLaps==0` + tag genérica + `slot.AiControlled==true` + sem evidência positiva (lobby/bestKnown). Cada drop é registrado em `_debug.notes` como `[CAMADA-6]` para rastreabilidade. **Invariantes preservadas (validadas no Test 19):** jamais filtra pilotos com voltas (`numLaps>0`), jamais filtra pilotos com evidência forte de lobby/bestKnown, e nunca atua em sessões offline (`NetworkGame!=1`)
+- **Diagnóstico "Race ended without FinalClassification" (`NoteIfFinalClassificationMissing`):** quando uma sessão Race/Quali termina sem `FinalClassificationData` (cenário típico de espectador F1 25 onde a tela de resultados não carrega), o finalizer adiciona uma nota `[WARNING]` em `_debug.notes` informando o nome da sessão, track, e orientando que os resultados foram reconstruídos via telemetria. Não altera resultados — apenas avisa quem está consumindo o `.otk` que aquela classificação é aproximada (pode merecer verificação manual ou re-export)
+- Test 18 em `Test-Finalizer.ps1`: regressão Monaco-style ghost. Constrói cenário de pacote Participants inicial com `AiControlled=false` + `Platform=Steam` para ci=2 (latcheando `HumanCarIdxs[2]=true`), depois corrige para `AiControlled=true` em pacote posterior, e envia FC com row P3 0-laps `NotClassified` para ci=2. Valida que (a) Hamilton e Verstappen reais são preservados, (b) ci=2 é filtrado, (c) `results.Count == 2`, (d) nota `[CAMADA-6]` aparece em `store.Notes`
+- Test 19 em `Test-Finalizer.ps1`: invariante UNAcapeleto. Constrói cenário com lobby contendo UNAcapeleto (rn=74, tid=3), pacote Participants reportando `AiControlled=true` para o slot ci=1 (slot promovido a IA após disconnect), FC com 0 laps DNF. Valida que UNAcapeleto continua nos resultados — evidência forte de lobby vence sobre flag de IA atual, preservando o fix v1.1.30
+
+### Changed
+- `IsKnownRealPlayer` reorganizada para checar evidência forte (lobby/bestKnown via `LookupBestKnownTagForEntry`) PRIMEIRO. Só depois consulta o sticky `HumanCarIdxs`. Quando o sticky está true MAS o slot está atualmente marcado `AiControlled=true`, exige corroboração adicional via DriverRun com voltas — caso contrário descarta o sticky como artefato de pacote inicial bugado
+- **Auto-export trigger e auto-clean permanecem inalterados (`OvertakePlugin`)**: clean ainda ocorre apenas após export confirmadamente bem-sucedido (`exportOk == true`), preservando backup quando o `.otk` falha em ser escrito. Atendendo ao requisito explícito do usuário ("se auto-export disparar em hora errada, não podemos perder a opção de gerar manualmente")
+
+### Note
+- **Limitação conhecida (sem mudança em v1.1.32):** jogadores reais cujo `LobbyInfoData` reportou `name="Player"` (privacy on no perfil F1 25) continuam aparecendo como `Driver_X` nos resultados, COM suas voltas e estatísticas completas. NÃO são fantasmas — são jogadores reais sem identificação visível, e sua remoção indevida violaria a invariante `Laps.Count > 0 => never filter`. Validado no Monaco_20260510: `Driver_13` (P15, 36 voltas, Stake) e `Driver_16` (P4, 39 voltas, Mercedes) são pilotos reais e foram corretamente preservados na v1.1.32
+
 ## [1.1.31] - 2026-05-09
 
 ### Fixed

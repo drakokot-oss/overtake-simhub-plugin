@@ -42,22 +42,51 @@ namespace Overtake.SimHub.Plugin.Finalizer
         /// or carIdx was confirmed human in this session. Use this BEFORE applying
         /// any phantom/overflow filter to avoid accidentally dropping real players who
         /// disconnected before completing a lap.
+        ///
+        /// v1.1.32 hardening: HumanCarIdxs is "sticky" — once true, stays true forever
+        /// in this session (see SessionStore.IngestParticipants). F1 25 has a known bug
+        /// where early Participants packets misreport AI grid fillers with
+        /// AiControlled=false + Platform!=255, latching HumanCarIdxs[i] to true for a
+        /// slot that never had a real human. Trusting that latch blindly let AI grid
+        /// fillers (Monaco_20260510 ci=19 Williams #23 case) escape every phantom
+        /// filter. We now require the sticky human flag to be CORROBORATED by either:
+        ///   (a) the slot is currently NOT marked AiControlled (no contradiction), OR
+        ///   (b) any DriverRun for this carIdx has Laps.Count > 0 (real telemetry), OR
+        ///   (c) strong lobby/bestKnown evidence (which is the (a)-path of the function).
+        /// This preserves the v1.1.30 invariant for UNAcapeleto-style abandoners
+        /// (lobby evidence + sticky human + 0 laps + slot promoted to AI = REAL),
+        /// while filtering AI grid fillers that only have the latched HumanCarIdxs flag.
         /// </summary>
         private static bool IsKnownRealPlayer(SessionRun sess, SessionStore store, int carIdx, ParticipantEntry slot)
         {
-            // Per-session evidence: confirmed human via Participants packet
+            // Strong evidence (cross-session, immune to early-packet artifacts).
+            if (slot != null && slot.TeamId != 255)
+            {
+                string resolved = store != null ? store.LookupBestKnownTagForEntry(slot) : null;
+                if (!string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return true;
+            }
+
+            // Per-session evidence: confirmed human via Participants packet.
             bool wasHuman;
             if (sess.HumanCarIdxs.TryGetValue(carIdx, out wasHuman) && wasHuman)
-                return true;
+            {
+                // No contradiction: slot is currently human (or unknown). Trust the flag.
+                if (slot == null || !slot.AiControlled)
+                    return true;
 
-            if (slot == null || slot.TeamId == 255)
-                return false;
-
-            // Check ALL name maps (lobby, bestKnownTags rn-key, bestKnownTagsByNet)
-            // through the public store API, which already implements priority order.
-            string resolved = store != null ? store.LookupBestKnownTagForEntry(slot) : null;
-            if (!string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
-                return true;
+                // Slot is currently AI. The sticky flag may be a F1-25 early-packet
+                // artifact. Require corroborating telemetry to keep treating as real.
+                foreach (var kvp in sess.Drivers)
+                {
+                    DriverRun dr = kvp.Value;
+                    if (dr != null && dr.CarIdx == carIdx && dr.Laps.Count > 0)
+                        return true;
+                }
+                // Sticky-human + currently AI + zero laps + no lobby/bestKnown evidence
+                // (already checked above) → very likely an AI grid filler that
+                // accidentally latched HumanCarIdxs. Fall through to "not real".
+            }
 
             return false;
         }
@@ -131,6 +160,121 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (store.Notes != null && store.Notes.Count < 500)
                 store.Notes.Add(note);
             return true;
+        }
+
+        /// <summary>
+        /// Camada 6 (v1.1.32) — last-line defense post-filter on the final resultsOut.
+        /// Removes rows that, despite passing every upstream filter, still look like
+        /// an AI grid filler (no laps, generic tag, currently AiControlled, no
+        /// lobby/bestKnown evidence). This is the safety net that caught the
+        /// Monaco_20260510 ci=19 (Williams #23) ghost — it sneaked through every
+        /// upstream filter because HumanCarIdxs[19] was latched true by an early
+        /// packet with a wrong AiControlled=false flag, and the v1.1.30
+        /// "positive-evidence-first" check trusted that latch.
+        ///
+        /// SAFETY (preserves v1.1.30 invariants):
+        ///  - Drivers with Laps.Count > 0 (numLaps > 0 in the row) are NEVER touched.
+        ///  - Drivers with positive lobby/bestKnown evidence (IsKnownRealPlayer with
+        ///    the v1.1.32 hardening) are NEVER touched.
+        ///  - Only generic tags (Driver_X / Car_X / CarN / Player_*) are eligible.
+        ///  - Only online sessions (NetworkGame == 1) are filtered. Offline keeps
+        ///    its existing behavior.
+        ///  - Each drop is recorded in store.Notes for traceability.
+        /// </summary>
+        private static int ApplyResultsPostFilter(
+            SessionRun sess, SessionStore store, IList<Dictionary<string, object>> resultsOut)
+        {
+            if (resultsOut == null || resultsOut.Count == 0) return 0;
+            if (sess == null || sess.NetworkGame != 1) return 0;
+
+            int dropped = 0;
+            for (int i = resultsOut.Count - 1; i >= 0; i--)
+            {
+                var res = resultsOut[i];
+                if (res == null) continue;
+
+                object tagObj, ciObj, lapsObj;
+                if (!res.TryGetValue("tag", out tagObj) || tagObj == null) continue;
+                if (!res.TryGetValue("carIdx", out ciObj) || ciObj == null) continue;
+                if (!res.TryGetValue("numLaps", out lapsObj) || lapsObj == null) continue;
+
+                string tag = tagObj.ToString();
+                int carIdx, numLaps;
+                try { carIdx = Convert.ToInt32(ciObj); }
+                catch { continue; }
+                try { numLaps = Convert.ToInt32(lapsObj); }
+                catch { continue; }
+
+                // INVARIANT 1: any telemetry → keep.
+                if (numLaps > 0) continue;
+
+                // INVARIANT 2: only generic tags are candidates.
+                if (!IsGenericTag(tag)) continue;
+
+                ParticipantEntry slotInfo;
+                sess.TeamByCarIdx.TryGetValue(carIdx, out slotInfo);
+
+                // Drop ONLY if we can prove it is currently AI-controlled. A null/255
+                // teamInfo means we have no information — keep (fail safe to inclusion).
+                if (slotInfo == null || slotInfo.AiControlled == false) continue;
+
+                // INVARIANT 3: positive lobby/bestKnown/sticky-human evidence wins.
+                if (IsKnownRealPlayer(sess, store, carIdx, slotInfo)) continue;
+
+                // No telemetry, generic tag, currently AI, no positive evidence → ghost.
+                resultsOut.RemoveAt(i);
+                dropped++;
+
+                if (store != null && store.Notes != null && store.Notes.Count < 500)
+                {
+                    store.Notes.Add(string.Format(
+                        "[CAMADA-6] Dropped phantom result row: tag={0} carIdx={1} team={2} rn={3} "
+                        + "(generic+0laps+AI+no-positive-evidence). Likely F1-25 AI grid filler that "
+                        + "escaped upstream filters via stale HumanCarIdxs latch.",
+                        tag, carIdx,
+                        slotInfo != null ? (int)slotInfo.TeamId : -1,
+                        slotInfo != null ? (int)slotInfo.RaceNumber : -1));
+                }
+            }
+            return dropped;
+        }
+
+        /// <summary>
+        /// v1.1.32 — diagnostic note when the session ends without a FinalClassification
+        /// packet. Common in spectator mode when the F1 25 results screen never loads,
+        /// and silent partial losses can also leave numClassified==0 even though SEND
+        /// fired. Recorded as a [WARNING] in store.Notes so the user knows to verify
+        /// the file (and may want to re-check or re-export). Does NOT alter results.
+        /// </summary>
+        private static void NoteIfFinalClassificationMissing(SessionRun sess, SessionStore store)
+        {
+            if (sess == null || store == null || store.Notes == null) return;
+            if (store.Notes.Count >= 500) return;
+
+            string stName = sess.SessionType.HasValue
+                ? Lookups.LookupOrDefault(Lookups.SessionType, sess.SessionType.Value, "S") : "";
+            bool isRace = stName.IndexOf("Race", StringComparison.OrdinalIgnoreCase) >= 0
+                       || stName.IndexOf("Sprint", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isQuali = stName.IndexOf("Qualifying", StringComparison.OrdinalIgnoreCase) >= 0
+                        || stName.IndexOf("Shootout", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (!isRace && !isQuali) return;
+
+            bool fcMissing = sess.FinalClassification == null
+                || sess.FinalClassification.Classification == null
+                || sess.FinalClassification.Classification.Count == 0;
+            if (!fcMissing) return;
+
+            int trackId = sess.TrackId.HasValue ? sess.TrackId.Value : -1;
+            string trackName = sess.TrackId.HasValue
+                ? Lookups.LookupOrDefault(Lookups.Track, sess.TrackId.Value, "Track") : "(unknown)";
+            store.Notes.Add(string.Format(
+                "[WARNING] {0} on {1} (trackId={2}) ended without a FinalClassification packet. "
+                + "Results were reconstructed from telemetry (positions are approximations based on "
+                + "lap count and total lap time, not the official game classification). "
+                + "If the race finished normally for everyone, please re-check the file or "
+                + "manually export from a saved replay. This is a known F1-25 limitation in "
+                + "spectator mode when the results screen does not load.",
+                stName, trackName, trackId));
         }
 
         private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess, SessionStore store)
@@ -1278,10 +1422,20 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 }
             }
 
+            // Camada 6 (v1.1.32) — last-line phantom defense on resultsOut.
+            // Runs BEFORE the position re-numbering so dropped rows don't leave
+            // gaps in 1..N. Safe because numLaps>0 / lobby-evidence rows are
+            // never touched (see ApplyResultsPostFilter invariants).
+            ApplyResultsPostFilter(sess, store, resultsOut);
+
             // Re-number positions
             resultsOut.Sort((a, b) => ((int)a["position"]).CompareTo((int)b["position"]));
             for (int i = 0; i < resultsOut.Count; i++)
                 resultsOut[i]["position"] = i + 1;
+
+            // v1.1.32 — diagnostic note for "race ended without FC" cases (helps
+            // narrators/spectators detect the F1-25 results-screen-never-loaded scenario).
+            NoteIfFinalClassificationMissing(sess, store);
 
             ApplyRaceClassifiedLappedFlags(resultsOut, isRace);
 

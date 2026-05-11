@@ -124,7 +124,7 @@ Reconstrói resultados a partir da telemetria:
 
 ## Filtragem de pilotos fantasma
 
-Cinco camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais. **Princípio fundamental (v1.1.30): evidência positiva primeiro.** Antes de aplicar qualquer heurística de phantom (overflow, AI flag, generic tag), todos os filtros checam se há evidência positiva de que o slot pertence a um piloto real. Se sim, NUNCA filtra.
+Seis camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais. **Princípio fundamental (v1.1.30): evidência positiva primeiro.** Antes de aplicar qualquer heurística de phantom (overflow, AI flag, generic tag), todos os filtros checam se há evidência positiva de que o slot pertence a um piloto real. Se sim, NUNCA filtra. **Refinamento v1.1.32: sticky-evidence vs evidência atual.** O `HumanCarIdxs[i]` é "sticky" (latched true forever na sessão), mas o F1 25 envia em pacotes Participants iniciais flags `AiControlled=false` errados para slots IA, latcheando o flag indevidamente. A partir da v1.1.32, sticky-human só vence se houver corroboração: `slot.AiControlled==false` no momento OU pelo menos um `DriverRun` com `Laps.Count>0` para esse `carIdx`. Evidência forte de lobby/bestKnown segue tendo prioridade absoluta.
 
 ### Conceito-chave: overflow slot
 
@@ -179,6 +179,14 @@ Filtra linhas FC que não representam pilotos reais:
 Remove fantasmas de reconexão:
 - Generic tag + 0 laps + `raceNumber_teamId` já pertence a outro driver com nome real
 - Só em sessões online
+
+### 7. ApplyResultsPostFilter — Camada 6 (v1.1.32) — `LeagueFinalizer`
+
+Última linha de defesa, executada no final do `FinalizeSession` sobre o `resultsOut` já construído (depois de FC main loop, fallbacks, e antes do re-numbering de posições):
+- Drop apenas se TODOS verdadeiros simultaneamente: `numLaps==0` + tag genérica + `slot.AiControlled==true` + sem evidência positiva (`IsKnownRealPlayer` retorna false sob a regra v1.1.32)
+- Cada drop emite uma nota `[CAMADA-6]` em `_debug.notes` para rastreabilidade
+- Só atua em sessões online
+- **Cobre o caso Monaco_20260510 ci=19**: AI grid filler que escapou todos os filtros upstream porque `HumanCarIdxs[19]` foi latcheado por pacote Participants inicial bugado
 
 ### Segurança (invariantes)
 
@@ -339,6 +347,23 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 ---
 
 ## Problemas conhecidos resolvidos
+
+### v1.1.32
+
+| Problema | Causa raiz | Correção |
+|----------|-----------|----------|
+| **Carro fantasma persistente em modo espectador** (`Monaco_20260510_213256_9A0E7F.otk`, ci=19 Williams #23) — AI grid filler aparecia em Quali (`Car_19`, NotClassified, 0 laps) e Race (`Driver_19`, DidNotFinish, 0 laps, grid=21), inflando `participants[]` global de 19 para 21 entradas. Escapou todas as 5 camadas de filtro phantom existentes. | `SessionStore.HumanCarIdxs[i]` é "sticky" (uma vez true, nunca volta a false na sessão — comportamento intencional). O F1 25 envia, em pacotes Participants iniciais, AI grid fillers com `AiControlled=false` + `Platform!=255`, latcheando `HumanCarIdxs[i]=true` para slots que nunca foram humanos. A guard `IsKnownRealPlayer` (v1.1.30) consultava `HumanCarIdxs` PRIMEIRO e retornava `true` cegamente, fazendo a checagem `positive evidence first` afirmar que aquele slot era real. Resultado: short-circuit `return false` em `IsPhantomEntry`, e `if (effAi == true) return true` em `ShouldSkipFcAiGridFillerRow` nunca era atingido para esse slot porque o caminho FC já tinha sido "aprovado". | (1) Hardening em `IsKnownRealPlayer`: evidência forte de lobby/bestKnown checada PRIMEIRO; sticky `HumanCarIdxs` só vence se corroborado por `slot.AiControlled==false` OU por algum `DriverRun` com `Laps.Count>0` para esse `carIdx`. (2) Camada 6 — `ApplyResultsPostFilter` no `resultsOut` final como rede de segurança que descarta linhas com `numLaps==0` + tag genérica + `slot.AiControlled==true` + sem evidência positiva. Cada drop registrado em `_debug.notes` como `[CAMADA-6]`. |
+| **Tabela final de classificação ausente para alguns narradores** — em modo espectador, F1 25 às vezes não envia `FinalClassificationData` (tela de resultados não carrega). O fallback de telemetria (`BuildRaceFallbackResults`/`BuildQualiFallbackResults`) gera resultados aproximados, mas o usuário não tinha visibilidade de que aquela tabela era reconstruída e não oficial. | Ausência de diagnóstico explícito para o consumidor do `.otk`. | `NoteIfFinalClassificationMissing` adiciona uma nota `[WARNING]` em `_debug.notes` quando uma sessão Race/Quali termina sem `FinalClassification`, informando o nome da sessão, track e orientando re-verificar o arquivo. **Trigger de auto-export e auto-clean inalterados** (auto-clean ainda só roda após export bem-sucedido — preserva backup quando o arquivo falha em ser escrito, atendendo ao requisito explícito do usuário). |
+
+**Validação manual (v1.1.32):**
+- `Monaco_20260510_213256_9A0E7F.otk` analisado: ci=19 (Williams #23) era AI grid filler com `aiControlled=true` no JSON e 0 laps em ambas as sessões. Não estava em `lobbyNameMap` nem em `bestKnownTags`. `HumanCarIdxs[19]` foi latcheado por pacote inicial bugado (única explicação para escape dos filtros existentes). Hipótese confirmada por: tag em Quali (`Car_19` — placeholder do `EarlyRegisterDriver`) vs em Race (`Driver_19` — placeholder do FC main loop sem entrada em `TagsByCarIdx[19]`)
+- `Driver_13` (P15, 36 laps, Stake) e `Driver_16` (P4, 39 laps, Mercedes) confirmados como **jogadores reais** com `LobbyInfoData.name="Player"` (privacy on). Mantidos nos resultados pela invariante `Laps.Count > 0 ⇒ never filter`. Não são fantasmas — não devem ser removidos
+- Test 18 simula a sequência exata (pacote Participants inicial bugado para ci=2 + correção posterior + FC com 0 laps): valida que ci=2 é filtrado, Hamilton/Verstappen reais preservados, e nota `[CAMADA-6]` aparece em `store.Notes`
+- Test 19 simula UNAcapeleto (lobby evidence + slot.AiControlled=true após disconnect): valida que continua preservado como DNF — lobby evidence vence sobre flag IA atual
+
+**Princípio de codificação para evitar regressões similares:**
+- Todo flag "sticky" (latched true forever) que sirva de evidência POSITIVA para preservar dados precisa de um mecanismo de invalidação quando outras evidências contradizem o latch. Sticky-true é seguro como "memória do que já foi confirmado", mas perigoso como "fonte única de verdade no momento da decisão" — sempre cruzar com o estado atual (`slot.AiControlled`, `Laps.Count`, etc.).
+- Camadas de defesa em profundidade (5 → 6 nesta release) devem cada uma ter sua própria invariante explícita e logging de drops, para que regressões fiquem visíveis no `.otk` exportado e não sejam descobertas só meses depois em produção.
 
 ### v1.1.31
 
