@@ -711,6 +711,7 @@ namespace Overtake.SimHub.Plugin.Store
             }
 
             d.ErsSamplesCount++;
+            d.ErsStorePctSumSimple += storePct;
 
             if (!d.ErsFirstSampleSet)
             {

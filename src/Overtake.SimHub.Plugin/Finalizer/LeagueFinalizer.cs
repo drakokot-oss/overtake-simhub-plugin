@@ -1918,7 +1918,21 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
                 double storeAvg = 0d;
                 if (dr.ErsStorePctTimeMs > 0L)
+                {
+                    // Preferred: time-weighted mean. In production samples
+                    // arrive at ~10Hz so dtMs is ~100ms each, giving a
+                    // robust integrated average that is insensitive to
+                    // sampling jitter.
                     storeAvg = dr.ErsStorePctSumWeighted / dr.ErsStorePctTimeMs;
+                }
+                else if (dr.ErsSamplesCount > 0)
+                {
+                    // Fallback: simple arithmetic mean. Activated when the
+                    // time signal degenerates (e.g. CI / test harnesses that
+                    // fire all packets within the same millisecond, leaving
+                    // ErsStorePctTimeMs at 0 even though we have samples).
+                    storeAvg = dr.ErsStorePctSumSimple / dr.ErsSamplesCount;
+                }
 
                 double deployedAvg = 0d;
                 if (deployedPerLap.Count > 0)

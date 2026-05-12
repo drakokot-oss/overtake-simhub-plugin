@@ -161,6 +161,13 @@ namespace Overtake.SimHub.Plugin.Store
         public float ErsStorePctMax;
         public double ErsStorePctSumWeighted;
         public long ErsStorePctTimeMs;
+        // Simple (un-weighted) sum, kept alongside the weighted accumulator
+        // as a fallback for environments where consecutive packets arrive
+        // within the same millisecond (e.g. CI / test harnesses): in that
+        // case ErsStorePctTimeMs may stay near zero and the time-weighted
+        // mean would be undefined. The finalizer falls back to the simple
+        // arithmetic mean of all non-paused samples then.
+        public double ErsStorePctSumSimple;
         public long ErsLastSampleMs;
         public byte ErsDeployModeLast;
         public bool ErsFirstSampleSet;
@@ -206,6 +213,7 @@ namespace Overtake.SimHub.Plugin.Store
             ErsStorePctMax = 0f;
             ErsStorePctSumWeighted = 0d;
             ErsStorePctTimeMs = 0L;
+            ErsStorePctSumSimple = 0d;
             ErsLastSampleMs = 0L;
             ErsDeployModeLast = 0;
             ErsFirstSampleSet = false;
