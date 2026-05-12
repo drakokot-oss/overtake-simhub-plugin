@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Generates 4 realistic example league-1.0 JSON files for testing.
+    Generates 4 realistic example league-1.1 JSON files for testing.
 #>
 param([string]$OutDir = "")
 $ErrorActionPreference = "Stop"
@@ -416,7 +416,7 @@ function BuildFullJson($cfg) {
     foreach ($d in $grid) { $allTags += $d.tag }
 
     return @{
-        schemaVersion = "league-1.0"
+        schemaVersion = "league-1.1"
         game = "F1_25"
         capture = @{
             sessionUID = $race.sessionUID

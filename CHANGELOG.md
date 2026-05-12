@@ -2,6 +2,38 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.34] - 2026-05-12
+
+### Added
+- **Telemetria de ERS (bateria) por piloto, em percentual:** novo bloco `ersTelemetry` em cada piloto do `.otk`, alinhado com o HUD do jogo. Permite analisar consumo e economia média de bateria pós-corrida. Pensado para narradores, análise de liga e relatórios:
+  - **`storePctAvg`** — economia média: % médio de carga da bateria ponderado pelo tempo (responde "quão cheia ele mantinha a bateria")
+  - **`deployedPctAvgPerLap`** — consumo médio: % da capacidade total gasto por volta (responde "quanto de bateria ele usava por volta")
+  - `storePctFirst`/`storePctLast`/`storePctMin`/`storePctMax` — referências de carga (saiu da garagem com X%, terminou com Y%, mínimo/máximo durante a corrida)
+  - `deployedPctPerLap[]`, `harvestedMgukPctPerLap[]`, `harvestedMguhPctPerLap[]` — arrays por volta (cada índice = uma volta concluída)
+  - `harvestedPctAvgPerLap` — recuperação média por volta (MGU-K + MGU-H combinados)
+  - `deployModeLast` — último modo de deploy: `None`/`Medium`/`HotLap`/`Overtake`
+  - `samplesCount`/`samplesPaused` — meta-dados de qualidade da amostra; descontam pausas e desconexões (`networkPaused=1` no UDP)
+- Bump do schema: `league-1.0` → `league-1.1` (aditivo, retrocompatível — leitores antigos ignoram `ersTelemetry`)
+- Test 21 em `Test-Finalizer.ps1`: simula 3 voltas com ciclo gasta/recupera + 1 sample pausado, valida `deployedPctPerLap=[100,95,90]`, `deployedPctAvgPerLap=95`, `samplesPaused=1`, range de `storePctAvg`, e `schemaVersion=="league-1.1"`. Cobre detecção de virada de volta via queda do contador
+- Test 22 em `Test-Finalizer.ps1`: re-executa o cenário Brazil-style (v1.1.33) com payload ERS preenchido também na IA grid filler do mesmo time. Garante que **ERS é dado puramente aditivo**: a IA continua filtrada (não vira evidência positiva), Hamilton e Drako% preservados. Trava o invariante "ERS não afeta filtros de fantasma"
+
+### Changed
+- `Packets/CarStatusData.cs` agora lê os offsets 29–54 da entry de 55 bytes (potência ICE/MGU-K em Watts, `ersStoreEnergy` em Joules, `ersDeployMode` 0–3, `ersHarvested*ThisLap*` em Joules, `ersDeployedThisLap` em Joules, `networkPaused`). Mantém fallback gracioso: se a entry tiver menos de 55 bytes (versões anteriores do jogo), lê apenas fuel/TC/ABS como antes e deixa `ErsCaptured=false`
+- `Store/SessionStore.IngestCarStatus` agora recebe `nowMs` (relógio monotônico da `Ingest()`) para calcular **média ponderada pelo tempo** entre amostras. Constantes locais: `ErsMaxJoules=4_000_000` (capacidade regulamentar = 100%), `ErsRolloverDropPct=5` (epsilon para detectar virada de volta via queda do contador), `ErsMaxSampleGapMs=5000` (cap de dt para não enviesar a média com pausas longas). Conversão Joules → % é feita na fronteira, o resto do pipeline trabalha em percentual
+- Detecção de virada de volta: quando `ersDeployedThisLap` cai abruptamente (drop > 5pp), o snapshot máximo da volta é empurrado para `deployedPctPerLap[]` antes do reset. Robusto contra flutuações de rede pequenas. A volta em andamento ao final da corrida é fechada explicitamente em `BuildDriverDictionary` para que o último valor não se perca
+- Amostras com `networkPaused=1` não contribuem para `storePctAvg`/`Min`/`Max`/`First`/`Last`/`DeployModeLast`, mas são contadas em `samplesPaused` para que o consumidor saiba quantas amostras foram descartadas
+- `Finalizer/LeagueFinalizer.BuildDriverDictionary` emite o bloco `ersTelemetry` quando o piloto tem `ErsCaptured=true`. Arrays per-lap arredondados a 2 casas decimais; agregados também a 2 casas
+- `Finalizer/Lookups.cs`: novo dicionário `ErsDeployModeMap` (`0=None, 1=Medium, 2=HotLap, 3=Overtake`)
+- `Store/DriverRun.cs`: novos campos para acumuladores ERS (sticky min/max, soma ponderada para média, listas por volta, snapshots da volta em andamento). Todos resetam corretamente em `Reset()` para que `BeginNewCapture()` não vaze dados de evento anterior
+
+### Note
+- **Sem mudança nos filtros de fantasma** (Camadas 1–6 da v1.1.29–v1.1.33). ERS é data ride-along no `DriverRun`; não toca em `IsKnownRealPlayer`/`IsPhantomEntry`/`ApplyResultsPostFilter`/`RemovePhantomDrivers`/`LookupBestKnownTagForEntry[Strict]`. Test 22 trava esse invariante explicitamente
+- **Sem mudança de UX**: nenhuma configuração nova no plugin, ERS é coletado automaticamente. Se você não quer no `.otk`, não há toggle — mas custo é negligível (~3% no tamanho do arquivo, ~17 KB em corrida 20×60)
+- **Sem dependência adicional**: usamos o mesmo pacote `CarStatusData` (ID 7) já recebido a ~10 Hz, apenas lendo mais bytes da entry. Sem mudança em socket, frequência ou pipeline de parsers
+- **`deployedPctPerLap` é sempre 0–100%** — o regulamento FIA limita o deploy a 4 MJ/volta (= 100% da capacidade), e o F1 25 respeita isso. Valores acima são teoricamente impossíveis
+- **Distribuição por modo de deploy** (% do tempo em cada modo) ficou fora desta versão: exige amostragem temporal cuidadosa e é fácil de adicionar depois sem quebrar nada (campo aditivo). Fica para v2 quando houver demanda
+- **Princípio de design** (acumulado): separar lookups por intenção continua valendo. Aqui, separamos também as métricas por intenção: `storePctAvg` (carga média = "economia") vs `deployedPctAvgPerLap` (gasto médio = "consumo"). Ambas em %, ambas comparáveis entre pilotos, mas respondem a perguntas diferentes
+
 ## [1.1.33] - 2026-05-12
 
 ### Fixed

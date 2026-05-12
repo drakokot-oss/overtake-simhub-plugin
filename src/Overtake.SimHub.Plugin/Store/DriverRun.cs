@@ -140,6 +140,48 @@ namespace Overtake.SimHub.Plugin.Store
         public bool FuelFirstSampleSet;
         public bool FuelCaptured;
 
+        // v1.1.34 — ERS / battery telemetry. All values stored as PERCENT
+        // (0..100) of the regulation capacity (4 MJ). The conversion from Joules
+        // to % is done at ingest time so this struct holds the human-facing unit.
+        //
+        // - Store* fields track the energy level in the battery itself.
+        // - Deployed*PerLap / Harvested*PerLap are per-lap snapshots, closed at
+        //   the LapData rollover (currentLapNum increment).
+        // - StorePctSumWeighted / StorePctTimeMs implement a time-weighted mean
+        //   for StorePctAvg: each sample contributes (value * dtMs) and we
+        //   divide at finalize time. Samples received with NetworkPaused=1 are
+        //   counted in ErsSamplesPaused but excluded from the average so a
+        //   driver going idle during a long pause does not bias the result.
+        // - DeployedLastSnapshot / HarvestedMguk/HarvestedMguhLastSnapshot keep
+        //   the *latest seen* per-lap counter; we publish it to the per-lap
+        //   array the first time we observe a lap rollover in LapData.
+        public float ErsStorePctFirst;
+        public float ErsStorePctLast;
+        public float ErsStorePctMin;
+        public float ErsStorePctMax;
+        public double ErsStorePctSumWeighted;
+        public long ErsStorePctTimeMs;
+        // Simple (un-weighted) sum, kept alongside the weighted accumulator
+        // as a fallback for environments where consecutive packets arrive
+        // within the same millisecond (e.g. CI / test harnesses): in that
+        // case ErsStorePctTimeMs may stay near zero and the time-weighted
+        // mean would be undefined. The finalizer falls back to the simple
+        // arithmetic mean of all non-paused samples then.
+        public double ErsStorePctSumSimple;
+        public long ErsLastSampleMs;
+        public byte ErsDeployModeLast;
+        public bool ErsFirstSampleSet;
+        public bool ErsCaptured;
+        public int ErsSamplesCount;
+        public int ErsSamplesPaused;
+        public List<float> DeployedPctPerLap = new List<float>();
+        public List<float> HarvestedMgukPctPerLap = new List<float>();
+        public List<float> HarvestedMguhPctPerLap = new List<float>();
+        public float DeployedPctLastSnapshot;
+        public float HarvestedMgukPctLastSnapshot;
+        public float HarvestedMguhPctLastSnapshot;
+        public byte ErsCurrentLapNum;
+
         public void Reset()
         {
             Laps.Clear();
@@ -165,6 +207,26 @@ namespace Overtake.SimHub.Plugin.Store
             FuelRemainingLapsLast = 0f;
             FuelFirstSampleSet = false;
             FuelCaptured = false;
+            ErsStorePctFirst = 0f;
+            ErsStorePctLast = 0f;
+            ErsStorePctMin = 0f;
+            ErsStorePctMax = 0f;
+            ErsStorePctSumWeighted = 0d;
+            ErsStorePctTimeMs = 0L;
+            ErsStorePctSumSimple = 0d;
+            ErsLastSampleMs = 0L;
+            ErsDeployModeLast = 0;
+            ErsFirstSampleSet = false;
+            ErsCaptured = false;
+            ErsSamplesCount = 0;
+            ErsSamplesPaused = 0;
+            DeployedPctPerLap.Clear();
+            HarvestedMgukPctPerLap.Clear();
+            HarvestedMguhPctPerLap.Clear();
+            DeployedPctLastSnapshot = 0f;
+            HarvestedMgukPctLastSnapshot = 0f;
+            HarvestedMguhPctLastSnapshot = 0f;
+            ErsCurrentLapNum = 0;
         }
     }
 }

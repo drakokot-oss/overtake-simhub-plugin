@@ -348,6 +348,23 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.34
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Coletar uso médio de bateria (ERS) por piloto, em percentual, como visto no jogo** | Novo bloco `ersTelemetry` no JSON do piloto (schema `league-1.1`, retrocompatível). `Packets/CarStatusData.cs` agora lê offsets 29–54 (ERS) além dos primeiros 17 bytes (fuel/TC/ABS). `SessionStore.IngestCarStatus(sid, entries, nowMs)` converte Joules → % na fronteira (4 MJ = 100%), detecta virada de volta via queda do contador `ersDeployedThisLap` (drop > 5pp), e mantém média ponderada pelo tempo entre amostras (`storePctSumWeighted / storePctTimeMs`). Amostras com `networkPaused=1` ficam fora de min/max/avg (não enviesam a média durante pausas) mas são contadas em `samplesPaused`. `LeagueFinalizer.BuildDriverDictionary` emite os campos: `storePctFirst/Last/Min/Max/Avg`, `deployedPctPerLap[]` + `deployedPctAvgPerLap`, `harvestedMgukPctPerLap[]`/`harvestedMguhPctPerLap[]` + `harvestedPctAvgPerLap`, `deployModeLast`, `samplesCount`/`samplesPaused`. Bumped `schemaVersion` para `league-1.1`. |
+
+**Métrica para "consumo médio" vs "economia média"** (princípio de produto):
+- `deployedPctAvgPerLap` = **consumo médio**: % da capacidade total gasta por volta (estilo agressivo tem valores próximos a 100%).
+- `storePctAvg` = **economia média**: % médio da carga ao longo da corrida (estilo guardador tem valores próximos a 80–90%, agressivo próximo a 30–50%).
+- Ambas em percentual (0–100), comparáveis entre pilotos do mesmo grid, alinhadas com o HUD do jogo.
+
+**Invariante anti-regressão (Test 22):** ERS é data **aditiva**. `IsKnownRealPlayer`/`IsPhantomEntry`/`ApplyResultsPostFilter` continuam sem tocar nesses campos. Test 22 re-executa o cenário Brazil da v1.1.33 com payload ERS preenchido para a IA grid filler e confirma que ela continua filtrada.
+
+**Princípio de codificação reforçado:**
+- Conversão de unidade (J → %) deve ser feita uma única vez na fronteira (`IngestCarStatus`). O resto do pipeline trabalha sempre em percentual. Isso evita o tipo de bug do v1.1.30 (`InvalidCastException` por boxing errado) e mantém o JSON externo consistente.
+- Cap de `dt` na média ponderada (`ErsMaxSampleGapMs=5000`): se o usuário pausou ou caiu da rede, uma amostra antiga não pode contribuir com peso desproporcional para a média. Constante explícita e documentada.
+
 ### v1.1.33
 
 | Problema | Causa raiz | Correção |
