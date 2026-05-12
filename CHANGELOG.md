@@ -2,6 +2,23 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.33] - 2026-05-12
+
+### Fixed
+- **Carro fantasma persistia em modo espectador mesmo após a v1.1.32 (Brazil_20260511_215148_531C9D.otk — ci=19 Visa Cash App #30):** o slot IA grid filler ainda aparecia nos resultados de Quali (`Car_19`, status DidNotFinish, 0 voltas) e Race (`Driver_19`, status DidNotFinish, 0 voltas, grid=21), inflando `participants[]` global de 19 humanos reais para 21. Causa raiz distinta da v1.1.32: `IsKnownRealPlayer` chamava `LookupBestKnownTagForEntry`, que cai num fallback final por `_lobbyNameByTeamOnly[tid]` quando net-key e rn-key falham. Esse fallback foi pensado para o caso raro "humano no lobby com `rn` diferente do que aparece em Participants", retornando o único humano daquele time. Mas quando o F1 25 adiciona um IA grid filler no MESMO time de um único humano (Drako% era o único Visa Cash App humano, rn=73), o slot ci=19 (rn=30, IA) buscava `_lobbyNameByTeamOnly[6]` e recebia `"Drako%"` como evidência positiva — fazendo a IA escapar de TODAS as 6 camadas de filtro (incluindo a Camada 6 introduzida na v1.1.32, que requer `IsKnownRealPlayer==false` para atuar). Fix: novo `LookupBestKnownTagForEntryStrict` em `SessionStore` que consulta apenas net-key + rn-key (sem o fallback `teamId-only`), e migração de `IsKnownRealPlayer` + name-recovery do FC main loop para essa versão estrita
+
+### Added
+- **`SessionStore.LookupBestKnownTagForEntryStrict(entry)`**: versão estrita do lookup público. Resolve nome apenas via `_bestKnownTagsByNet[netKey]` (chave network-id, única por jogador) ou `_bestKnownTags[rn_tid]`/`_lobbyNameByTeamRn[rn_tid]` (chave de seat do lobby, única). NÃO consulta `_lobbyNameByTeamOnly`. Use para qualquer decisão de filtro phantom. O lookup não-estrito (`LookupBestKnownTagForEntry`) continua disponível para `RetroResolveNames`, que só atribui label a slots já considerados reais
+- Test 20 em `Test-Finalizer.ps1`: regressão Brazil-style. Cenário com Hamilton (Mercedes ci=0), Drako% (único Visa Cash App humano, rn=73, ci=1) e ci=2 IA grid filler no mesmo time (rn=30, ausente do lobby). Valida que (a) Hamilton e Drako% reais são preservados, (b) Drako% aparece EXATAMENTE uma vez (sem duplicação), (c) ci=2 ghost é filtrado mesmo com `_lobbyNameByTeamOnly[6]==Drako%`, (d) `participants[]` global tem exatamente 2 entradas
+
+### Changed
+- `LeagueFinalizer.IsKnownRealPlayer` migrada para `LookupBestKnownTagForEntryStrict`. Humanos identificados via net-key ou rn-key continuam preservados normalmente. Humanos que dependiam apenas do fallback `teamId-only` (cenário raro de Participants reportar `rn` diferente do lobby) continuam protegidos por dois caminhos independentes: o sticky `HumanCarIdxs` corroborado introduzido na v1.1.32 e a renomeação retroativa em `RetroResolveNames` (que ainda usa o fallback completo)
+- FC main loop name-recovery em `LeagueFinalizer.cs` linha 1171 também migrado para `Strict`: evita que uma FC row de IA grid filler seja renomeada para o nome do humano único do mesmo time, o que poderia (a) "roubar" a row do humano real, ou (b) gerar duplicata Drako%/Drako% no `resultsOut`
+
+### Note
+- `RetroResolveNames` permanece usando o lookup não-estrito intencionalmente: o caller já tem o slot mapeado para um carIdx ativo e quer apenas resolver um label legível. A guarda `sess.Drivers.ContainsKey(resolvedName)` evita criação de duplicatas quando o humano já existe sob seu próprio tag (validado no Brazil_20260511 — Drako% real apareceu apenas uma vez)
+- Camada 6 e o hardening de `IsKnownRealPlayer` da v1.1.32 continuam ativos. A v1.1.33 fecha apenas a rota de escape adicional via `_lobbyNameByTeamOnly`. Para futuras regressões, qualquer novo uso do lookup em contexto de filtro deve usar a versão `Strict`
+
 ## [1.1.32] - 2026-05-10
 
 ### Fixed

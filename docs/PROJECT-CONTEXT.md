@@ -124,7 +124,7 @@ Reconstrói resultados a partir da telemetria:
 
 ## Filtragem de pilotos fantasma
 
-Seis camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais. **Princípio fundamental (v1.1.30): evidência positiva primeiro.** Antes de aplicar qualquer heurística de phantom (overflow, AI flag, generic tag), todos os filtros checam se há evidência positiva de que o slot pertence a um piloto real. Se sim, NUNCA filtra. **Refinamento v1.1.32: sticky-evidence vs evidência atual.** O `HumanCarIdxs[i]` é "sticky" (latched true forever na sessão), mas o F1 25 envia em pacotes Participants iniciais flags `AiControlled=false` errados para slots IA, latcheando o flag indevidamente. A partir da v1.1.32, sticky-human só vence se houver corroboração: `slot.AiControlled==false` no momento OU pelo menos um `DriverRun` com `Laps.Count>0` para esse `carIdx`. Evidência forte de lobby/bestKnown segue tendo prioridade absoluta.
+Seis camadas independentes de filtragem (defense-in-depth) removem entradas que não são pilotos reais. **Princípio fundamental (v1.1.30): evidência positiva primeiro.** Antes de aplicar qualquer heurística de phantom (overflow, AI flag, generic tag), todos os filtros checam se há evidência positiva de que o slot pertence a um piloto real. Se sim, NUNCA filtra. **Refinamento v1.1.32: sticky-evidence vs evidência atual.** O `HumanCarIdxs[i]` é "sticky" (latched true forever na sessão), mas o F1 25 envia em pacotes Participants iniciais flags `AiControlled=false` errados para slots IA, latcheando o flag indevidamente. A partir da v1.1.32, sticky-human só vence se houver corroboração: `slot.AiControlled==false` no momento OU pelo menos um `DriverRun` com `Laps.Count>0` para esse `carIdx`. **Refinamento v1.1.33: lookup estrito para decisões de filtro.** O `LookupBestKnownTagForEntry` original cai num fallback final por `_lobbyNameByTeamOnly[tid]` que retorna o "único humano daquele time". Útil para *resolver label* (RetroResolveNames), mas perigoso para *decidir filtro*: um IA grid filler no mesmo time de um humano único herdaria o nome do humano e escaparia. A partir da v1.1.33, `IsKnownRealPlayer` (e o name-recovery do FC main loop) usam `LookupBestKnownTagForEntryStrict`, que consulta apenas net-key + rn-key.
 
 ### Conceito-chave: overflow slot
 
@@ -347,6 +347,21 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 ---
 
 ## Problemas conhecidos resolvidos
+
+### v1.1.33
+
+| Problema | Causa raiz | Correção |
+|----------|-----------|----------|
+| **Carro fantasma persistia em modo espectador mesmo após a v1.1.32** (`Brazil_20260511_215148_531C9D.otk` ci=19 Visa Cash App #30 — `Car_19` na Quali, `Driver_19` na Race, 0 laps em ambas, `participants[]` global=21 com 19 humanos reais). Camada 6 NÃO disparou (não emitiu `[CAMADA-6]` em notes). | `IsKnownRealPlayer` chamava `LookupBestKnownTagForEntry`, que tem 3 níveis de prioridade: net-key → rn-key → `_lobbyNameByTeamOnly[tid]`. O fallback `teamId-only` foi pensado para o cenário raro "humano no lobby com `rn` diferente do reportado em Participants", retornando o único humano daquele time. Mas quando F1 25 adiciona um IA grid filler no MESMO time de um único humano (Drako% era o único Visa Cash App humano, rn=73), o slot ci=19 (rn=30, IA grid filler) buscava `_lobbyNameByTeamOnly[6]` e recebia `"Drako%"` como evidência positiva. `IsKnownRealPlayer` retornava `true`, fazendo a IA escapar de TODAS as 6 camadas (Camada 6 inclusive — ela só atua quando `IsKnownRealPlayer==false`). | (1) Novo `SessionStore.LookupBestKnownTagForEntryStrict(entry)` que consulta apenas net-key + rn-key, sem o fallback `teamId-only`. (2) `IsKnownRealPlayer` migrado para `Strict`. (3) FC main loop name-recovery (`LeagueFinalizer.cs:1171`) também migrado para `Strict` — evita renomear FC row de IA grid filler para o nome do humano único do mesmo time, que poderia roubar a row do humano ou criar duplicata. |
+
+**Validação manual (v1.1.33):**
+- `Brazil_20260511_215148_531C9D.otk` analisado: ci=19 (Visa Cash App #30) era IA grid filler com `aiControlled=true` no JSON. `_debug.diagnostics.lobbyInfo.bestKnownTags` não tinha `30_6`, `lobbyNameMap` não tinha `30_6`, mas `lobbyByTeamOnly[6]=Drako%` (único Visa Cash App humano, rn=73). Esse foi o canal de fuga.
+- Test 20 reproduz o cenário exato (Hamilton + Drako% + ci=2 IA grid filler em Visa Cash App): valida que ci=2 é filtrado, Drako% real preserved exatamente uma vez, `participants[]` global tem 2 entradas.
+- Test 19 (UNAcapeleto, v1.1.32) continua passando — UNAcapeleto tem entrada exata `74_3` em `_bestKnownTags`, então a versão `Strict` resolve normalmente.
+
+**Princípio de codificação (acumulado da v1.1.32 + v1.1.33):**
+- Distinguir lookups por **propósito**: lookup para *resolver label* pode usar fallbacks de menor confiança (teamId-only); lookup para *decidir filtro* deve usar apenas chaves únicas-por-slot (network-id, raceNumber+team). Misturar os dois propósitos abre rotas de escape para fantasmas.
+- Toda chave de lookup com fallback "best-effort" (não unicidade garantida) deve ter um nome explícito (ex: `*Strict` vs sem sufixo) para que o ponto de uso revele a intenção.
 
 ### v1.1.32
 
