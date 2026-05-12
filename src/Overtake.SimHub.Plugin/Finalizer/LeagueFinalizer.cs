@@ -1917,20 +1917,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 }
 
                 double storeAvg = 0d;
-                if (dr.ErsStorePctTimeMs > 0L)
+                if (dr.ErsSamplesCount > 0)
                 {
-                    // Preferred: time-weighted mean. In production samples
-                    // arrive at ~10Hz so dtMs is ~100ms each, giving a
-                    // robust integrated average that is insensitive to
-                    // sampling jitter.
-                    storeAvg = dr.ErsStorePctSumWeighted / dr.ErsStorePctTimeMs;
-                }
-                else if (dr.ErsSamplesCount > 0)
-                {
-                    // Fallback: simple arithmetic mean. Activated when the
-                    // time signal degenerates (e.g. CI / test harnesses that
-                    // fire all packets within the same millisecond, leaving
-                    // ErsStorePctTimeMs at 0 even though we have samples).
+                    // Arithmetic mean over all non-paused samples. The
+                    // CarStatus packet ships at ~10Hz uniform, so this is
+                    // statistically equivalent to a time-weighted mean and
+                    // robust to test harnesses that fire packets at
+                    // sub-millisecond cadence.
                     storeAvg = dr.ErsStorePctSumSimple / dr.ErsSamplesCount;
                 }
 

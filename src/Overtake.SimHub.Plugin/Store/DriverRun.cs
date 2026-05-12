@@ -147,28 +147,20 @@ namespace Overtake.SimHub.Plugin.Store
         // - Store* fields track the energy level in the battery itself.
         // - Deployed*PerLap / Harvested*PerLap are per-lap snapshots, closed at
         //   the LapData rollover (currentLapNum increment).
-        // - StorePctSumWeighted / StorePctTimeMs implement a time-weighted mean
-        //   for StorePctAvg: each sample contributes (value * dtMs) and we
-        //   divide at finalize time. Samples received with NetworkPaused=1 are
-        //   counted in ErsSamplesPaused but excluded from the average so a
-        //   driver going idle during a long pause does not bias the result.
+        // - StorePctSumSimple / ErsSamplesCount compute the arithmetic mean
+        //   for StorePctAvg. Samples received with NetworkPaused=1 are
+        //   excluded from the sum (and counted in ErsSamplesPaused) so a
+        //   driver idle during a long pause does not bias the result.
+        //   Production sampling is ~10Hz uniform, so a simple arithmetic
+        //   mean is the time-weighted mean — no need for an extra layer.
         // - DeployedLastSnapshot / HarvestedMguk/HarvestedMguhLastSnapshot keep
         //   the *latest seen* per-lap counter; we publish it to the per-lap
-        //   array the first time we observe a lap rollover in LapData.
+        //   array the first time we observe a counter rollover.
         public float ErsStorePctFirst;
         public float ErsStorePctLast;
         public float ErsStorePctMin;
         public float ErsStorePctMax;
-        public double ErsStorePctSumWeighted;
-        public long ErsStorePctTimeMs;
-        // Simple (un-weighted) sum, kept alongside the weighted accumulator
-        // as a fallback for environments where consecutive packets arrive
-        // within the same millisecond (e.g. CI / test harnesses): in that
-        // case ErsStorePctTimeMs may stay near zero and the time-weighted
-        // mean would be undefined. The finalizer falls back to the simple
-        // arithmetic mean of all non-paused samples then.
         public double ErsStorePctSumSimple;
-        public long ErsLastSampleMs;
         public byte ErsDeployModeLast;
         public bool ErsFirstSampleSet;
         public bool ErsCaptured;
@@ -211,10 +203,7 @@ namespace Overtake.SimHub.Plugin.Store
             ErsStorePctLast = 0f;
             ErsStorePctMin = 0f;
             ErsStorePctMax = 0f;
-            ErsStorePctSumWeighted = 0d;
-            ErsStorePctTimeMs = 0L;
             ErsStorePctSumSimple = 0d;
-            ErsLastSampleMs = 0L;
             ErsDeployModeLast = 0;
             ErsFirstSampleSet = false;
             ErsCaptured = false;

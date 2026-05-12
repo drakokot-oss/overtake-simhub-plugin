@@ -598,12 +598,6 @@ namespace Overtake.SimHub.Plugin.Store
         // A real volta-end drop is from ~95-100% to ~0%, way larger than any
         // network jitter (~0.1% between consecutive samples).
         private const float ErsRolloverDropPct = 5f;
-        // Cap the dt between samples used in the time-weighted average. If the
-        // user paused via the menu, alt-tabbed, or the network stalled, the
-        // gap can be many seconds — letting that contribute fully would bias
-        // the long-running average toward whatever value happened to be on
-        // screen at that moment. 5s is generous (50x the nominal 100ms period).
-        private const long ErsMaxSampleGapMs = 5000L;
 
         private void IngestCarStatus(string sid, CarStatusEntry[] entries, long nowMs)
         {
@@ -653,11 +647,11 @@ namespace Overtake.SimHub.Plugin.Store
                 // when entry size >= 55). Older F1 versions / shorter packets
                 // are silently ignored, leaving ErsCaptured=false on driver.
                 if (entries[i].ErsCaptured)
-                    IngestErsForDriver(d, entries[i], nowMs);
+                    IngestErsForDriver(d, entries[i]);
             }
         }
 
-        private static void IngestErsForDriver(DriverRun d, CarStatusEntry e, long nowMs)
+        private static void IngestErsForDriver(DriverRun d, CarStatusEntry e)
         {
             float storePct = (e.ErsStoreEnergy / ErsMaxJoules) * 100f;
             if (storePct < 0f) storePct = 0f;
@@ -700,12 +694,10 @@ namespace Overtake.SimHub.Plugin.Store
 
             if (paused)
             {
-                // Pause samples do not contribute to the time-weighted mean or
-                // to min/max (the driver is frozen). They are counted so the
-                // consumer can detect long disconnections that distorted the
-                // sample count.
+                // Pause samples do not contribute to the mean or to min/max
+                // (the driver is frozen). They are counted so the consumer
+                // can detect long disconnections that distorted the capture.
                 d.ErsSamplesPaused++;
-                d.ErsLastSampleMs = nowMs;
                 d.ErsCaptured = true;
                 return;
             }
@@ -719,24 +711,17 @@ namespace Overtake.SimHub.Plugin.Store
                 d.ErsStorePctMin = storePct;
                 d.ErsStorePctMax = storePct;
                 d.ErsStorePctLast = storePct;
-                d.ErsLastSampleMs = nowMs;
                 d.ErsFirstSampleSet = true;
             }
             else
             {
-                long dtMs = nowMs - d.ErsLastSampleMs;
-                if (dtMs > 0 && dtMs <= ErsMaxSampleGapMs)
-                {
-                    // Trapezoidal would be marginally more accurate, but the
-                    // sampling is uniform enough (10Hz) that left-rectangle
-                    // (use the previous sample's value over the elapsed dt)
-                    // is well within rounding error. We use the *previous*
-                    // value to avoid pulling a sudden change into the past.
-                    d.ErsStorePctSumWeighted += d.ErsStorePctLast * dtMs;
-                    d.ErsStorePctTimeMs += dtMs;
-                }
-                d.ErsLastSampleMs = nowMs;
-
+                // ARITHMETIC mean — sampling at ~10Hz is uniform enough that
+                // a time-weighted mean is statistically equivalent. An early
+                // weighted-mean implementation surfaced two CI edge cases
+                // (sub-millisecond dispatch collapsing most dtMs to 0 OR
+                // a single non-zero dtMs dominating the weighted sum) with
+                // no precision gain in production. Simple-mean is robust in
+                // both environments; ErsStorePctSumSimple is updated above.
                 if (storePct < d.ErsStorePctMin) d.ErsStorePctMin = storePct;
                 if (storePct > d.ErsStorePctMax) d.ErsStorePctMax = storePct;
                 d.ErsStorePctLast = storePct;

@@ -363,7 +363,7 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 **Princípio de codificação reforçado:**
 - Conversão de unidade (J → %) deve ser feita uma única vez na fronteira (`IngestCarStatus`). O resto do pipeline trabalha sempre em percentual. Isso evita o tipo de bug do v1.1.30 (`InvalidCastException` por boxing errado) e mantém o JSON externo consistente.
-- Cap de `dt` na média ponderada (`ErsMaxSampleGapMs=5000`): se o usuário pausou ou caiu da rede, uma amostra antiga não pode contribuir com peso desproporcional para a média. Constante explícita e documentada.
+- `storePctAvg` é média aritmética das amostras não-pausadas. Tentativa inicial usou média ponderada pelo tempo, mas como o `CarStatus` chega a ~10Hz uniforme, a média aritmética é estatisticamente equivalente — e robusta tanto em produção quanto em test harnesses que disparam pacotes em cadência sub-milissegundo. Amostras com `networkPaused=1` são contadas em `samplesPaused` mas não entram no somatório nem em min/max.
 
 ### v1.1.33
 
