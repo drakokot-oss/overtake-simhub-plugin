@@ -972,7 +972,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             var result = new Dictionary<string, object>
             {
-                { "schemaVersion", "league-1.0" },
+                { "schemaVersion", "league-1.1" },
                 { "game", "F1_25" },
                 { "capture", capture },
                 { "participants", allParticipants },
@@ -1891,6 +1891,80 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 };
             }
 
+            // v1.1.34 — ERS / battery telemetry. Percent unit (0..100, where
+            // 100 = full 4 MJ regulation capacity), same scale users see in
+            // the in-game HUD. Two main consumer-facing numbers:
+            //   - storePctAvg          -> "economia" / average battery level
+            //   - deployedPctAvgPerLap -> "consumo" / average deploy per lap
+            object ersTelemetryOut = null;
+            if (dr.ErsCaptured)
+            {
+                // Close the in-flight lap snapshot. We rely on counter-reset
+                // detection to push per-lap entries; if the session ends with
+                // a partial lap, the snapshot still holds usable data and is
+                // recorded as the last entry so the consumer sees the full
+                // race in deployedPctPerLap.
+                List<float> deployedPerLap = new List<float>(dr.DeployedPctPerLap);
+                List<float> harvestedMgukPerLap = new List<float>(dr.HarvestedMgukPctPerLap);
+                List<float> harvestedMguhPerLap = new List<float>(dr.HarvestedMguhPctPerLap);
+                if (dr.DeployedPctLastSnapshot > 0f
+                    || dr.HarvestedMgukPctLastSnapshot > 0f
+                    || dr.HarvestedMguhPctLastSnapshot > 0f)
+                {
+                    deployedPerLap.Add(dr.DeployedPctLastSnapshot);
+                    harvestedMgukPerLap.Add(dr.HarvestedMgukPctLastSnapshot);
+                    harvestedMguhPerLap.Add(dr.HarvestedMguhPctLastSnapshot);
+                }
+
+                double storeAvg = 0d;
+                if (dr.ErsStorePctTimeMs > 0L)
+                    storeAvg = dr.ErsStorePctSumWeighted / dr.ErsStorePctTimeMs;
+
+                double deployedAvg = 0d;
+                if (deployedPerLap.Count > 0)
+                {
+                    double sum = 0d;
+                    for (int j = 0; j < deployedPerLap.Count; j++) sum += deployedPerLap[j];
+                    deployedAvg = sum / deployedPerLap.Count;
+                }
+
+                double harvestedAvg = 0d;
+                if (harvestedMgukPerLap.Count > 0)
+                {
+                    double sum = 0d;
+                    for (int j = 0; j < harvestedMgukPerLap.Count; j++)
+                        sum += harvestedMgukPerLap[j] + harvestedMguhPerLap[j];
+                    harvestedAvg = sum / harvestedMgukPerLap.Count;
+                }
+
+                var deployedRounded = new List<double>(deployedPerLap.Count);
+                for (int j = 0; j < deployedPerLap.Count; j++)
+                    deployedRounded.Add(Math.Round((double)deployedPerLap[j], 2));
+                var hMgukRounded = new List<double>(harvestedMgukPerLap.Count);
+                for (int j = 0; j < harvestedMgukPerLap.Count; j++)
+                    hMgukRounded.Add(Math.Round((double)harvestedMgukPerLap[j], 2));
+                var hMguhRounded = new List<double>(harvestedMguhPerLap.Count);
+                for (int j = 0; j < harvestedMguhPerLap.Count; j++)
+                    hMguhRounded.Add(Math.Round((double)harvestedMguhPerLap[j], 2));
+
+                ersTelemetryOut = new Dictionary<string, object>
+                {
+                    { "storePctFirst", Math.Round((double)dr.ErsStorePctFirst, 2) },
+                    { "storePctLast", Math.Round((double)dr.ErsStorePctLast, 2) },
+                    { "storePctMin", Math.Round((double)dr.ErsStorePctMin, 2) },
+                    { "storePctMax", Math.Round((double)dr.ErsStorePctMax, 2) },
+                    { "storePctAvg", Math.Round(storeAvg, 2) },
+                    { "deployedPctPerLap", deployedRounded },
+                    { "deployedPctAvgPerLap", Math.Round(deployedAvg, 2) },
+                    { "harvestedMgukPctPerLap", hMgukRounded },
+                    { "harvestedMguhPctPerLap", hMguhRounded },
+                    { "harvestedPctAvgPerLap", Math.Round(harvestedAvg, 2) },
+                    { "deployModeLast", Lookups.LookupOrDefault(Lookups.ErsDeployModeMap, dr.ErsDeployModeLast, "ErsMode") },
+                    { "samplesCount", dr.ErsSamplesCount },
+                    { "samplesPaused", dr.ErsSamplesPaused },
+                };
+            }
+
             return new Dictionary<string, object>
             {
                 { "position", 0 },
@@ -1917,6 +1991,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "cornerCuttingWarnings", dr.LastCornerCuttingWarnings },
                 { "driverAssists", driverAssistsOut },
                 { "fuelTelemetry", fuelTelemetryOut },
+                { "ersTelemetry", ersTelemetryOut },
             };
         }
 

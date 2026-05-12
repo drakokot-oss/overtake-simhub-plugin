@@ -487,9 +487,9 @@ namespace Overtake.SimHub.Plugin.Store
             else if (pid == 2 && parsed.LapData != null)
                 IngestLapData(sid, sess, parsed.LapData, nowMs);
 
-            // 7) CarStatus (per-car assists)
+            // 7) CarStatus (per-car assists + ERS telemetry)
             else if (pid == 7 && parsed.CarStatus != null)
-                IngestCarStatus(sid, parsed.CarStatus);
+                IngestCarStatus(sid, parsed.CarStatus, nowMs);
 
             // 10) CarDamage
             else if (pid == 10 && parsed.CarDamage != null)
@@ -592,7 +592,20 @@ namespace Overtake.SimHub.Plugin.Store
 
         private const float CarStatusFuelCapacityMinKg = 5f;
 
-        private void IngestCarStatus(string sid, CarStatusEntry[] entries)
+        // v1.1.34 — ERS regulation capacity: 4 MJ = 4 000 000 J = 100%.
+        private const float ErsMaxJoules = 4000000f;
+        // Detection epsilon for lap rollover (counter dropping sharply).
+        // A real volta-end drop is from ~95-100% to ~0%, way larger than any
+        // network jitter (~0.1% between consecutive samples).
+        private const float ErsRolloverDropPct = 5f;
+        // Cap the dt between samples used in the time-weighted average. If the
+        // user paused via the menu, alt-tabbed, or the network stalled, the
+        // gap can be many seconds — letting that contribute fully would bias
+        // the long-running average toward whatever value happened to be on
+        // screen at that moment. 5s is generous (50x the nominal 100ms period).
+        private const long ErsMaxSampleGapMs = 5000L;
+
+        private void IngestCarStatus(string sid, CarStatusEntry[] entries, long nowMs)
         {
             if (entries == null) return;
             for (int i = 0; i < entries.Length; i++)
@@ -634,7 +647,102 @@ namespace Overtake.SimHub.Plugin.Store
                     d.FuelMixLast = entries[i].FuelMix;
                     d.FuelCaptured = true;
                 }
+
+                // v1.1.34 — ERS / battery telemetry. Only ingest when the
+                // packet actually carried the bytes (ErsCaptured set by parser
+                // when entry size >= 55). Older F1 versions / shorter packets
+                // are silently ignored, leaving ErsCaptured=false on driver.
+                if (entries[i].ErsCaptured)
+                    IngestErsForDriver(d, entries[i], nowMs);
             }
+        }
+
+        private static void IngestErsForDriver(DriverRun d, CarStatusEntry e, long nowMs)
+        {
+            float storePct = (e.ErsStoreEnergy / ErsMaxJoules) * 100f;
+            if (storePct < 0f) storePct = 0f;
+            if (storePct > 100f) storePct = 100f;
+
+            float deployedPctNow = (e.ErsDeployedThisLap / ErsMaxJoules) * 100f;
+            float hMgukPctNow = (e.ErsHarvestedThisLapMguk / ErsMaxJoules) * 100f;
+            float hMguhPctNow = (e.ErsHarvestedThisLapMguh / ErsMaxJoules) * 100f;
+            if (deployedPctNow < 0f) deployedPctNow = 0f;
+            if (hMgukPctNow < 0f) hMgukPctNow = 0f;
+            if (hMguhPctNow < 0f) hMguhPctNow = 0f;
+
+            // Detect lap rollover via counter reset: the game zeroes
+            // ErsDeployedThisLap at the start-line crossing. We assume any
+            // drop greater than ErsRolloverDropPct indicates a new lap. The
+            // *previous* snapshot is the end-of-lap value, so we push it to
+            // the per-lap array before updating the snapshot.
+            //
+            // We only push when ErsFirstSampleSet is true, otherwise the very
+            // first packet (which may carry leftover values from the previous
+            // session) would produce a phantom lap[0] entry.
+            if (d.ErsFirstSampleSet && deployedPctNow + ErsRolloverDropPct < d.DeployedPctLastSnapshot)
+            {
+                d.DeployedPctPerLap.Add(d.DeployedPctLastSnapshot);
+                d.HarvestedMgukPctPerLap.Add(d.HarvestedMgukPctLastSnapshot);
+                d.HarvestedMguhPctPerLap.Add(d.HarvestedMguhPctLastSnapshot);
+                d.DeployedPctLastSnapshot = 0f;
+                d.HarvestedMgukPctLastSnapshot = 0f;
+                d.HarvestedMguhPctLastSnapshot = 0f;
+            }
+
+            // Per-lap counters are monotonically non-decreasing within a lap
+            // (the game only adds to them). Track running maximum to be
+            // resilient against any momentary fluctuation.
+            if (deployedPctNow > d.DeployedPctLastSnapshot) d.DeployedPctLastSnapshot = deployedPctNow;
+            if (hMgukPctNow > d.HarvestedMgukPctLastSnapshot) d.HarvestedMgukPctLastSnapshot = hMgukPctNow;
+            if (hMguhPctNow > d.HarvestedMguhPctLastSnapshot) d.HarvestedMguhPctLastSnapshot = hMguhPctNow;
+
+            bool paused = e.NetworkPaused != 0;
+
+            if (paused)
+            {
+                // Pause samples do not contribute to the time-weighted mean or
+                // to min/max (the driver is frozen). They are counted so the
+                // consumer can detect long disconnections that distorted the
+                // sample count.
+                d.ErsSamplesPaused++;
+                d.ErsLastSampleMs = nowMs;
+                d.ErsCaptured = true;
+                return;
+            }
+
+            d.ErsSamplesCount++;
+
+            if (!d.ErsFirstSampleSet)
+            {
+                d.ErsStorePctFirst = storePct;
+                d.ErsStorePctMin = storePct;
+                d.ErsStorePctMax = storePct;
+                d.ErsStorePctLast = storePct;
+                d.ErsLastSampleMs = nowMs;
+                d.ErsFirstSampleSet = true;
+            }
+            else
+            {
+                long dtMs = nowMs - d.ErsLastSampleMs;
+                if (dtMs > 0 && dtMs <= ErsMaxSampleGapMs)
+                {
+                    // Trapezoidal would be marginally more accurate, but the
+                    // sampling is uniform enough (10Hz) that left-rectangle
+                    // (use the previous sample's value over the elapsed dt)
+                    // is well within rounding error. We use the *previous*
+                    // value to avoid pulling a sudden change into the past.
+                    d.ErsStorePctSumWeighted += d.ErsStorePctLast * dtMs;
+                    d.ErsStorePctTimeMs += dtMs;
+                }
+                d.ErsLastSampleMs = nowMs;
+
+                if (storePct < d.ErsStorePctMin) d.ErsStorePctMin = storePct;
+                if (storePct > d.ErsStorePctMax) d.ErsStorePctMax = storePct;
+                d.ErsStorePctLast = storePct;
+            }
+
+            d.ErsDeployModeLast = e.ErsDeployMode;
+            d.ErsCaptured = true;
         }
 
         private void IngestLobbyInfo(string sid, SessionRun sess, LobbyInfoData lobby)

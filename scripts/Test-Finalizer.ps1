@@ -1086,6 +1086,297 @@ function Test-AiFillerSameTeamAsSingleHuman() {
 Write-Host "=== Test 20: AI grid filler in same team as single human (v1.1.33 Brazil regression) ===" -ForegroundColor Cyan
 [void](Test-AiFillerSameTeamAsSingleHuman)
 
+# ---- Test 21: ERS telemetry aggregation (v1.1.34) ----
+# Synthesizes a 3-lap race for two drivers (ci=0 Hamilton, ci=1 Verstappen).
+# Each CarStatus packet carries fuel + ERS bytes; we step time between packets
+# by mutating internal _nowMs via the IngestCarStatusPublicForTest helper if
+# available, otherwise we rely on real elapsed time which makes asserts on
+# storePctAvg fuzzy. To keep the test deterministic we run a short burst of
+# samples per "lap" inside a sleep-free loop, exercising the lap-rollover
+# detection (counter drop) but accepting that storePctAvg is computed only
+# from samples seen between calls (dtMs >= 1) — we therefore assert the AVG is
+# within a wide tolerance around the simple mean.
+function Test-ErsTelemetry() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Race @ Bahrain, online
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 4; $sp[7] = 10
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # Participants: ci=0 Hamilton (human), ci=1 Verstappen (human)
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    $hn = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($hn, 0, $pp, 8, $hn.Length)
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $pp[41] = 1; $pp[44] = 1
+    $vn = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($vn, 0, $pp, 65, $vn.Length)
+    $pp[58] = 0; $pp[61] = 2; $pp[63] = 1
+    $pp[98] = 1; $pp[101] = 1
+    for ($c = 2; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp[$st + 3] = 255
+        $pp[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # Build a CarStatus packet (22 entries * 55 bytes). For each entry we set
+    # TC/ABS/FuelMix/FuelCapacity sentinels valid for fuel capture, plus ERS
+    # bytes at offsets 29..54.
+    function New-CarStatusPacket($storeEnergyHam, $deployedHam, $hMgukHam, $hMguhHam, $modeHam, $storeEnergyVer, $deployedVer, $hMgukVer, $hMguhVer, $modeVer, $pausedHam = 0) {
+        $cs = New-Object byte[] (22 * 55)
+        for ($i = 0; $i -lt 22; $i++) {
+            $off = $i * 55
+            $cs[$off + 0] = 1
+            $cs[$off + 1] = 1
+            $cs[$off + 2] = 1
+            [System.BitConverter]::GetBytes([float]100.0).CopyTo($cs, $off + 5)
+            [System.BitConverter]::GetBytes([float]110.0).CopyTo($cs, $off + 9)
+            [System.BitConverter]::GetBytes([float]50.0).CopyTo($cs, $off + 13)
+        }
+        $off0 = 0
+        [System.BitConverter]::GetBytes([float]$storeEnergyHam).CopyTo($cs, $off0 + 37)
+        $cs[$off0 + 41] = [byte]$modeHam
+        [System.BitConverter]::GetBytes([float]$hMgukHam).CopyTo($cs, $off0 + 42)
+        [System.BitConverter]::GetBytes([float]$hMguhHam).CopyTo($cs, $off0 + 46)
+        [System.BitConverter]::GetBytes([float]$deployedHam).CopyTo($cs, $off0 + 50)
+        $cs[$off0 + 54] = [byte]$pausedHam
+        $off1 = 55
+        [System.BitConverter]::GetBytes([float]$storeEnergyVer).CopyTo($cs, $off1 + 37)
+        $cs[$off1 + 41] = [byte]$modeVer
+        [System.BitConverter]::GetBytes([float]$hMgukVer).CopyTo($cs, $off1 + 42)
+        [System.BitConverter]::GetBytes([float]$hMguhVer).CopyTo($cs, $off1 + 46)
+        [System.BitConverter]::GetBytes([float]$deployedVer).CopyTo($cs, $off1 + 50)
+        return ,$cs
+    }
+
+    # Lap 1: deploy goes 0 -> 4_000_000 J (100%), harvested ramps 0 -> 2 MJ (50%)
+    # Lap 2: counter resets, deploy 0 -> 3_800_000 J (95%)
+    # Lap 3: counter resets, deploy 0 -> 3_600_000 J (90%), Hamilton paused once
+    # Store energy oscillates 4 MJ -> 1 MJ -> 4 MJ (avg roughly 2.5 MJ = 62.5%)
+
+    # Sample bursts. Each call invokes Ingest -> IngestCarStatus with nowMs=NowMs()
+    # internally. Time-weighted mean: dtMs between calls is real wall-clock time
+    # (1-5ms in a tight loop), so all samples have small dt. That is enough for
+    # the average to converge to the arithmetic mean of the sampled values.
+    $samples = @(
+        @(4000000, 0,       0,       0,       2,  4000000, 0,       0,       0,       2,  0),
+        @(3000000, 1000000, 500000,  400000,  2,  3500000, 500000,  300000,  200000,  2,  0),
+        @(2000000, 2000000, 800000,  700000,  3,  3000000, 1500000, 700000,  600000,  3,  0),
+        @(1500000, 3000000, 1500000, 1300000, 3,  2500000, 2500000, 1300000, 1100000, 3,  0),
+        @(1000000, 4000000, 2000000, 1800000, 3,  2000000, 3500000, 1800000, 1600000, 3,  0),
+        # Lap 2 rollover (deployed drops)
+        @(4000000, 100000,  100000,  100000,  1,  4000000, 100000,  100000,  100000,  1,  0),
+        @(3000000, 1900000, 900000,  800000,  2,  3500000, 1500000, 700000,  600000,  2,  0),
+        @(1500000, 3800000, 1600000, 1400000, 3,  2000000, 3000000, 1400000, 1200000, 3,  0),
+        # Lap 3 rollover
+        @(4000000, 200000,  200000,  200000,  1,  4000000, 200000,  200000,  200000,  1,  1),  # Hamilton paused this sample
+        @(2500000, 1800000, 800000,  700000,  2,  3000000, 1400000, 700000,  600000,  2,  0),
+        @(1000000, 3600000, 1400000, 1300000, 3,  2500000, 2800000, 1300000, 1100000, 3,  0)
+    )
+
+    foreach ($row in $samples) {
+        $pkt = New-CarStatusPacket $row[0] $row[1] $row[2] $row[3] $row[4] $row[5] $row[6] $row[7] $row[8] $row[9] $row[10]
+        $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 7 $pkt))))
+    }
+
+    # FC: both finish
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    $fc[1] = 1; $fc[2] = 5; $fc[3] = 1; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)
+    $offV = 1 + 46
+    $fc[$offV + 0] = 2; $fc[$offV + 1] = 5; $fc[$offV + 2] = 2; $fc[$offV + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]84000).CopyTo($fc, $offV + 7)
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.34: session count = 1" ($sessions.Count -eq 1)
+    if ($sessions.Count -lt 1) { return }
+    $drivers = Get-DictValue $sessions[0] "drivers"
+    Assert "v1.1.34: drivers map present" ($drivers -ne $null)
+    if ($drivers -eq $null) { return }
+
+    $ham = $drivers["Hamilton"]
+    Assert "v1.1.34: Hamilton driver present" ($ham -ne $null)
+    if ($ham -eq $null) { return }
+
+    $ers = Get-DictValue $ham "ersTelemetry"
+    Assert "v1.1.34: Hamilton ersTelemetry present" ($ers -ne $null)
+    if ($ers -eq $null) { return }
+
+    $storeFirst = Get-DictValue $ers "storePctFirst"
+    $storeLast = Get-DictValue $ers "storePctLast"
+    $storeMin = Get-DictValue $ers "storePctMin"
+    $storeMax = Get-DictValue $ers "storePctMax"
+    $storeAvg = Get-DictValue $ers "storePctAvg"
+    $deployedArr = Get-DictValue $ers "deployedPctPerLap"
+    $deployedAvg = Get-DictValue $ers "deployedPctAvgPerLap"
+    $harvMguk = Get-DictValue $ers "harvestedMgukPctPerLap"
+    $harvMguh = Get-DictValue $ers "harvestedMguhPctPerLap"
+    $modeLast = Get-DictValue $ers "deployModeLast"
+    $samplesCount = Get-DictValue $ers "samplesCount"
+    $samplesPaused = Get-DictValue $ers "samplesPaused"
+
+    Assert "v1.1.34: storePctFirst == 100" ([Math]::Abs([double]$storeFirst - 100.0) -lt 0.5)
+    Assert "v1.1.34: storePctMax == 100" ([Math]::Abs([double]$storeMax - 100.0) -lt 0.5)
+    Assert "v1.1.34: storePctMin == 25 (1 MJ = 25%)" ([Math]::Abs([double]$storeMin - 25.0) -lt 0.5)
+    Assert "v1.1.34: storePctLast == 25" ([Math]::Abs([double]$storeLast - 25.0) -lt 0.5)
+    Assert "v1.1.34: storePctAvg in (40,70) range" ([double]$storeAvg -gt 40 -and [double]$storeAvg -lt 70)
+
+    # deployedPctPerLap: rollover detection should produce three closed laps:
+    # lap1 max 100, lap2 max 95, lap3 max 90 (in-flight at finalize -> snapshot pushed)
+    Assert "v1.1.34: deployedPctPerLap has 3 entries (rollover + in-flight)" ($deployedArr.Count -eq 3)
+    if ($deployedArr.Count -eq 3) {
+        Assert "v1.1.34: deployedPctPerLap[0] == 100" ([Math]::Abs([double]$deployedArr[0] - 100.0) -lt 0.5)
+        Assert "v1.1.34: deployedPctPerLap[1] == 95"  ([Math]::Abs([double]$deployedArr[1] - 95.0)  -lt 0.5)
+        Assert "v1.1.34: deployedPctPerLap[2] == 90"  ([Math]::Abs([double]$deployedArr[2] - 90.0)  -lt 0.5)
+    }
+    Assert "v1.1.34: deployedPctAvgPerLap == 95" ([Math]::Abs([double]$deployedAvg - 95.0) -lt 0.5)
+
+    Assert "v1.1.34: harvestedMgukPctPerLap has 3 entries" ($harvMguk.Count -eq 3)
+    Assert "v1.1.34: harvestedMguhPctPerLap has 3 entries" ($harvMguh.Count -eq 3)
+
+    Assert "v1.1.34: deployModeLast == Overtake" ($modeLast -eq "Overtake")
+    Assert "v1.1.34: samplesPaused == 1 (Hamilton paused once)" ([int]$samplesPaused -eq 1)
+    Assert "v1.1.34: samplesCount >= 10" ([int]$samplesCount -ge 10)
+
+    # Verstappen never paused
+    $ver = $drivers["Verstappen"]
+    if ($ver -ne $null) {
+        $ersV = Get-DictValue $ver "ersTelemetry"
+        if ($ersV -ne $null) {
+            $sV = Get-DictValue $ersV "samplesPaused"
+            Assert "v1.1.34: Verstappen samplesPaused == 0" ([int]$sV -eq 0)
+        }
+    }
+
+    # Schema bump
+    $schema = Get-DictValue $res "schemaVersion"
+    Assert "v1.1.34: schemaVersion == league-1.1" ($schema -eq "league-1.1")
+}
+
+Write-Host "=== Test 21: ERS telemetry aggregation (v1.1.34) ===" -ForegroundColor Cyan
+[void](Test-ErsTelemetry)
+
+# ---- Test 22: phantom invariant preserved with ERS payload (v1.1.34) ----
+# Re-runs the Brazil scenario from Test 20 but each CarStatus carries a full
+# ERS payload for the AI grid filler (ci=2 Visa Cash App rn=30, paired with the
+# only Visa Cash App human Drako% at rn=73). The strict lookup must STILL
+# filter the AI; the ERS payload from the AI car must NOT be enough to flip
+# IsKnownRealPlayer. This locks in the invariant that ERS is purely additive
+# and never affects phantom filtering.
+function Test-PhantomInvariantWithErsPayload() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 10
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    $lobbyPayload = New-Object byte[] (1 + 22 * 42)
+    $lobbyPayload[0] = 2
+    $lobbyPayload[1 + 0] = 0; $lobbyPayload[1 + 1] = 0; $lobbyPayload[1 + 3] = 1
+    $hn = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($hn, 0, $lobbyPayload, (1 + 4), $hn.Length)
+    $lobbyPayload[1 + 36] = 44; $lobbyPayload[1 + 38] = 1
+    $offD = 1 + 42
+    $lobbyPayload[$offD + 0] = 0; $lobbyPayload[$offD + 1] = 6; $lobbyPayload[$offD + 3] = 1
+    $dn = [System.Text.Encoding]::UTF8.GetBytes("Drako%")
+    [System.Array]::Copy($dn, 0, $lobbyPayload, ($offD + 4), $dn.Length)
+    $lobbyPayload[$offD + 36] = 73; $lobbyPayload[$offD + 38] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 9 $lobbyPayload))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 3
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    [System.Array]::Copy($hn, 0, $pp, 8, $hn.Length)
+    $pp[41] = 1; $pp[44] = 1
+    $pp[58] = 0; $pp[61] = 6; $pp[63] = 73
+    [System.Array]::Copy($dn, 0, $pp, 65, $dn.Length)
+    $pp[98] = 1; $pp[101] = 1
+    $pp[115] = 1; $pp[118] = 6; $pp[120] = 30
+    $pp[155] = 0; $pp[158] = 255
+    for ($c = 3; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp[$st + 3] = 255; $pp[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # CarStatus with ERS payload populated for ALL cars including ci=2 AI.
+    $cs = New-Object byte[] (22 * 55)
+    for ($i = 0; $i -lt 22; $i++) {
+        $off = $i * 55
+        $cs[$off + 0] = 1
+        $cs[$off + 1] = 1
+        $cs[$off + 2] = 1
+        [System.BitConverter]::GetBytes([float]100.0).CopyTo($cs, $off + 5)
+        [System.BitConverter]::GetBytes([float]110.0).CopyTo($cs, $off + 9)
+        [System.BitConverter]::GetBytes([float]50.0).CopyTo($cs, $off + 13)
+        # ERS payload — even the AI ghost gets a full battery telemetry
+        [System.BitConverter]::GetBytes([float]2000000.0).CopyTo($cs, $off + 37)
+        $cs[$off + 41] = 2
+        [System.BitConverter]::GetBytes([float]500000.0).CopyTo($cs, $off + 42)
+        [System.BitConverter]::GetBytes([float]400000.0).CopyTo($cs, $off + 46)
+        [System.BitConverter]::GetBytes([float]1000000.0).CopyTo($cs, $off + 50)
+        $cs[$off + 54] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 7 $cs))))
+
+    $ld1 = New-Object byte[] (22 * 57)
+    $ld1[33] = 1; $ld1[33 + 57] = 1
+    $ld1[43] = 1; $ld1[43 + 57] = 2
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld1))))
+
+    $ld2 = New-Object byte[] (22 * 57)
+    $ld2[33] = 2; $ld2[33 + 57] = 2
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($ld2, 0)
+    [System.BitConverter]::GetBytes([uint16]28000).CopyTo($ld2, 8)
+    [System.BitConverter]::GetBytes([uint16]27000).CopyTo($ld2, 11)
+    $ld2[43] = 1; $ld2[43 + 57] = 2
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 3
+    $fc[1] = 1; $fc[2] = 5; $fc[3] = 1; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)
+    $offV = 1 + 46
+    $fc[$offV + 0] = 2; $fc[$offV + 1] = 5; $fc[$offV + 2] = 2; $fc[$offV + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]84000).CopyTo($fc, $offV + 7)
+    $offG = 1 + 2 * 46
+    $fc[$offG + 0] = 3; $fc[$offG + 1] = 0; $fc[$offG + 2] = 3; $fc[$offG + 6] = 6
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.34: session count = 1 (with ERS payload)" ($sessions.Count -eq 1)
+    if ($sessions.Count -lt 1) { return }
+    $rs = Get-DictValue $sessions[0] "results"
+    Assert "v1.1.34: results present" ($rs -ne $null)
+    if ($rs -eq $null) { return }
+
+    $hamFound = $false; $drakoFound = $false; $ghostFound = $false
+    foreach ($r in $rs) {
+        $tg = Get-DictValue $r "tag"
+        if ($tg -eq "Hamilton") { $hamFound = $true }
+        if ($tg -eq "Drako%")   { $drakoFound = $true }
+        if ($tg -eq "Driver_2" -or $tg -eq "Car_2" -or $tg -eq "Car2") { $ghostFound = $true }
+    }
+    Assert "v1.1.34 INVARIANT: Hamilton preserved even with ERS payload" $hamFound
+    Assert "v1.1.34 INVARIANT: Drako% preserved even with ERS payload" $drakoFound
+    Assert "v1.1.34 INVARIANT: AI grid filler STILL filtered with ERS payload (ERS is not evidence)" (-not $ghostFound)
+    Assert "v1.1.34 INVARIANT: results count = 2" ($rs.Count -eq 2)
+}
+
+Write-Host "=== Test 22: phantom invariant preserved with ERS payload (v1.1.34) ===" -ForegroundColor Cyan
+[void](Test-PhantomInvariantWithErsPayload)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

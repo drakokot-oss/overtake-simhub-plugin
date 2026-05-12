@@ -234,6 +234,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 0, "Lean" }, { 1, "Standard" }, { 2, "Rich" }, { 3, "Max" },
         };
 
+        /// <summary>CarStatus m_ersDeployMode (F1 25 UDP packet 7).</summary>
+        public static readonly Dictionary<int, string> ErsDeployModeMap = new Dictionary<int, string>
+        {
+            { 0, "None" }, { 1, "Medium" }, { 2, "HotLap" }, { 3, "Overtake" },
+        };
+
         public static readonly Dictionary<int, string> ResultStatus = new Dictionary<int, string>
         {
             { 0, "Unknown" }, { 1, "Invalid" }, { 2, "Inactive" }, { 3, "Finished" },
