@@ -965,6 +965,127 @@ function Test-RealPlayerLobbyEvidenceVsAi() {
 Write-Host "=== Test 19: real player + lobby evidence vs slot.AiControlled (v1.1.32 invariant) ===" -ForegroundColor Cyan
 [void](Test-RealPlayerLobbyEvidenceVsAi)
 
+# ---- Test 20: AI grid filler in same team as a single human (v1.1.33 Brazil regression) ----
+# Reproduces Brazil_20260511_215148_531C9D.otk ci=19 (Visa Cash App #30):
+# only Drako% (rn=73) was a Visa Cash App human in the lobby. F1 25 added an
+# AI grid filler at ci=19 (rn=30) in the same team. The AI slot had:
+#   - aiControlled=true
+#   - 0 laps
+#   - generic tag (Car_19 / Driver_19)
+#   - NOT in lobbyNameMap (key 30_6 missing)
+#   - NOT in bestKnownTags (key 30_6 missing)
+#   - BUT lobbyByTeamOnly[6] = "Drako%" (single Visa Cash App human)
+# v1.1.32 IsKnownRealPlayer used LookupBestKnownTagForEntry, which falls back
+# to lobbyByTeamOnly[tid] when netKey + rnKey both miss — returned "Drako%"
+# and treated the AI slot as a real player. v1.1.33 must use the STRICT
+# lookup (netKey + rnKey only) so the AI grid filler is filtered while
+# Drako% himself stays preserved.
+function Test-AiFillerSameTeamAsSingleHuman() {
+    $st0 = [System.Activator]::CreateInstance($storeType)
+
+    # Online race @ Brazil (trackId=10)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 10
+    $sp[124] = 0; $sp[125] = 1   # NetworkGame=1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
+
+    # Lobby: 2 players, Hamilton (ci0 mapped) + Drako% (Visa Cash App, rn=73, tid=6).
+    # Note: the AI grid filler that the GAME later adds is NOT in the lobby.
+    $lobbyPayload = New-Object byte[] (1 + 22 * 42)
+    $lobbyPayload[0] = 2
+    # Lobby slot 0 = Hamilton, tid=Mercedes(0), rn=44
+    $lobbyPayload[1 + 0] = 0; $lobbyPayload[1 + 1] = 0; $lobbyPayload[1 + 3] = 1
+    $hn = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($hn, 0, $lobbyPayload, (1 + 4), $hn.Length)
+    $lobbyPayload[1 + 36] = 44; $lobbyPayload[1 + 38] = 1
+    # Lobby slot 1 = Drako%, tid=VisaCashApp(6), rn=73 (the ONLY Visa Cash App human)
+    $offD = 1 + 42
+    $lobbyPayload[$offD + 0] = 0; $lobbyPayload[$offD + 1] = 6; $lobbyPayload[$offD + 3] = 1
+    $dn = [System.Text.Encoding]::UTF8.GetBytes("Drako%")
+    [System.Array]::Copy($dn, 0, $lobbyPayload, ($offD + 4), $dn.Length)
+    $lobbyPayload[$offD + 36] = 73; $lobbyPayload[$offD + 38] = 1
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 9 $lobbyPayload))))
+
+    # Participants: ci=0 Hamilton (human), ci=1 Drako% (human, Visa Cash App #73),
+    # ci=2 GHOST (AI grid filler in Visa Cash App, rn=30 — different rn from Drako%).
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 3
+    # ci=0 Hamilton AI=false, tid=0, rn=44
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    [System.Array]::Copy($hn, 0, $pp, 8, $hn.Length)
+    $pp[41] = 1; $pp[44] = 1
+    # ci=1 Drako% AI=false, tid=6 (VisaCashApp), rn=73
+    $pp[58] = 0; $pp[61] = 6; $pp[63] = 73
+    [System.Array]::Copy($dn, 0, $pp, 65, $dn.Length)
+    $pp[98] = 1; $pp[101] = 1
+    # ci=2 GHOST: AiControlled=true, tid=6 (VisaCashApp), rn=30 - NOT in lobby.
+    $pp[115] = 1     # AiControlled=true
+    $pp[118] = 6     # TeamId=VisaCashApp (same as Drako%)
+    $pp[120] = 30    # RaceNumber=30 (different from Drako%'s 73)
+    # No name (left zero) - simulates AI slot
+    $pp[155] = 0     # ShowOnlineNames=off
+    $pp[158] = 255   # Platform=Unknown
+    for ($c = 3; $c -lt 22; $c++) {
+        $st = 1 + $c * 57
+        $pp[$st + 3] = 255; $pp[$st + 5] = 0
+    }
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # LapData: only Hamilton + Drako% drive
+    $ld1 = New-Object byte[] (22 * 57)
+    $ld1[33] = 1; $ld1[33 + 57] = 1
+    $ld1[43] = 1; $ld1[43 + 57] = 2
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld1))))
+
+    $ld2 = New-Object byte[] (22 * 57)
+    $ld2[33] = 2; $ld2[33 + 57] = 2
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($ld2, 0)
+    [System.BitConverter]::GetBytes([uint16]28000).CopyTo($ld2, 8)
+    [System.BitConverter]::GetBytes([uint16]27000).CopyTo($ld2, 11)
+    $ld2[43] = 1; $ld2[43 + 57] = 2
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 2 $ld2))))
+
+    # FC: ci=0 Hamilton P1, ci=1 Drako% P2, ci=2 ghost P3 0 laps
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 3
+    $fc[1] = 1; $fc[2] = 5; $fc[3] = 1; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]83000).CopyTo($fc, 1 + 7)
+    $offV = 1 + 46
+    $fc[$offV + 0] = 2; $fc[$offV + 1] = 5; $fc[$offV + 2] = 2; $fc[$offV + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]84000).CopyTo($fc, $offV + 7)
+    $offG = 1 + 2 * 46
+    $fc[$offG + 0] = 3; $fc[$offG + 1] = 0; $fc[$offG + 2] = 3; $fc[$offG + 6] = 6
+    $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st0))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.33: session count is 1" ($sessions.Count -eq 1)
+    if ($sessions.Count -lt 1) { return }
+    $rs = Get-DictValue $sessions[0] "results"
+    Assert "v1.1.33: results array exists" ($rs -ne $null)
+    if ($rs -eq $null) { return }
+
+    $hamFound = $false; $drakoFound = $false; $ghostFound = $false; $drakoCount = 0
+    foreach ($r in $rs) {
+        $tg = Get-DictValue $r "tag"
+        if ($tg -eq "Hamilton") { $hamFound = $true }
+        if ($tg -eq "Drako%")   { $drakoFound = $true; $drakoCount++ }
+        if ($tg -eq "Driver_2" -or $tg -eq "Car_2" -or $tg -eq "Car2") { $ghostFound = $true }
+    }
+    Assert "v1.1.33: Hamilton preserved (real human, has laps)" $hamFound
+    Assert "v1.1.33: Drako% preserved EXACTLY ONCE (real Visa Cash App human)" ($drakoFound -and $drakoCount -eq 1)
+    Assert "v1.1.33 BRAZIL FIX: AI grid filler in same team as single human is FILTERED (no team-only inheritance)" (-not $ghostFound)
+    Assert "v1.1.33: results count is exactly 2 (no ghost)" ($rs.Count -eq 2)
+
+    # Confirm participants[] global also reflects the fix
+    $globalParts = Get-DictValue $res "participants"
+    Assert "v1.1.33: global participants count is 2 (only humans)" ($globalParts.Count -eq 2)
+}
+
+Write-Host "=== Test 20: AI grid filler in same team as single human (v1.1.33 Brazil regression) ===" -ForegroundColor Cyan
+[void](Test-AiFillerSameTeamAsSingleHuman)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

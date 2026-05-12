@@ -59,10 +59,17 @@ namespace Overtake.SimHub.Plugin.Finalizer
         /// </summary>
         private static bool IsKnownRealPlayer(SessionRun sess, SessionStore store, int carIdx, ParticipantEntry slot)
         {
-            // Strong evidence (cross-session, immune to early-packet artifacts).
+            // v1.1.33: use the STRICT lookup (netKey + rnKey only). The non-strict
+            // overload also tries `_lobbyNameByTeamOnly[tid]`, which returns the
+            // single human of a team and would let an AI grid filler in that
+            // same team inherit the human's name as "positive evidence". That
+            // was the Brazil_20260511 ci=19 (Visa Cash App #30) escape route:
+            // Drako% was the only Visa Cash App human, so the AI grid filler at
+            // ci=19 picked up `Drako%` from `_lobbyNameByTeamOnly[6]`, and the
+            // v1.1.32 IsKnownRealPlayer trusted it. Strict variant blocks that.
             if (slot != null && slot.TeamId != 255)
             {
-                string resolved = store != null ? store.LookupBestKnownTagForEntry(slot) : null;
+                string resolved = store != null ? store.LookupBestKnownTagForEntryStrict(slot) : null;
                 if (!string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
                     return true;
             }
@@ -1155,13 +1162,18 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
                     // Try to recover unknown drivers from the store (network-id key
                     // first; rn-key fallback skipped when ambiguous — issue #1).
+                    // v1.1.33: STRICT lookup (no teamId-only fallback) to avoid an AI
+                    // grid filler in the same team as a single human inheriting the
+                    // human's name from `_lobbyNameByTeamOnly[tid]`. That would
+                    // either steal the human's row or produce a duplicate. The strict
+                    // variant requires netKey or exact rn_tid match.
                     if (!sess.Drivers.ContainsKey(tag) && (IsGenericTag(tag) || tag.StartsWith("Car")))
                     {
                         ParticipantEntry pe;
                         sess.TeamByCarIdx.TryGetValue(row.CarIdx, out pe);
                         if (pe != null)
                         {
-                            string resolved = store.LookupBestKnownTagForEntry(pe);
+                            string resolved = store.LookupBestKnownTagForEntryStrict(pe);
                             if (!string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
                                 tag = resolved;
                         }

@@ -1137,6 +1137,63 @@ namespace Overtake.SimHub.Plugin.Store
         }
 
         /// <summary>
+        /// Strict version of <see cref="LookupBestKnownTagForEntry"/> — consults
+        /// ONLY the unique-per-slot keys (network-id and raceNumber+team), and
+        /// SKIPS the teamId-only fallback. Use this when the goal is to PROVE the
+        /// slot belongs to a specific real player, not merely to pick a plausible
+        /// name for it.
+        ///
+        /// Why: the teamId-only fallback (`_lobbyNameByTeamOnly[tid]`) was designed
+        /// for a rare legacy case (Participants packet reports a different
+        /// raceNumber than the lobby for an existing humano). It returns the
+        /// "single human" of a team, but if F1 25 adds an AI grid filler to that
+        /// same team, the AI slot inherits the human's name as positive evidence.
+        /// That is exactly what let the Brazil_20260511 ci=19 (Visa Cash App #30)
+        /// AI grid filler escape every phantom filter — `Drako%` was the only
+        /// Visa Cash App human in the lobby, so `_lobbyNameByTeamOnly[6]` returned
+        /// `Drako%` for the AI's slot, and `IsKnownRealPlayer` mistakenly took
+        /// that as proof it was a real player.
+        ///
+        /// Callers that intend to RESOLVE a name to display (e.g.
+        /// RetroResolveNames) should keep using the non-strict overload — they
+        /// already know the slot is real and just need a label. Callers deciding
+        /// whether to FILTER (IsPhantomEntry, ShouldSkipFcAiGridFillerRow,
+        /// IsKnownRealPlayer) must use this strict version.
+        /// </summary>
+        public string LookupBestKnownTagForEntryStrict(ParticipantEntry entry)
+        {
+            if (entry == null) return null;
+            int rn = entry.RaceNumber;
+            int tid = entry.TeamId;
+            string netKey = ComputeNetKey(entry);
+            string rnKey = string.Format("{0}_{1}", rn, tid);
+
+            string resolved;
+
+            // 1) network-id key — unique per network player, no spoofing risk.
+            if (netKey != null)
+            {
+                if (_bestKnownTagsByNet.TryGetValue(netKey, out resolved)
+                    && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return resolved;
+            }
+
+            // 2) raceNumber key — unique per lobby seat, skip when ambiguous.
+            if (!_rnKeyAmbiguous.Contains(rnKey))
+            {
+                if (_bestKnownTags.TryGetValue(rnKey, out resolved)
+                    && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return resolved;
+                if (_lobbyNameByTeamRn.TryGetValue(rnKey, out resolved)
+                    && !string.IsNullOrEmpty(resolved) && !IsGenericTag(resolved))
+                    return resolved;
+            }
+
+            // No teamId-only fallback by design.
+            return null;
+        }
+
+        /// <summary>
         /// Entry-aware overload. Priority:
         ///   1. Network-id key (immune to raceNumber collisions in Custom MyTeam).
         ///   2. raceNumber key, only when NOT flagged ambiguous.
