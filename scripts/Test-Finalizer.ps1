@@ -128,7 +128,7 @@ $ingestMethod.Invoke($store, @((Dispatch (New-FakePacket 8 $fc))))
 Write-Host "=== Test 1: Finalize structure ===" -ForegroundColor Cyan
 $result = $finalizeMethod.Invoke($null, @($store))
 Assert "Result not null" ($result -ne $null)
-Assert "Has schemaVersion" ((Get-DictValue $result "schemaVersion") -eq "league-1.0")
+Assert "Has schemaVersion" ((Get-DictValue $result "schemaVersion") -eq "league-1.1")
 Assert "Has game" ((Get-DictValue $result "game") -eq "F1_25")
 Assert "Has capture" ((Get-DictValue $result "capture") -ne $null)
 Assert "Has participants" ((Get-DictValue $result "participants") -ne $null)
@@ -237,7 +237,7 @@ $ser = New-Object $serType
 $ser.MaxJsonLength = [int]::MaxValue
 $json = $ser.Serialize($result)
 Assert "JSON not empty" ($json.Length -gt 100)
-Assert "JSON contains league-1.0" ($json.Contains("league-1.0"))
+Assert "JSON contains league-1.1" ($json.Contains("league-1.1"))
 Assert "JSON contains Hamilton" ($json.Contains("Hamilton"))
 Assert "JSON contains Monaco" ($json.Contains("Monaco"))
 Assert "JSON contains Race" ($json.Contains("Race"))

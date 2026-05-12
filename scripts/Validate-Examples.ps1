@@ -32,7 +32,7 @@ foreach ($f in $files) {
 
     # Validate key fields
     $errors = @()
-    if ($json.schemaVersion -ne "league-1.0") { $errors += "Wrong schemaVersion" }
+    if ($json.schemaVersion -ne "league-1.1") { $errors += "Wrong schemaVersion" }
     if ($json.game -ne "F1_25") { $errors += "Wrong game" }
     if ($sessCount -lt 2) { $errors += "Expected 2 sessions (Quali+Race)" }
     if ($resCount -lt 15) { $errors += "Too few results" }
