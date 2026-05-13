@@ -2,6 +2,21 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.35] - 2026-05-13
+
+### Changed
+- **Telemetria de ERS — separar `harvested` por fonte (MGU-K vs MGU-H):** o campo `harvestedPctAvgPerLap` da v1.1.34 somava as duas fontes de regeneração num único número. MGU-K (regen pelas freadas/eixo) e MGU-H (regen pelo turbo) têm limites regulamentares **independentes** de 4 MJ por volta = 100% da capacidade cada. A soma rotineiramente passava de 100% (validado em `Spa_20260512_234130_F0EB39.otk` real: Drako% 116%, Vortex_Dudu Costa 121%, Lucas Costa 134%), o que lia como bug mesmo com os dados subjacentes corretos. Substituído por dois campos independentes:
+  - **`harvestedMgukPctAvgPerLap`** — média da regeneração pelo MGU-K (sempre 0..100%)
+  - **`harvestedMguhPctAvgPerLap`** — média da regeneração pelo MGU-H (sempre 0..100%)
+- Arrays per-lap (`harvestedMgukPctPerLap[]` e `harvestedMguhPctPerLap[]`) **inalterados** — já estavam separados na v1.1.34. A mudança é apenas nos agregados.
+- Test 21 atualizado: novos asserts `harvestedMgukPctAvgPerLap == 41.67%` e `harvestedMguhPctAvgPerLap == 37.5%` (cenário sintético); ambos dentro de [0, 100]; assert explícito que o campo legado foi removido (`harvestedPctAvgPerLap == null`)
+
+### Note
+- **Schema permanece `league-1.1`** — a remoção de `harvestedPctAvgPerLap` e adição de dois campos novos é modificação em campo opcional aditivo. Leitores que dependiam do campo antigo precisam migrar (somar os dois novos para reproduzir o valor antigo); outros leitores não são afetados
+- **Sem mudança nos filtros de fantasma.** Test 22 (invariante phantom + ERS payload) continua passando inalterado. ERS continua sendo data ride-along
+- **Issue conhecido NÃO corrigido nesta release:** `deployedPctPerLap` pode ter 1 entrada extra ao final (cooldown lap pós-FC, valor geralmente <1%). Cosmético, não atrapalha análise — `deployedPctAvgPerLap` ainda fica próximo do correto porque a entry extra contribui pouco para a média. Pode ser corrigido em release futura truncando o array em `dr.Laps.Count`
+- **Princípio reforçado:** quando uma métrica tem múltiplas fontes regulamentadas independentemente, expor cada uma separadamente. Somar fontes com cap individual em uma métrica única gera valores acima do limite e confunde quem lê. Quem quiser o total combinado pode somar do lado consumidor
+
 ## [1.1.34] - 2026-05-12
 
 ### Added

@@ -348,6 +348,16 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.35
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **`harvestedPctAvgPerLap` da v1.1.34 sempre passava de 100%** (validado em `Spa_20260512_234130_F0EB39.otk` real: 19/19 pilotos com valores 116–134%). Lia como bug mesmo sendo dado correto. | O campo somava MGU-K + MGU-H, cada um com cap regulamentar **independente** de 4 MJ/volta = 100% da capacidade. A soma legítimamente excedia 100%. Substituído por dois campos separados: `harvestedMgukPctAvgPerLap` (média do MGU-K, sempre 0..100%) e `harvestedMguhPctAvgPerLap` (média do MGU-H, sempre 0..100%). Arrays per-lap permanecem inalterados (já eram separados desde v1.1.34). Schema continua `league-1.1` — mudança em campo opcional aditivo. |
+
+**Princípio de codificação reforçado (v1.1.35):**
+- Quando uma métrica tem múltiplas fontes regulamentadas com cap individual independente, expor cada fonte separadamente. Somar essas fontes em um único campo gera valores acima do "cap aparente" e confunde quem lê o JSON. Quem precisar do total agregado pode somar do lado consumidor.
+- O nome do campo deve refletir a fonte/escopo: `harvestedMguk*` é claro que é só MGU-K; `harvestedPct*` (sem qualificador) era ambíguo.
+
 ### v1.1.34
 
 | Demanda | Como foi feito |

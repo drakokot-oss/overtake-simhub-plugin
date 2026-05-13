@@ -1219,6 +1219,8 @@ function Test-ErsTelemetry() {
     $deployedAvg = Get-DictValue $ers "deployedPctAvgPerLap"
     $harvMguk = Get-DictValue $ers "harvestedMgukPctPerLap"
     $harvMguh = Get-DictValue $ers "harvestedMguhPctPerLap"
+    $harvMgukAvg = Get-DictValue $ers "harvestedMgukPctAvgPerLap"
+    $harvMguhAvg = Get-DictValue $ers "harvestedMguhPctAvgPerLap"
     $modeLast = Get-DictValue $ers "deployModeLast"
     $samplesCount = Get-DictValue $ers "samplesCount"
     $samplesPaused = Get-DictValue $ers "samplesPaused"
@@ -1241,6 +1243,21 @@ function Test-ErsTelemetry() {
 
     Assert "v1.1.34: harvestedMgukPctPerLap has 3 entries" ($harvMguk.Count -eq 3)
     Assert "v1.1.34: harvestedMguhPctPerLap has 3 entries" ($harvMguh.Count -eq 3)
+
+    # v1.1.35 — separate per-source averages, each capped naturally at 100%.
+    # MGU-K samples for Hamilton: lap1 max 50% (2 MJ), lap2 max 40% (1.6 MJ),
+    # lap3 max 35% (1.4 MJ). Mean = (50+40+35)/3 = 41.67%.
+    # MGU-H samples for Hamilton: lap1 max 45%, lap2 max 35%, lap3 max 32.5%.
+    # Mean = (45+35+32.5)/3 = 37.5%.
+    Assert "v1.1.35: harvestedMgukPctAvgPerLap present" ($harvMgukAvg -ne $null)
+    Assert "v1.1.35: harvestedMguhPctAvgPerLap present" ($harvMguhAvg -ne $null)
+    Assert "v1.1.35: harvestedMgukPctAvgPerLap == 41.67" ([Math]::Abs([double]$harvMgukAvg - 41.67) -lt 0.5)
+    Assert "v1.1.35: harvestedMguhPctAvgPerLap == 37.5" ([Math]::Abs([double]$harvMguhAvg - 37.5) -lt 0.5)
+    Assert "v1.1.35: harvestedMgukPctAvgPerLap <= 100 (regulation cap)" ([double]$harvMgukAvg -le 100.0)
+    Assert "v1.1.35: harvestedMguhPctAvgPerLap <= 100 (regulation cap)" ([double]$harvMguhAvg -le 100.0)
+    # Old combined field must be gone (would have been 79.17 = 41.67+37.5)
+    $oldHarv = Get-DictValue $ers "harvestedPctAvgPerLap"
+    Assert "v1.1.35: legacy harvestedPctAvgPerLap removed" ($oldHarv -eq $null)
 
     Assert "v1.1.34: deployModeLast == Overtake" ($modeLast -eq "Overtake")
     Assert "v1.1.34: samplesPaused == 1 (Hamilton paused once)" ([int]$samplesPaused -eq 1)

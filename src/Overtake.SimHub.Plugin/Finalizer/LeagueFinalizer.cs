@@ -1935,13 +1935,26 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     deployedAvg = sum / deployedPerLap.Count;
                 }
 
-                double harvestedAvg = 0d;
+                // v1.1.35 — split harvested averages by source (MGU-K and MGU-H).
+                // Each source has an independent regulation cap of 4 MJ per lap
+                // (= 100% of capacity). The previous combined `harvestedPctAvgPerLap`
+                // summed both sources and routinely exceeded 100% (e.g. Spa race:
+                // 116% for Drako%, 134% for Lucas Costa), which read as "broken"
+                // even though the underlying values were correct. Two separate
+                // averages remove the ambiguity and stay within 0..100 each.
+                double harvestedMgukAvg = 0d;
                 if (harvestedMgukPerLap.Count > 0)
                 {
                     double sum = 0d;
-                    for (int j = 0; j < harvestedMgukPerLap.Count; j++)
-                        sum += harvestedMgukPerLap[j] + harvestedMguhPerLap[j];
-                    harvestedAvg = sum / harvestedMgukPerLap.Count;
+                    for (int j = 0; j < harvestedMgukPerLap.Count; j++) sum += harvestedMgukPerLap[j];
+                    harvestedMgukAvg = sum / harvestedMgukPerLap.Count;
+                }
+                double harvestedMguhAvg = 0d;
+                if (harvestedMguhPerLap.Count > 0)
+                {
+                    double sum = 0d;
+                    for (int j = 0; j < harvestedMguhPerLap.Count; j++) sum += harvestedMguhPerLap[j];
+                    harvestedMguhAvg = sum / harvestedMguhPerLap.Count;
                 }
 
                 var deployedRounded = new List<double>(deployedPerLap.Count);
@@ -1965,7 +1978,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     { "deployedPctAvgPerLap", Math.Round(deployedAvg, 2) },
                     { "harvestedMgukPctPerLap", hMgukRounded },
                     { "harvestedMguhPctPerLap", hMguhRounded },
-                    { "harvestedPctAvgPerLap", Math.Round(harvestedAvg, 2) },
+                    { "harvestedMgukPctAvgPerLap", Math.Round(harvestedMgukAvg, 2) },
+                    { "harvestedMguhPctAvgPerLap", Math.Round(harvestedMguhAvg, 2) },
                     { "deployModeLast", Lookups.LookupOrDefault(Lookups.ErsDeployModeMap, dr.ErsDeployModeLast, "ErsMode") },
                     { "samplesCount", dr.ErsSamplesCount },
                     { "samplesPaused", dr.ErsSamplesPaused },
