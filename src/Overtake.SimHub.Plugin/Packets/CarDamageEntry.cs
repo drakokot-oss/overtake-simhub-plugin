@@ -18,13 +18,16 @@ namespace Overtake.SimHub.Plugin.Packets
     }
 
     /// <summary>
-    /// Packet ID 10: Car Damage — 46 bytes per car, 22 cars.
+    /// Packet ID 10: Car Damage — 46 bytes per car.
+    /// F1 25: 22 cars. F1 26 (mod): up to 24. The parser reads as many
+    /// entries as the buffer can hold (capped at <see cref="GameInfo.MaxSupportedCars"/>).
     /// Layout: 4f(tyreWear) + 4B(tyresDamage) + 4B(brakesDamage) + 4B(tyreBlisters) + 18B(wing/engine)
     /// </summary>
     public class CarDamageEntry
     {
         public const int EntrySize = 46;
-        public const int NumCars = 22;
+        /// <summary>Parser cap. Tracks <see cref="GameInfo.MaxSupportedCars"/>.</summary>
+        public const int NumCars = GameInfo.MaxSupportedCars;
 
         public int CarIdx;
         public TyreSet TyreWear;
@@ -34,7 +37,8 @@ namespace Overtake.SimHub.Plugin.Packets
 
         public static CarDamageEntry[] Parse(byte[] data)
         {
-            if (data == null || data.Length < PacketHeader.Size + EntrySize * NumCars)
+            // Need at least the header plus one entry to do anything useful.
+            if (data == null || data.Length < PacketHeader.Size + EntrySize)
                 return null;
 
             var entries = new CarDamageEntry[NumCars];
@@ -43,6 +47,9 @@ namespace Overtake.SimHub.Plugin.Packets
             for (int i = 0; i < NumCars; i++)
             {
                 int off = p + i * EntrySize;
+                // Bail when the buffer runs short. Trailing slots stay null.
+                if (off + EntrySize > data.Length)
+                    break;
 
                 float wRL = BitConverter.ToSingle(data, off + 0);
                 float wRR = BitConverter.ToSingle(data, off + 4);

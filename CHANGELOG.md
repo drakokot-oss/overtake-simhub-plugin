@@ -2,6 +2,34 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.36] - 2026-05-18
+
+### Added
+- **Prontidão para F1 26 (grids maiores + identificação dinâmica do jogo):** Codemasters anunciou o F1 26 como "mod" do F1 25 (mesma base UDP), com duas mudanças concretas já confirmadas para 2026 — **11 equipes no grid** (Cadillac entra) e **Sauber renomeada para Audi**. Tudo que dependia do limite histórico de 22 carros foi destravado para acomodar até 26 entradas sem perda de dados:
+  - Novo `Packets/GameInfo.cs` centraliza `MaxSupportedCars = 26` (11 equipes × 2 + 4 wildcards) e o helper `GameNameFromPacketFormat(ushort)` que mapeia `2025 → "F1_25"`, `2026 → "F1_26"`, fallback `"F1_<fmt>"` para futuras versões. **Sem hard-code** de mapeamento de equipes/pilotos — quando o spec do F1 26 sair, os ajustes ficam isolados em `Lookups.Teams`/`Lookups.DriverById`
+  - **Campo `game` do `.otk` agora é dinâmico**, derivado do `PacketHeader.PacketFormat` do jogo. Compatível com leitores antigos (continua string `"F1_25"` em capturas vindas do F1 25). Quando vier do F1 26 emitirá `"F1_26"` automaticamente
+  - **Novo bloco `_debug.game`** no `.otk` expõe `packetFormat`, `gameYear`, `gameMajorVersion`, `gameMinorVersion`, `resolvedGameLabel` e `parserMaxSupportedCars`. Permite triagem rápida caso o jogo envie um PacketFormat inesperado (vemos a string `"F1_<n>"` no `game` + os bytes exatos aqui, sem adivinhação)
+- Test 23 em `Test-Finalizer.ps1`: valida `game` dinâmico para três PacketFormats (`2025 → "F1_25"`, `2026 → "F1_26"`, `2030 → "F1_2030"`) e a presença/conteúdo do bloco `_debug.game`
+- Test 24 em `Test-Finalizer.ps1`: valida que os parsers aceitam um pacote de Participants com **24 entries ativas** (grid F1 26 esperado), preservando `Entries[23]` populado e `TagsByCarIdx[23]` presente
+- Test 25 em `Test-Finalizer.ps1`: garante compatibilidade backward — `LapData` com 22 entries (grid F1 25 atual) continua sendo parseada sem erro; slots 22..25 ficam `null` graciosamente
+
+### Changed
+- `Packets/ParticipantsData.cs`, `Packets/LobbyInfoData.cs`, `Packets/FinalClassificationData.cs`, `Packets/LapDataEntry.cs`, `Packets/CarDamageEntry.cs`, `Packets/CarStatusData.cs`: todos os 6 parsers per-car agora usam `GameInfo.MaxSupportedCars` (26) no lugar de constantes locais `MaxCars = 22` / `NumCars = 22`. Cada loop mantém o early-break `if (off + EntrySize > data.Length) break;` para tolerar buffers menores (F1 25 com 22 entries continua funcionando sem custo)
+- `Packets/LapDataEntry.Parse` e `Packets/CarDamageEntry.Parse`: o early-return `data.Length < PacketHeader.Size + EntrySize * NumCars` (estrito, exigia grid completo) foi relaxado para `data.Length < PacketHeader.Size + EntrySize` (precisa apenas 1 entry para começar). Trailing slots ficam `null`
+- `Store/SessionStore.IngestLapData` e `Store/SessionStore.IngestCarDamage`: adicionado null guard `if (row == null) continue;` no início do loop, refletindo a nova semântica dos parsers (slots além do que o buffer comporta ficam null)
+- `Store/SessionStore`: o loop final que registra cars sem tag de `TeamByCarIdx` agora itera até `GameInfo.MaxSupportedCars` (era hard-code `< 22`). Mantém a lógica anti-phantom existente (Camadas 1–6) intacta — apenas amplia a janela de carIdx considerados
+- `Store/SessionRun.cs`: novos campos `LastPacketFormat`, `LastGameYear`, `LastGameMajorVersion`, `LastGameMinorVersion` capturados a cada packet ingerido (`SessionStore.Ingest` linha ~460). Permitem `LeagueFinalizer` resolver o `game` dinamicamente sem inspecionar pacotes individualmente
+- `Finalizer/LeagueFinalizer.Finalize`: substitui `{ "game", "F1_25" }` por `gameLabel` derivado de `GameInfo.GameNameFromPacketFormat(newestPacketFormat)`. Fallback `"F1_25"` quando nenhum pacote foi observado (preserva backward compat para tests que não alimentam header)
+- `UI/SettingsControl.xaml*`: labels visíveis ao usuário trocadas para "F1 25 / F1 26" onde a instrução é genérica (waiting message, setup steps de console/PC). Manteve "Codemasters F1 25" onde é nome literal de menu do SimHub
+- `OvertakePlugin.cs` e `AssemblyInfo.cs`: PluginDescription/AssemblyDescription atualizadas para "F1 25 / F1 26 UDP telemetry"
+
+### Note
+- **Schema continua `league-1.1`** — todas as mudanças são aditivas ou refinamento de campo existente. Leitores antigos continuam funcionando (campo `game` continua string; valor pode mudar para `"F1_26"` no futuro). Quando o F1 26 trouxer mudança regulamentar de ERS, aí avaliaremos bump
+- **Sem mudança nos filtros de fantasma** (Camadas 1–6 da v1.1.29–v1.1.33). A lógica usa `participantsPeakNumActive` (dinâmico) e não dependia do cap 22. O único `< 22` hard-coded em `SessionStore` foi substituído por `< GameInfo.MaxSupportedCars`
+- **Riscos residuais documentados:** se a Codemasters mudar **offsets de byte** em algum pacote do F1 26 (improvável dado que é "mod" do F1 25), os parsers vão ler bytes errados silenciosamente. Não há como prevenir sem o spec oficial. Mitigação: `_debug.game` permite identificar imediatamente qual jogo gerou o `.otk`, facilitando comparação com um pacote real do F1 26 e ajuste cirúrgico em `Lookups`/offsets se necessário
+- **Próximos passos quando o F1 26 oficialmente sair (TODO acionáveis):** (1) confirmar PacketFormat esperado (educated guess: 2026); (2) adicionar Cadillac e Audi a `Lookups.Teams` com IDs corretos extraídos de uma captura real; (3) adicionar novos `DriverId`s a `Lookups.DriverById` (roster Cadillac/Audi); (4) verificar com diff de 1 pacote real que nenhuma estrutura mudou — se mudou, hotfix v1.1.37 cirúrgico. Estimativa: ~30min de trabalho quando tivermos uma captura real
+- **Princípio de design:** preferimos **degradar graciosamente** (Cadillac vira `"Team(10)"`, novos pilotos viram `"Driver_X"`) a quebrar o pipeline com nomes inventados sem confirmação. UX subóptima é aceitável por 1 release; capturas corrompidas não são
+
 ## [1.1.35] - 2026-05-13
 
 ### Changed

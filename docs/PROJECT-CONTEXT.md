@@ -348,6 +348,17 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.36
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Preparar o plugin para o F1 26 sem ter o spec UDP em mãos.** Codemasters anunciou o F1 26 como mod do F1 25 (mesma base), com duas mudanças concretas: 11 equipes (Cadillac entra) e Sauber renomeada para Audi. O grid pula de 22 para 24 carros, o que excederia o cap histórico de 22 em 6 parsers e truncaria silenciosamente os carros 23 e 24. | Estratégia "defensiva e adaptável": novo `Packets/GameInfo.cs` centraliza `MaxSupportedCars = 26` (11×2 + 4 wildcards) e o helper `GameNameFromPacketFormat(ushort)`. Todos os 6 parsers per-car (Participants, LobbyInfo, FinalClassification, LapData, CarDamage, CarStatus) usam essa constante; cada loop tem `if (off + EntrySize > data.Length) break;` para tolerar buffers menores. `LapData` e `CarDamage` relaxaram o early-return que exigia grid completo (`< PacketHeader.Size + EntrySize * NumCars` → `< PacketHeader.Size + EntrySize`). `SessionStore.IngestLapData`/`IngestCarDamage` recebem null guards porque trailing slots agora ficam null. Campo `game` do JSON deriva de `PacketHeader.PacketFormat` via `SessionRun.LastPacketFormat`. Novo bloco `_debug.game` expõe os bytes brutos (`packetFormat`, `gameYear`, `resolvedGameLabel`, `parserMaxSupportedCars`) para triagem rápida. UI labels trocadas para "F1 25 / F1 26" onde a instrução é genérica. Sem mapear Cadillac/Audi/novos pilotos em `Lookups` ainda — esse mapping é trivial (~30min) com 1 captura real do F1 26 e fica como TODO documentado. Tests 23, 24, 25 cobrem game label dinâmico + forward-compat com 24 entries + backward compat com 22 entries. |
+
+**Princípio de design reforçado (v1.1.36):**
+- **Degradação graciosa sobre adivinhação.** Cadillac sem ID confirmado vira `"Team(10)"` (feio mas correto); inventar mapping e errar gera dados sujos que poluem o histórico de capturas. UX subóptima por 1 release é aceitável.
+- **Defesa por parser_size, não por const.** O cap de carros virou um parâmetro central (`GameInfo.MaxSupportedCars`); cada parser confia no tamanho do buffer recebido em vez de exigir formato exato. Adicionar suporte a 28 carros (caso F1 27 expanda mais) vai exigir 1 alteração no `GameInfo` em vez de 6.
+- **Sinalização explícita do jogo.** O `_debug.game` permite diagnóstico imediato: se vier um `.otk` com `game = "F1_2030"`, sei que o spec mudou e posso pedir o pacote bruto antes de tocar em qualquer parser.
+
 ### v1.1.35
 
 | Demanda | Como foi feito |

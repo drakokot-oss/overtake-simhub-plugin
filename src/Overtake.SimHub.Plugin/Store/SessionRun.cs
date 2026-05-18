@@ -99,5 +99,16 @@ namespace Overtake.SimHub.Plugin.Store
         public byte FormationLap;
         public byte SafetyCarSetting;
         public byte RedFlagsSetting;
+
+        // v1.1.36 — Game-version awareness.
+        // Captured from PacketHeader (first u16 = PacketFormat, byte 2 = GameYear)
+        // on every ingested packet. Used by LeagueFinalizer to emit a dynamic
+        // "game" field in the exported JSON (e.g. "F1_25" vs "F1_26") and to
+        // surface game telemetry in the _debug block for troubleshooting.
+        // Zero-initialised values mean "not yet observed".
+        public ushort LastPacketFormat;
+        public byte LastGameYear;
+        public byte LastGameMajorVersion;
+        public byte LastGameMinorVersion;
     }
 }

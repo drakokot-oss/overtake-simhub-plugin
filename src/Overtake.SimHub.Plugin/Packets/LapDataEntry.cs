@@ -3,7 +3,9 @@ using System;
 namespace Overtake.SimHub.Plugin.Packets
 {
     /// <summary>
-    /// Packet ID 2: Lap Data — one entry per car, 57 bytes each, 22 cars.
+    /// Packet ID 2: Lap Data — one entry per car, 57 bytes each.
+    /// F1 25: 22 entries. F1 26 (mod): up to 24. The parser reads as many
+    /// entries as the buffer can hold (capped at <see cref="GameInfo.MaxSupportedCars"/>).
     /// Layout per car (packed, little-endian):
     ///   I(4) I(4) H(2) B(1) H(2) B(1) H(2) B(1) H(2) B(1)
     ///   f(4) f(4) f(4)
@@ -13,7 +15,8 @@ namespace Overtake.SimHub.Plugin.Packets
     public class LapDataEntry
     {
         public const int EntrySize = 57;
-        public const int NumCars = 22;
+        /// <summary>Parser cap. Tracks <see cref="GameInfo.MaxSupportedCars"/>.</summary>
+        public const int NumCars = GameInfo.MaxSupportedCars;
 
         public int CarIdx;
         public uint LastLapTimeInMS;
@@ -61,7 +64,8 @@ namespace Overtake.SimHub.Plugin.Packets
 
         public static LapDataEntry[] Parse(byte[] data)
         {
-            if (data == null || data.Length < PacketHeader.Size + EntrySize * NumCars)
+            // Need at least the header plus one entry to do anything useful.
+            if (data == null || data.Length < PacketHeader.Size + EntrySize)
                 return null;
 
             var entries = new LapDataEntry[NumCars];
@@ -70,6 +74,10 @@ namespace Overtake.SimHub.Plugin.Packets
             for (int i = 0; i < NumCars; i++)
             {
                 int off = p + i * EntrySize;
+                // Bail when the buffer runs short. F1 25 stops at 22; F1 26
+                // can push up to 24+. Trailing slots stay null.
+                if (off + EntrySize > data.Length)
+                    break;
 
                 entries[i] = new LapDataEntry
                 {

@@ -970,10 +970,33 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             capture["sessionTypesInCapture"] = sessionTypeNames;
 
+            // v1.1.36 — Derive the "game" label from PacketHeader.PacketFormat
+            // (captured per packet in SessionStore). The newest non-zero format
+            // observed across all sessions wins. Falls back to "F1_25" when no
+            // packet header has been seen yet (matches prior behaviour and
+            // preserves backward compat for tests / capture-less exports).
+            ushort newestPacketFormat = 0;
+            byte newestGameYear = 0;
+            byte newestGameMajor = 0;
+            byte newestGameMinor = 0;
+            foreach (var s in store.Sessions.Values)
+            {
+                if (s.LastPacketFormat != 0 && s.LastPacketFormat >= newestPacketFormat)
+                {
+                    newestPacketFormat = s.LastPacketFormat;
+                    newestGameYear = s.LastGameYear;
+                    newestGameMajor = s.LastGameMajorVersion;
+                    newestGameMinor = s.LastGameMinorVersion;
+                }
+            }
+            string gameLabel = (newestPacketFormat != 0)
+                ? Packets.GameInfo.GameNameFromPacketFormat(newestPacketFormat)
+                : "F1_25";
+
             var result = new Dictionary<string, object>
             {
                 { "schemaVersion", "league-1.1" },
-                { "game", "F1_25" },
+                { "game", gameLabel },
                 { "capture", capture },
                 { "participants", allParticipants },
                 { "sessions", sessionsOut },
@@ -1010,10 +1033,25 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 }
             }
 
+            // v1.1.36 — Game-version block exposes the raw PacketHeader markers
+            // that drove `result["game"]`. Useful when a future F1 build ships
+            // an unexpected PacketFormat (we'll see "F1_<n>" in `game` plus the
+            // exact bytes here, no guessing needed to triage the report).
+            var gameDebug = new Dictionary<string, object>
+            {
+                { "packetFormat", newestPacketFormat != 0 ? (object)(int)newestPacketFormat : null },
+                { "gameYear", newestPacketFormat != 0 ? (object)(int)newestGameYear : null },
+                { "gameMajorVersion", newestPacketFormat != 0 ? (object)(int)newestGameMajor : null },
+                { "gameMinorVersion", newestPacketFormat != 0 ? (object)(int)newestGameMinor : null },
+                { "resolvedGameLabel", gameLabel },
+                { "parserMaxSupportedCars", Packets.GameInfo.MaxSupportedCars },
+            };
+
             result["_debug"] = new Dictionary<string, object>
             {
                 { "packetIdCounts", pktCounts },
                 { "notes", store.Notes },
+                { "game", gameDebug },
                 { "integrity", new Dictionary<string, object>
                     {
                         { "driversWithoutTeam", driversWithoutTeam },

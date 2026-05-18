@@ -26,15 +26,16 @@ namespace Overtake.SimHub.Plugin.Packets
     /// The lobby uses join-order (or arbitrary) indexing. Use (teamId, carNumber)
     /// to match lobby entries to in-session Participants data.
     ///
-    /// Payload: 1 byte numPlayers + 22 entries of 42 bytes each.
-    /// Total size: 954 bytes.
+    /// F1 25 payload: 1 byte numPlayers + 22 entries of 42 bytes each (954 bytes).
+    /// F1 26 will likely carry up to 24 entries (11 teams x 2). The parser reads
+    /// up to <see cref="GameInfo.MaxSupportedCars"/> entries; smaller F1 25
+    /// buffers are handled by the early-break inside the loop.
     /// </summary>
     public class LobbyInfoData
     {
         private const int Stride = 42;
         private const int NameOffset = 4;
         private const int NameLen = 32;
-        private const int MaxCars = 22;
 
         public byte NumPlayers;
         public LobbyInfoEntry[] Entries;
@@ -48,8 +49,8 @@ namespace Overtake.SimHub.Plugin.Packets
             byte numPlayers = data[p];
             int baseOff = p + 1;
 
-            var entries = new LobbyInfoEntry[MaxCars];
-            int limit = Math.Min(numPlayers, (byte)MaxCars);
+            var entries = new LobbyInfoEntry[GameInfo.MaxSupportedCars];
+            int limit = Math.Min(numPlayers, (byte)GameInfo.MaxSupportedCars);
 
             for (int i = 0; i < limit; i++)
             {
