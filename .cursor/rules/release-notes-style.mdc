@@ -1,0 +1,95 @@
+---
+description: How to write user-facing release notes (version.json + GitHub Release body)
+alwaysApply: true
+---
+
+# Release notes style — duas audiências, dois textos
+
+Sempre que preparar uma nova release deste plugin, separe a comunicação em
+**duas audiências distintas**. Não copie um no outro. Já foi pedido pelo
+usuário (v1.1.36) que os textos da página de downloads sejam amigáveis e
+deixassem o tom técnico no `CHANGELOG.md`.
+
+## Os três lugares — escopo e tom
+
+| Lugar | Audiência | Tom |
+|---|---|---|
+| `version.json.releaseNotes` | **Usuário final / narrador** que vê isso na página de downloads (`https://racehub.overtakef1.com/downloads`) | Curto, em português, foca em "o que muda pra você". **Zero jargão de código**: sem nomes de arquivo, sem nomes de método, sem offsets de byte, sem "MaxCars = 22". |
+| GitHub Release body (`gh release edit vX.Y.Z --notes-file ...`) | **Misto** — sobrevoa, com link pro CHANGELOG técnico | Mesma escrita amigável do `version.json`, mas pode crescer um pouco mais (até ~15 linhas). Sempre termina com um link para `CHANGELOG.md#X.Y.Z` e a frase "Detalhes técnicos: veja o CHANGELOG.md". |
+| `CHANGELOG.md` | **Dev (você ou eu numa sessão futura)** lendo o histórico | Detalhado, com nomes de arquivo, métodos, testes adicionados, decisões de design, riscos residuais. Mantém o estilo `### Added / ### Changed / ### Fixed / ### Note` já usado nas v1.1.29+. |
+
+## Regras de redação dos `releaseNotes` amigáveis
+
+**SIM**
+- Comece com um **título de 1 linha** explicando o "para que isso serve pra mim".
+  - Bom: `## Preparado para o F1 26`, `## Telemetria de bateria mais precisa`.
+  - Ruim: `## v1.1.36: F1 26 readiness`, `## Lift MaxCars from 22 to 26`.
+- Use **bullets curtos** (no máximo 1 frase cada).
+- Quando uma mudança quebra algo no consumidor (ex.: campo renomeado no `.otk`),
+  diga isso em uma seção `### Para quem consome o .otk` separada — não polui
+  o leitor casual mas é honesto com integradores.
+- Sempre tenha uma seção **"E pro F1 25 atual?"** ou **"Sem mudar nada na sua rotina"**
+  quando a release for incremental, para tranquilizar quem não está caçando o que
+  mudou.
+- Termine o GitHub Release body com:
+  ```
+  ---
+
+  📥 **Download:** `Overtake.SimHub.Plugin-vX.Y.Z-Setup.exe` — Windows + SimHub 9.x
+  🛠️ **Detalhes técnicos:** veja o [CHANGELOG.md](https://github.com/drakokot-oss/overtake-simhub-plugin/blob/main/CHANGELOG.md#XYZ---YYYY-MM-DD).
+  ```
+  O `version.json` NÃO precisa desse rodapé — o front já mostra download separado.
+
+**NÃO**
+- Nada de `Packets/X.cs`, `LeagueFinalizer.Finalize`, `participantsPeakNumActive`,
+  `early-break`, `Camadas 1-6`, `schema league-1.1`, `byte offset`, `Math.Round`,
+  `IList`, `Dispatch`, `Ingest`. Esses ficam no CHANGELOG.
+- Nada de "Test 17 valida X" — usuário final não roda testes.
+- Sem markdown pesado (tabelas grandes, blocos de código longos). Pode haver
+  inline code em pequenos termos quando ajuda (ex.: nome de campo do `.otk`
+  numa seção dedicada a integradores).
+- Não mencione número de versão anterior ("v1.1.34 introduziu...") — assume que
+  o leitor é novo e só quer saber o que está disponível **agora**.
+
+## ASCII no `version.json.releaseNotes`
+
+O `version.json` é serializado/desserializado por PowerShell e front. Use
+caracteres ASCII no `releaseNotes` desse arquivo:
+
+- Acentos podem ser perdidos em alguns parsers — escreva sem acento se possível
+  (a UI front aceita mas a fonte canônica fica mais segura).
+- Aspas: `"..."` apenas (sem aspas curvas `""`).
+- Hífens: `-` apenas (sem em-dash `—`).
+- Sem emojis no `version.json` (o GitHub Release body aceita emojis tranquilo).
+
+Já existiu o problema de mojibake nos `AssemblyInfo.cs`; a mesma classe de
+problema pode pegar o `version.json`.
+
+## Aplicação prática no pipeline de release
+
+No passo 2 da rule de release (`release-workflow.mdc`), quando editar
+`version.json`:
+
+1. Compor a entrada técnica completa no `CHANGELOG.md` primeiro (`### Added /
+   Changed / Fixed / Note`).
+2. **Destilar a essência** em 2-4 bullets amigáveis e gravar no
+   `version.json.releaseNotes` (ASCII).
+3. Após o `gh release` ser criado automaticamente pelo `release.yml` (que copia
+   o CHANGELOG), **editar o body com `gh release edit vX.Y.Z --notes-file ...`**
+   passando a versão amigável + rodapé com link pro CHANGELOG.
+
+Sem o passo 3 o GitHub Release fica com o CHANGELOG bruto, que é o que
+gerou o feedback negativo do usuário em maio/2026 sobre os textos da
+página de downloads.
+
+## Exemplos canônicos
+
+Veja, como referência de tom, as release notes reescritas nas seguintes tags
+(todas em maio/2026):
+
+- `v1.1.36` — F1 26 readiness (mudança grande, audiência mista)
+- `v1.1.35` — refinamento de campo do `.otk` (audiência mista com nota a integradores)
+- `v1.1.34` — feature nova (telemetria de bateria) explicada em termos de "o que aparece pra você"
+- `v1.1.33` / `v1.1.32` — correções de bug em linguagem narrativa ("a tabela final agora só mostra pilotos reais")
+
+Reuse essa estrutura.
