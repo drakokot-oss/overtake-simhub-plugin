@@ -27,11 +27,15 @@ namespace Overtake.SimHub.Plugin.Packets
 
     /// <summary>
     /// Packet ID 4: Participants.
-    /// Payload: 1 byte numActiveCars + 22 entries of 57 bytes each.
+    /// F1 25 payload: 1 byte numActiveCars + 22 entries of 57 bytes each.
+    /// F1 26 (mod over F1 25) is expected to carry up to 24 entries (Cadillac
+    /// joins; Sauber rebrands to Audi). The parser reads up to
+    /// <see cref="GameInfo.MaxSupportedCars"/> entries but bails out when the
+    /// buffer runs short, so F1 25 packets (22) are unaffected.
     /// Name field: 32 bytes at offset 7 within each entry (null-terminated, UTF-8/Latin-1).
     ///
-    /// ALL 22 entries are always parsed for team data (teamId, raceNumber, etc.)
-    /// because this data is reliable even in overflow positions.
+    /// ALL entries that fit in the buffer are parsed for team data (teamId,
+    /// raceNumber, etc.) because this data is reliable even in overflow positions.
     /// TagsByCarIdx is populated only for active entries (0..numActive-1).
     /// For human players with showOnlineNames=0, the game sends the F1 seat name
     /// instead of the gamertag, so these are replaced with placeholders.
@@ -43,10 +47,11 @@ namespace Overtake.SimHub.Plugin.Packets
         private const int NameOffset = 7;
         private const int NameLen = 32;
 
-        private const int MaxCars = 22;
-
         public byte NumActiveCars;
-        /// <summary>Always 22 entries (some may be null if packet is short).</summary>
+        /// <summary>
+        /// Slot-indexed array sized to <see cref="GameInfo.MaxSupportedCars"/>.
+        /// Entries beyond what the buffer fits will be null.
+        /// </summary>
         public ParticipantEntry[] Entries;
         /// <summary>Tags for active entries only (0..NumActiveCars-1).</summary>
         public Dictionary<int, string> TagsByCarIdx;
@@ -99,12 +104,13 @@ namespace Overtake.SimHub.Plugin.Packets
             byte numActive = data[p];
             int baseOff = p + 1;
 
-            var entries = new ParticipantEntry[MaxCars];
+            var entries = new ParticipantEntry[GameInfo.MaxSupportedCars];
             var tagsByIdx = new Dictionary<int, string>();
             var nameCount = new Dictionary<string, int>();
 
-            // Parse ALL 22 entries for team data; names only tracked for active
-            for (int i = 0; i < MaxCars; i++)
+            // Parse every entry the buffer can fit, up to MaxSupportedCars.
+            // Names are only tracked for active entries (0..numActive-1).
+            for (int i = 0; i < GameInfo.MaxSupportedCars; i++)
             {
                 int start = baseOff + i * Stride;
                 if (start + Stride > data.Length)

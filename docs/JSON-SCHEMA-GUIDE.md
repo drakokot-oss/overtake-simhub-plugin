@@ -40,7 +40,7 @@ Exemplo: `Spa_20260512_234130_F0EB39.otk`
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `schemaVersion` | `string` | Sempre `"league-1.1"` (v1.1.34+). Use para validar compatibilidade. |
-| `game` | `string` | Sempre `"F1_25"`. |
+| `game` | `string` | Identificador do jogo que gerou a captura. A partir de **v1.1.36** é derivado dinamicamente do `PacketHeader.PacketFormat` do UDP: `2025 → "F1_25"`, `2026 → "F1_26"`, futuras versões `"F1_<fmt>"`. Capturas geradas por versões anteriores à v1.1.36 sempre serão `"F1_25"`. Use esse campo para escolher labels/branding e mappings condicionais de equipe/piloto (Cadillac, Audi etc. só aparecem em `"F1_26"`). |
 | `capture` | `object` | Metadados da captura (quando começou/terminou). |
 | `participants` | `string[]` | Tags (nomes) de todos os pilotos vistos na captura. **Já filtrado de fantasmas** (Camadas 1–6). |
 | `sessions` | `array` | **Array principal.** Cada item é uma sessão (Qualifying, Race, etc.). |
@@ -794,7 +794,7 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 1. **Sempre filtre por `sessionType.name`** para encontrar a corrida/qualy desejada.
 2. **`results[]` já vem ordenado** pela classificação original do jogo.
 3. **Cruze `results[].tag` com `drivers[tag]`** para obter as voltas detalhadas e telemetria.
-4. **`_debug` e `exportDiagnostics` são internos** — não exibir no site.
+4. **`_debug` e `exportDiagnostics` são internos** — não exibir no site. Útil para suporte: `_debug.game` (v1.1.36+) traz `packetFormat`, `gameYear`, `resolvedGameLabel` e `parserMaxSupportedCars`, permitindo identificar de qual versão do jogo veio a captura sem inspecionar os pacotes brutos.
 5. **Tempos em ms** — divida por 1000 e formate com 3 casas decimais.
 6. **`isPlayer`** — use para destacar o piloto do usuário nos resultados. Em modo espectador (`isSpectating: true`), nenhum piloto terá `isPlayer: true`.
 7. **Carros fantasma são filtrados** — o JSON só contém pilotos reais (Camadas 1–6 da v1.1.29–v1.1.33). Se vier algum, reportar com o `.otk`.
@@ -804,6 +804,7 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 11. **`yourTelemetry: "restricted"`** significa que dados privados (`tyreWearPerLap`, `fuelTelemetry`, `ersTelemetry`) podem vir incompletos para esse piloto.
 12. **`myTeam: true`** significa `teamName = "MyTeam"`. O frontend deve permitir renomear.
 13. **`ersTelemetry`** — a métrica mais útil para análise pós-corrida é `deployedPctAvgPerLap` (consumo) + `storePctAvg` (economia). Cuidado: **não combine `harvestedMgukPctAvg + harvestedMguhPctAvg` em uma única barra "regen"** sem deixar claro ao usuário que cada fonte vai até 100% independentemente. Prefira mostrar duas barras separadas.
+14. **F1 25 vs F1 26** (v1.1.36+) — use o campo `game` para chavear branding/lookups: `"F1_25"` = grid de 10 equipes (Mercedes/Ferrari/RBR/Williams/Aston/Alpine/Visa Cash App/Haas/McLaren/Stake Sauber); `"F1_26"` = grid de 11 equipes (adiciona Cadillac; Sauber renomeada para Audi). Equipes ou pilotos novos do F1 26 que ainda não estiverem mapeados aparecerão como `"Team(<id>)"` / `"Driver_<idx>"` — não é bug, é fallback gracioso até a release seguinte do plugin adicionar os IDs reais. **Sempre exiba `teamName`/`tag` recebido**, sem tentar adivinhar nomes corretos no frontend.
 
 ---
 
@@ -814,6 +815,7 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 | `league-1.0` | inicial | Schema original; equivalente ao app standalone (com `isPlayer` adicional). |
 | `league-1.1` | **v1.1.34** | Adicionou `ersTelemetry` em cada piloto (campo aditivo). Adicionou também `driverAssists`, `fuelTelemetry`, `lobbySettings`, `isSpectating`, `forecastAccuracy`, `participantsPeakNumActive` e os campos extras em `results[]` (`carIdx`, `raceNumber`, `classifiedLapped`, `classificationLeaderLaps`). |
 | `league-1.1` (refinement) | **v1.1.35** | `ersTelemetry.harvestedPctAvgPerLap` (combinado MGU-K + MGU-H) **removido**. Substituído por dois campos separados: `harvestedMgukPctAvgPerLap` e `harvestedMguhPctAvgPerLap` — cada um respeita o cap regulamentar individual de 100% por fonte. Schema string permanece `"league-1.1"` (mudança em campo opcional aditivo). Consumidores que dependiam do agregado antigo devem somar os dois novos. |
+| `league-1.1` (refinement) | **v1.1.36** | Preparação para F1 26 (mod do F1 25, mesma base UDP). Campo `game` agora é **dinâmico**, derivado de `PacketHeader.PacketFormat`: `2025 → "F1_25"`, `2026 → "F1_26"`, futuras versões `"F1_<fmt>"`. Novo bloco `_debug.game` com `packetFormat`, `gameYear`, `resolvedGameLabel`, `parserMaxSupportedCars`. Parsers per-car aceitam até 26 entradas (grid F1 26 = 11×2 + wildcards). Schema string permanece `"league-1.1"`. Capturas F1 25 ficam idênticas; novas chaves só aparecem em capturas do F1 26 com IDs ainda não mapeados (que virão como `"Team(<id>)"`/`"Driver_<idx>"` até hotfix de mapping). |
 
 **Política de versionamento:**
 - **Bump de minor** (`league-1.0` → `league-1.1`): adição de campos opcionais, retrocompatível para readers que ignoram desconhecidos.

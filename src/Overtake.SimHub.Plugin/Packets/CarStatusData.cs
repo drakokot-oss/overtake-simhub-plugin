@@ -34,7 +34,10 @@ namespace Overtake.SimHub.Plugin.Packets
                 return null;
 
             int p = PacketHeader.Size;
-            int maxCars = Math.Min(22, (data.Length - p) / EntrySize);
+            // F1 25 sends 22 entries; F1 26 (mod) is expected to send up to 24.
+            // Cap at GameInfo.MaxSupportedCars so a hypothetical larger grid in
+            // future patches is not silently truncated.
+            int maxCars = Math.Min(GameInfo.MaxSupportedCars, (data.Length - p) / EntrySize);
             var entries = new CarStatusEntry[maxCars];
 
             for (int i = 0; i < maxCars; i++)

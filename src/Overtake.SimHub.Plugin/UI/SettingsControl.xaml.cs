@@ -241,9 +241,9 @@ namespace Overtake.SimHub.Plugin.UI
             else if (receiverStatus == "Listening")
             {
                 StatusDot.Fill = YellowBrush;
-                LblStatusMain.Text = string.Format("Waiting for F1 25 data on port {0}...", _settings.UdpPort);
+                LblStatusMain.Text = string.Format("Waiting for F1 25 / F1 26 data on port {0}...", _settings.UdpPort);
                 LblHelpText.Text = string.Format(
-                    "1) F1 25: Settings > Telemetry > UDP Port = {0}  " +
+                    "1) F1 25 / F1 26: Settings > Telemetry > UDP Port = {0}  " +
                     "2) SimHub: Home > F1 25 > Game config > UDP Port = {1}  " +
                     "See Setup Guide below.",
                     _settings.UdpPort, _settings.ForwardPort);

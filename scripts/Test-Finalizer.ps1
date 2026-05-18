@@ -1394,6 +1394,146 @@ function Test-PhantomInvariantWithErsPayload() {
 Write-Host "=== Test 22: phantom invariant preserved with ERS payload (v1.1.34) ===" -ForegroundColor Cyan
 [void](Test-PhantomInvariantWithErsPayload)
 
+function Test-GameVersionDynamicLabel() {
+    # v1.1.36 — F1 26 readiness. The exported `game` field must now follow the
+    # PacketFormat captured in the header, NOT be hard-coded to "F1_25".
+    # We build three mini-stores, each fed a single packet whose header carries
+    # a different PacketFormat, and assert the resolved label matches.
+    $cases = @(
+        @{ Fmt = [uint16]2025; Expected = "F1_25"; Label = "F1 25" },
+        @{ Fmt = [uint16]2026; Expected = "F1_26"; Label = "F1 26" },
+        @{ Fmt = [uint16]2030; Expected = "F1_2030"; Label = "unknown future format" }
+    )
+
+    foreach ($case in $cases) {
+        $store2 = [System.Activator]::CreateInstance($storeType)
+
+        # Build a header with the per-case PacketFormat. Body is a tiny
+        # Session payload (packet id 1) just so SessionStore creates a session.
+        $hdr = New-Object byte[] 29
+        [System.BitConverter]::GetBytes($case.Fmt).CopyTo($hdr, 0)
+        $hdr[2] = 25; $hdr[3] = 1; $hdr[4] = 0; $hdr[5] = 1
+        $hdr[6] = 1   # packet id = Session
+        [System.BitConverter]::GetBytes([uint64]999).CopyTo($hdr, 7)
+        [System.BitConverter]::GetBytes([float]50.0).CopyTo($hdr, 15)
+        [System.BitConverter]::GetBytes([uint32]1).CopyTo($hdr, 19)
+        [System.BitConverter]::GetBytes([uint32]1).CopyTo($hdr, 23)
+        $hdr[27] = 0; $hdr[28] = 255
+
+        $body = New-Object byte[] 700
+        $body[0] = 1; $body[1] = 25; $body[2] = 22; $body[6] = 10; $body[7] = 5
+        $body[124] = 0; $body[125] = 1
+
+        $full = New-Object byte[] ($hdr.Length + $body.Length)
+        [System.Array]::Copy($hdr, 0, $full, 0, $hdr.Length)
+        [System.Array]::Copy($body, 0, $full, $hdr.Length, $body.Length)
+
+        $ingestMethod.Invoke($store2, @((Dispatch $full)))
+
+        $out = $finalizeMethod.Invoke($null, @($store2))
+        $game = Get-DictValue $out "game"
+        Assert "v1.1.36 ($($case.Label)): game = $($case.Expected) (got '$game')" ($game -eq $case.Expected)
+
+        $dbg = Get-DictValue $out "_debug"
+        $dbgGame = Get-DictValue $dbg "game"
+        Assert "v1.1.36 ($($case.Label)): _debug.game block emitted" ($dbgGame -ne $null)
+        if ($dbgGame -ne $null) {
+            $resolvedLabel = Get-DictValue $dbgGame "resolvedGameLabel"
+            Assert "v1.1.36 ($($case.Label)): _debug.game.resolvedGameLabel = $($case.Expected)" ($resolvedLabel -eq $case.Expected)
+
+            $maxCars = Get-DictValue $dbgGame "parserMaxSupportedCars"
+            Assert "v1.1.36 ($($case.Label)): _debug.game.parserMaxSupportedCars >= 24" ([int]$maxCars -ge 24)
+
+            $pf = Get-DictValue $dbgGame "packetFormat"
+            Assert "v1.1.36 ($($case.Label)): _debug.game.packetFormat = $($case.Fmt)" ([int]$pf -eq [int]$case.Fmt)
+        }
+    }
+}
+
+Write-Host "=== Test 23: game label derived from PacketFormat (v1.1.36 F1 26 readiness) ===" -ForegroundColor Cyan
+[void](Test-GameVersionDynamicLabel)
+
+function Test-ExpandedGridParsing() {
+    # v1.1.36 — Forward-compat with F1 26 grids (24 cars / 11 teams).
+    # Build a Participants packet with 24 entries instead of 22 and verify
+    # the parser reads all of them through the public ParticipantsData type.
+    $partType = $asm.GetType("Overtake.SimHub.Plugin.Packets.ParticipantsData")
+
+    # ParticipantsData header (29) + numActiveCars (1) + 26 entries * 57 stride.
+    # We populate 24 active entries (matches expected F1 26 grid) and leave
+    # slots 24, 25 empty in the buffer. MaxSupportedCars=26 must accept this.
+    $entriesToFill = 24
+    $bufSize = 29 + 1 + 26 * 57
+    $buf = New-Object byte[] $bufSize
+
+    # Header
+    [System.BitConverter]::GetBytes([uint16]2026).CopyTo($buf, 0)
+    $buf[2] = 26; $buf[3] = 1; $buf[4] = 0; $buf[5] = 1
+    $buf[6] = 4   # Participants packet id
+    [System.BitConverter]::GetBytes([uint64]4242).CopyTo($buf, 7)
+    [System.BitConverter]::GetBytes([float]10.0).CopyTo($buf, 15)
+    $buf[27] = 0; $buf[28] = 255
+
+    $buf[29] = [byte]$entriesToFill   # numActiveCars = 24
+
+    # Per-entry: position name like "Driver24A".."Driver24X" for uniqueness.
+    for ($i = 0; $i -lt $entriesToFill; $i++) {
+        $start = 30 + $i * 57
+        $buf[$start + 0] = 0                  # aiControlled = false
+        $buf[$start + 1] = 255                # DriverId = network
+        $buf[$start + 3] = [byte](($i % 11))  # teamId 0..10 (Cadillac would be #10)
+        $buf[$start + 4] = 0                  # myTeam
+        $buf[$start + 5] = [byte]($i + 1)     # raceNumber unique
+        $buf[$start + 40] = 1                 # ShowOnlineNames = 1
+        $buf[$start + 43] = 1                 # Platform = Steam
+        $name = [System.Text.Encoding]::UTF8.GetBytes("Test$i")
+        [System.Array]::Copy($name, 0, $buf, $start + 7, $name.Length)
+    }
+
+    $parseMethod = $partType.GetMethod("Parse")
+    $parts = $parseMethod.Invoke($null, [object[]]@(,[byte[]]$buf))
+
+    Assert "v1.1.36: parser accepts 24-active-car packet" ($parts.NumActiveCars -eq 24)
+    Assert "v1.1.36: Entries array sized to MaxSupportedCars (26)" ($parts.Entries.Length -eq 26)
+    Assert "v1.1.36: 24th entry parsed (carIdx 23)" ($parts.Entries[23] -ne $null)
+    Assert "v1.1.36: 24th entry name preserved" ($parts.Entries[23].Name -eq "Test23")
+    Assert "v1.1.36: TagsByCarIdx contains 24th car" ($parts.TagsByCarIdx.ContainsKey(23))
+}
+
+Write-Host "=== Test 24: parsers accept 24-car grid (v1.1.36 F1 26 readiness) ===" -ForegroundColor Cyan
+[void](Test-ExpandedGridParsing)
+
+function Test-LapDataPartialBufferTolerated() {
+    # v1.1.36 — LapData parser must tolerate buffers smaller than NumCars
+    # (was strict: required exactly 22 * 57 bytes; now reads what fits).
+    # We feed a buffer with exactly 22 entries (F1 25 grid) and confirm the
+    # parser fills slots 0..21 and leaves 22..25 null without throwing.
+    $lapType = $asm.GetType("Overtake.SimHub.Plugin.Packets.LapDataEntry")
+
+    $buf = New-Object byte[] (29 + 57 * 22)
+    [System.BitConverter]::GetBytes([uint16]2025).CopyTo($buf, 0)
+    $buf[2] = 25; $buf[6] = 2
+    [System.BitConverter]::GetBytes([uint64]1).CopyTo($buf, 7)
+    [System.BitConverter]::GetBytes([float]1.0).CopyTo($buf, 15)
+    $buf[27] = 0; $buf[28] = 255
+
+    # Mark car 21 with a recognisable lap number so we can assert it parsed.
+    $car21 = 29 + 21 * 57
+    $buf[$car21 + 33] = 7   # currentLapNum = 7
+
+    $parseMethod = $lapType.GetMethod("Parse")
+    $rows = $parseMethod.Invoke($null, [object[]]@(,[byte[]]$buf))
+
+    Assert "v1.1.36: LapData parses 22-car F1 25 buffer without error" ($rows -ne $null)
+    Assert "v1.1.36: LapData array sized to MaxSupportedCars (26)" ($rows.Length -eq 26)
+    Assert "v1.1.36: LapData slot 21 populated (CurrentLapNum=7)" ($rows[21] -ne $null -and $rows[21].CurrentLapNum -eq 7)
+    Assert "v1.1.36: LapData slot 22 null (out of buffer)" ($rows[22] -eq $null)
+    Assert "v1.1.36: LapData slot 25 null (out of buffer)" ($rows[25] -eq $null)
+}
+
+Write-Host "=== Test 25: LapData parser tolerant of partial buffers (v1.1.36) ===" -ForegroundColor Cyan
+[void](Test-LapDataPartialBufferTolerated)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

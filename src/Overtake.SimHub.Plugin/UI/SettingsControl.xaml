@@ -28,7 +28,7 @@
                     <StackPanel Grid.Column="0">
                         <TextBlock Text="Overtake Telemetry" FontSize="20" FontWeight="Bold"
                                    Foreground="#2EC4B6" />
-                        <TextBlock Text="Capture F1 25 race data and export to Overtake Race Hub."
+                        <TextBlock Text="Capture F1 25 / F1 26 race data and export to Overtake Race Hub."
                                    Foreground="#7B8CA3" FontSize="12" Margin="0,4,0,6" />
                         <TextBlock Foreground="#7B8CA3" FontSize="11">
                             <Hyperlink x:Name="LnkWebsite" Foreground="#2EC4B6"
@@ -135,7 +135,7 @@
                     </Grid>
 
                     <TextBlock x:Name="LblHelpText"
-                               Text="The plugin captures data automatically when F1 25 is running."
+                               Text="The plugin captures data automatically when F1 25 or F1 26 is running."
                                Foreground="#7B8CA3" FontSize="11" Margin="0,8,0,0"
                                TextWrapping="Wrap" />
 
@@ -211,7 +211,7 @@
                                 Content="APPLY"
                                 Padding="15,5"
                                 Click="BtnApplyPort_Click" />
-                        <TextBlock Text="Must match F1 25 telemetry port (default: 20778)"
+                        <TextBlock Text="Must match the game's telemetry port (default: 20778)"
                                    Foreground="#7B8CA3" FontSize="11"
                                    VerticalAlignment="Center" Margin="10,0,0,0" />
                     </StackPanel>
@@ -240,7 +240,7 @@
                         <LineBreak />
                         <Run>Settings > Telemetry > UDP Telemetry = On</Run>
                         <LineBreak />
-                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = 127.0.0.1  |  UDP Port = 20778  |  Format = 2025</Run>
+                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = 127.0.0.1  |  UDP Port = 20778  |  Format = 2025 (F1 25) / 2026 (F1 26)</Run>
                         <LineBreak /><LineBreak />
                         <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 2 - SimHub Game Config (IMPORTANT):</Run>
                         <LineBreak />
@@ -252,7 +252,7 @@
                         <LineBreak /><LineBreak />
                         <Run FontWeight="Bold" Foreground="#2EC4B6">How it works:</Run>
                         <LineBreak />
-                        <Run>F1 25 (20778)  &#x2192;  Overtake Plugin  &#x2192;  relay  &#x2192;  SimHub (20777)</Run>
+                        <Run>Game (20778)  &#x2192;  Overtake Plugin  &#x2192;  relay  &#x2192;  SimHub (20777)</Run>
                         <LineBreak />
                         <Run Foreground="#7B8CA3">The plugin receives telemetry, processes it, and relays every packet</Run>
                         <LineBreak />
@@ -265,7 +265,7 @@
             <styles:SHSection Title="Setup Guide (Console - PS5 / Xbox)">
                 <StackPanel Margin="10">
                     <TextBlock TextWrapping="Wrap" Foreground="#CCC" FontSize="12">
-                        <Run Foreground="#7B8CA3">F1 25 on PlayStation and Xbox can send telemetry to a PC on the same network.</Run>
+                        <Run Foreground="#7B8CA3">F1 25 / F1 26 on PlayStation and Xbox can send telemetry to a PC on the same network.</Run>
                         <LineBreak /><LineBreak />
                         <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 1 - Find your PC's IP address:</Run>
                         <LineBreak />
@@ -280,7 +280,7 @@
                         <LineBreak />
                         <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = your PC's IP (e.g. 192.168.1.100)</Run>
                         <LineBreak />
-                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP Port = 20778  |  Format = 2025</Run>
+                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP Port = 20778  |  Format = 2025 (F1 25) / 2026 (F1 26)</Run>
                         <LineBreak /><LineBreak />
                         <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 3 - SimHub (same as PC Step 2):</Run>
                         <LineBreak />

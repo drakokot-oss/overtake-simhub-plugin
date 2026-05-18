@@ -459,6 +459,19 @@ namespace Overtake.SimHub.Plugin.Store
             if (header.PlayerCarIndex < 255)
                 sess.PlayerCarIndex = header.PlayerCarIndex;
 
+            // v1.1.36 — Capture game-version markers from every packet header.
+            // We overwrite on each packet on purpose: if the game restarts mid-
+            // session (rare), the most-recent values reflect the active build.
+            // Zero PacketFormat is treated as "not yet observed" downstream so a
+            // malformed first packet won't pin the session to "F1_0".
+            if (header.PacketFormat != 0)
+            {
+                sess.LastPacketFormat = header.PacketFormat;
+                sess.LastGameYear = header.GameYear;
+                sess.LastGameMajorVersion = header.GameMajorVersion;
+                sess.LastGameMinorVersion = header.GameMinorVersion;
+            }
+
             // 1) Session
             if (pid == 1 && parsed.Session != null)
                 IngestSession(sess, parsed.Session, nowMs);
@@ -1993,7 +2006,8 @@ namespace Overtake.SimHub.Plugin.Store
             // Register cars from TeamByCarIdx that still lack tags.
             // Skip overflow AI filler slots in online sessions only when there
             // is NO positive evidence of a real player (lobby/bestKnown/wasHuman).
-            for (int ci = 0; ci < 22; ci++)
+            // v1.1.36 — cap bumped from 22 to MaxSupportedCars to cover F1 26 grids.
+            for (int ci = 0; ci < GameInfo.MaxSupportedCars; ci++)
             {
                 if (sess.TagsByCarIdx.ContainsKey(ci)) continue;
                 ParticipantEntry team;
@@ -2038,6 +2052,10 @@ namespace Overtake.SimHub.Plugin.Store
             for (int i = 0; i < rows.Length; i++)
             {
                 var row = rows[i];
+                // v1.1.36 — LapDataEntry.Parse now leaves trailing slots null
+                // when the buffer holds fewer than NumCars (=MaxSupportedCars)
+                // entries, which is the normal case on F1 25 (22 cars).
+                if (row == null) continue;
                 int carIdx = row.CarIdx;
                 var d = EnsureDriver(sid, carIdx);
                 if (d == null)
@@ -2200,6 +2218,9 @@ namespace Overtake.SimHub.Plugin.Store
             for (int i = 0; i < rows.Length; i++)
             {
                 var row = rows[i];
+                // v1.1.36 — CarDamageEntry.Parse now leaves trailing slots null
+                // when the buffer holds fewer than NumCars entries. Safe-skip.
+                if (row == null) continue;
                 int carIdx = row.CarIdx;
                 var d = EnsureDriver(sid, carIdx);
                 if (d == null) continue;

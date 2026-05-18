@@ -19,7 +19,7 @@ using Overtake.SimHub.Plugin.UI;
 
 namespace Overtake.SimHub.Plugin
 {
-    [PluginDescription("Receives F1 25 UDP telemetry for the Overtake platform")]
+    [PluginDescription("Receives F1 25 / F1 26 UDP telemetry for the Overtake platform")]
     [PluginAuthor("Overtake")]
     [PluginName("Overtake Telemetry")]
     public class OvertakePlugin : IPlugin, IDataPlugin, IWPFSettingsV2
