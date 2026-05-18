@@ -75,6 +75,7 @@
     <Compile Include="OvertakePlugin.cs" />
     <Compile Include="OvertakeSettings.cs" />
     <Compile Include="UdpReceiver.cs" />
+    <Compile Include="Packets\GameInfo.cs" />
     <Compile Include="Packets\PacketHeader.cs" />
     <Compile Include="Packets\SessionData.cs" />
     <Compile Include="Packets\LapDataEntry.cs" />
