@@ -72,7 +72,7 @@ $store = [System.Activator]::CreateInstance($storeType)
 
 # Session (Race, Monaco)
 $sp = New-Object byte[] 700
-$sp[0] = 1; $sp[1] = 28; $sp[2] = 20; $sp[6] = 10; $sp[7] = 5
+$sp[0] = 1; $sp[1] = 28; $sp[2] = 20; $sp[6] = 15; $sp[7] = 5
 $sp[124] = 0; $sp[125] = 1
 $ingestMethod.Invoke($store, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -144,7 +144,7 @@ $s = $sessions[0]
 $st = Get-DictValue $s "sessionType"
 Assert "SessionType is dict" ($st -ne $null)
 Assert "SessionType name = Race" ((Get-DictValue $st "name") -eq "Race")
-Assert "SessionType id = 10" ((Get-DictValue $st "id") -eq 10)
+Assert "SessionType id = 15" ((Get-DictValue $st "id") -eq 15)
 
 $track = Get-DictValue $s "track"
 Assert "Track name = Monaco" ((Get-DictValue $track "name") -eq "Monaco")
@@ -361,7 +361,7 @@ function Test-LobbyKnownOverflow() {
     $st0 = [System.Activator]::CreateInstance($storeType)
     # Online race session
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 20  # Race-style id
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 20  # Race-style id
     $sp[124] = 0; $sp[125] = 1            # NetworkGame=1
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -459,7 +459,7 @@ function Test-AutoRotateOnTrackChange() {
 
     # --- Baku Race (track 20), with FC so it counts as a "closed terminal session" ---
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 16; $sp[7] = 20  # sessionType=16 (Race), trackId=20 (Baku)
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 20  # sessionType=15 (Race, F1 25 spec), trackId=20 (Baku)
     $sp[124] = 0; $sp[125] = 1            # NetworkGame=1
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp -sessionUid ([uint64]7000)))))
 
@@ -603,7 +603,7 @@ function Test-ByteBoxingCastBug() {
 
     # Online Race @ Monaco
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 5
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5
     $sp[124] = 0; $sp[125] = 1
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -761,7 +761,7 @@ function Test-MonacoStyleGhost() {
 
     # Online race @ Monaco (trackId=5)
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 5
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5
     $sp[124] = 0; $sp[125] = 1   # NetworkGame=1 (online)
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -878,7 +878,7 @@ function Test-RealPlayerLobbyEvidenceVsAi() {
 
     # Online race @ LasVegas (trackId=20-style)
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 20
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 20
     $sp[124] = 0; $sp[125] = 1
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -985,7 +985,7 @@ function Test-AiFillerSameTeamAsSingleHuman() {
 
     # Online race @ Brazil (trackId=10)
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 10
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 10
     $sp[124] = 0; $sp[125] = 1   # NetworkGame=1
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -1292,7 +1292,7 @@ function Test-PhantomInvariantWithErsPayload() {
     $st0 = [System.Activator]::CreateInstance($storeType)
 
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 10
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 10
     $sp[124] = 0; $sp[125] = 1
     $ingestMethod.Invoke($st0, @((Dispatch (New-FakePacket 1 $sp))))
 
@@ -1577,7 +1577,7 @@ function Test-CarryOverFcOnlyPhantomFiltered() {
     # Phase 2: a real race for sessionUID=200 -- Session (Race @ trackId=10),
     # Participants (Hamilton + Verstappen), then FC. This is the legitimate one.
     $sp = New-Object byte[] 700
-    $sp[0] = 1; $sp[6] = 10; $sp[7] = 10
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 10
     $sp[124] = 0; $sp[125] = 1
     $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]200)))))
 
@@ -1639,6 +1639,8 @@ Write-Host "=== Test 26: FC-only carry-over phantom filtered (v1.1.37 Silverston
 
 function Test-SprintFormatConsolidatorInvariant() {
     # v1.1.37 -- Lock-in test for the existing Sprint Format consolidator.
+    # v1.1.38 -- IDs corrected against the official F1 25 UDP spec
+    #            (Data Output from F1 25 v3.pdf, "Session types" appendix).
     # The invariant (since v1.1.31): SS + SQ + Sprint + Quali + Race within
     # the SAME track must end up in ONE consolidated .otk. Two pieces of
     # logic protect this:
@@ -1649,9 +1651,12 @@ function Test-SprintFormatConsolidatorInvariant() {
     #      trackId mid-weekend, so auto-rotation stays dormant.
     # If a future refactor breaks either piece, this test fails loudly.
     #
-    # Session type ids per F1 25 UDP spec:
-    #   14 = SprintShootout, 8 = ShortQualifying, 13 = Sprint,
-    #    5 = Qualifying1, 10 = Race.
+    # Session type ids per F1 25 UDP spec (Data Output from F1 25 v3.pdf):
+    #   10 = Sprint Shootout 1 (used here for SS / Sprint Qualifying)
+    #    8 = Short Qualifying  (used in some Sprint Format lobbies for SQ)
+    #   16 = Race 2            (Sprint Race proper in Sprint Format weekends)
+    #    5 = Qualifying 1      (main qualifying)
+    #   15 = Race              (Main Race, the only terminal session id)
     $st = [System.Activator]::CreateInstance($storeType)
     $tid = 14   # Abu Dhabi -- any consistent trackId works
 
@@ -1695,35 +1700,35 @@ function Test-SprintFormatConsolidatorInvariant() {
         $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid))))
     }
 
-    # Sprint Shootout -- terminal? No.
-    & $feedSession ([uint64]100) ([byte]14) ([byte]$tid)
+    # Sprint Shootout 1 (id=10) -- terminal? No (BUG in <= v1.1.37: was "Race").
+    & $feedSession ([uint64]100) ([byte]10) ([byte]$tid)
     & $feedParticipants ([uint64]100)
     & $feedFc ([uint64]100)
-    Assert "v1.1.37 Sprint invariant: SS+FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
+    Assert "v1.1.38 Sprint invariant: SS (id=10 Sprint Shootout 1) + FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
 
-    # Short Qualifying -- terminal? No.
+    # Short Qualifying (id=8) -- terminal? No.
     & $feedSession ([uint64]101) ([byte]8) ([byte]$tid)
     & $feedParticipants ([uint64]101)
     & $feedFc ([uint64]101)
-    Assert "v1.1.37 Sprint invariant: SQ+FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
+    Assert "v1.1.38 Sprint invariant: SQ (id=8) + FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
 
-    # Sprint Race -- terminal? No (this is the key assertion: "Sprint" is NOT "Race").
-    & $feedSession ([uint64]102) ([byte]13) ([byte]$tid)
+    # Sprint Race (id=16 Race 2) -- terminal? No (BUG in <= v1.1.37: was "Race").
+    & $feedSession ([uint64]102) ([byte]16) ([byte]$tid)
     & $feedParticipants ([uint64]102)
     & $feedFc ([uint64]102)
-    Assert "v1.1.37 Sprint invariant: Sprint+FC does NOT count as terminal (Sprint != Race)" (-not $st.HasClosedTerminalSession())
+    Assert "v1.1.38 Sprint invariant: Sprint Race (id=16 Race 2) + FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
 
-    # Qualifying -- terminal? No.
+    # Qualifying 1 (id=5) -- terminal? No.
     & $feedSession ([uint64]103) ([byte]5) ([byte]$tid)
     & $feedParticipants ([uint64]103)
     & $feedFc ([uint64]103)
-    Assert "v1.1.37 Sprint invariant: Quali+FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
+    Assert "v1.1.38 Sprint invariant: Quali (id=5) + FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
 
-    # Main Race -- terminal? YES.
-    & $feedSession ([uint64]104) ([byte]10) ([byte]$tid)
+    # Main Race (id=15) -- the ONLY terminal session per F1 25 spec.
+    & $feedSession ([uint64]104) ([byte]15) ([byte]$tid)
     & $feedParticipants ([uint64]104)
     & $feedFc ([uint64]104)
-    Assert "v1.1.37 Sprint invariant: Race+FC IS terminal" $st.HasClosedTerminalSession()
+    Assert "v1.1.38 Sprint invariant: Race (id=15) + FC IS terminal" $st.HasClosedTerminalSession()
 
     # No AUTO-ROTATE should have been requested at any point -- trackId never moved.
     $notes = Get-Field $st "Notes"
@@ -1737,8 +1742,209 @@ function Test-SprintFormatConsolidatorInvariant() {
     Assert "v1.1.37 Sprint invariant: Finalize emits ALL 5 sessions (SS+SQ+Sprint+Quali+Race) in ONE file" ($sessions.Count -eq 5)
 }
 
-Write-Host "=== Test 27: Sprint Format consolidator invariant (v1.1.37 lock-in) ===" -ForegroundColor Cyan
+Write-Host "=== Test 27: Sprint Format consolidator invariant (v1.1.37 lock-in / v1.1.38 IDs) ===" -ForegroundColor Cyan
 [void](Test-SprintFormatConsolidatorInvariant)
+
+function Test-SprintShootoutId10NotTerminal() {
+    # v1.1.38 -- direct regression for the Sprint Format bug reported in v1.1.37.
+    # Before v1.1.38, Lookups.SessionType mapped id=10 to "Race", which made
+    # IsTerminalSession(10) return TRUE and auto-export fire after the Sprint
+    # Shootout 1's Final Classification. That split Sprint Format weekends into
+    # separate .otk files. F1 25 spec is unambiguous: id=10 is "Sprint Shootout 1".
+    #
+    # This test directly poisons the store with id=10 + a Final Classification and
+    # asserts HasClosedTerminalSession() stays FALSE -- meaning no auto-export
+    # would have fired.
+    $st = [System.Activator]::CreateInstance($storeType)
+
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 14   # sessionType=10 (Sprint Shootout 1), Abu Dhabi
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]300)))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $nm = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($nm, 0, $pp, 8, $nm.Length)
+    $pp[41] = 1; $pp[44] = 1
+    for ($c = 1; $c -lt 22; $c++) {
+        $cst = 1 + $c * 57
+        $pp[$cst + 3] = 255; $pp[$cst + 5] = 0
+    }
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]300)))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 1
+    $fc[1] = 1; $fc[2] = 3; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]87000).CopyTo($fc, 1 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc ([uint64]300)))))
+
+    Assert "v1.1.38 ID fix: id=10 (Sprint Shootout 1) + FC must NOT register as terminal session" `
+        (-not $st.HasClosedTerminalSession())
+
+    # Finalize and confirm Lookups labels the session correctly.
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.38 ID fix: id=10 session is emitted" ($sessions.Count -eq 1)
+    if ($sessions.Count -eq 1) {
+        $stype = Get-DictValue $sessions[0] "sessionType"
+        $nm2 = Get-DictValue $stype "name"
+        Assert "v1.1.38 ID fix: id=10 sessionType.name == 'SprintShootout1' (not 'Race')" `
+            ($nm2 -eq "SprintShootout1")
+    }
+}
+
+Write-Host "=== Test 28: Sprint Shootout 1 (id=10) NOT terminal (v1.1.38 ID fix) ===" -ForegroundColor Cyan
+[void](Test-SprintShootoutId10NotTerminal)
+
+function Test-SprintRaceId16NotTerminal() {
+    # v1.1.38 -- F1 25 spec: id=16 is "Race 2", which in Sprint Format weekends
+    # is the Sprint Race proper. Before v1.1.38, Lookups had id=16 -> "Race",
+    # making IsTerminalSession(16) return TRUE and firing auto-export at the
+    # Sprint Race's Final Classification -- so the Main Race that followed
+    # would have to start a fresh capture and ended up in a separate .otk.
+    #
+    # After fix: id=16 -> "Race2", IsTerminalSession(16) == false. Sprint
+    # Race waits for the Main Race (id=15) to fire auto-export.
+    $st = [System.Activator]::CreateInstance($storeType)
+
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 16; $sp[7] = 14   # sessionType=16 (Race 2 / Sprint Race), Abu Dhabi
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]400)))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $nm = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($nm, 0, $pp, 8, $nm.Length)
+    $pp[41] = 1; $pp[44] = 1
+    for ($c = 1; $c -lt 22; $c++) {
+        $cst = 1 + $c * 57
+        $pp[$cst + 3] = 255; $pp[$cst + 5] = 0
+    }
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]400)))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 1
+    $fc[1] = 1; $fc[2] = 24; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]86500).CopyTo($fc, 1 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc ([uint64]400)))))
+
+    Assert "v1.1.38 ID fix: id=16 (Race 2 / Sprint Race) + FC must NOT register as terminal" `
+        (-not $st.HasClosedTerminalSession())
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.38 ID fix: id=16 session is emitted" ($sessions.Count -eq 1)
+    if ($sessions.Count -eq 1) {
+        $stype = Get-DictValue $sessions[0] "sessionType"
+        $nm2 = Get-DictValue $stype "name"
+        Assert "v1.1.38 ID fix: id=16 sessionType.name == 'Race2' (not 'Race')" `
+            ($nm2 -eq "Race2")
+    }
+}
+
+Write-Host "=== Test 29: Sprint Race (id=16 Race 2) NOT terminal (v1.1.38 ID fix) ===" -ForegroundColor Cyan
+[void](Test-SprintRaceId16NotTerminal)
+
+function Test-CleanCaptureFullyResetsStoreNoDataLoss() {
+    # v1.1.38 -- contract for the "clean session" pipeline. User reported concern:
+    # "garanta que ao final da sessao a gente de fato consiga limpar os dados,
+    # sem perder dados relevantes da corrida."
+    #
+    # The end-to-end pipeline is:
+    #   1. Race + FC arrives -> IsTerminalSession(id=15) returns true
+    #   2. Auto-export builds the .otk (LeagueFinalizer.Finalize, then OtkWriter)
+    #   3. ONLY THEN BeginNewCapture() clears the store -- so the .otk has every
+    #      relevant byte before the in-memory state is wiped.
+    #
+    # This test enforces the *clear* half of that contract: Finalize captures
+    # everything we expected (drivers, results, events), and then BeginNewCapture
+    # wipes the store such that an immediate second Finalize on the same store
+    # returns zero sessions -- proving no stale residue would leak into the
+    # NEXT capture / NEXT race.
+    $st = [System.Activator]::CreateInstance($storeType)
+
+    # Build a complete Race in one session (id=15, F1 25 spec): Hamilton + Verstappen,
+    # full lap data, full FC.
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5   # Race @ Monaco
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]500)))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $nm0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($nm0, 0, $pp, 8, $nm0.Length)
+    $pp[41] = 1; $pp[44] = 1
+    $pp[58] = 0; $pp[61] = 2; $pp[63] = 1
+    $nm1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($nm1, 0, $pp, 65, $nm1.Length)
+    $pp[98] = 1; $pp[101] = 1
+    for ($c = 2; $c -lt 22; $c++) {
+        $cst = 1 + $c * 57
+        $pp[$cst + 3] = 255; $pp[$cst + 5] = 0
+    }
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]500)))))
+
+    $ld = New-Object byte[] (22 * 57)
+    $ld[33] = 1; $ld[33 + 57] = 1
+    $ld[43] = 1; $ld[43 + 57] = 2
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 2 $ld ([uint64]500)))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    $fc[1] = 1; $fc[2] = 70; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]82000).CopyTo($fc, 1 + 7)
+    $off2 = 1 + 46
+    $fc[$off2 + 0] = 2; $fc[$off2 + 1] = 70; $fc[$off2 + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]82500).CopyTo($fc, $off2 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc ([uint64]500)))))
+
+    # Phase 1: Finalize and prove the .otk would have captured everything we care about.
+    $res1 = $finalizeMethod.Invoke($null, @($st))
+    $sessions1 = Get-DictValue $res1 "sessions"
+    Assert "v1.1.38 clean contract: pre-clean Finalize emits 1 session" ($sessions1.Count -eq 1)
+    $participants1 = Get-DictValue $res1 "participants"
+    $hasHam = $false; $hasVer = $false
+    foreach ($p in $participants1) {
+        if ($p -eq "Hamilton")   { $hasHam = $true }
+        if ($p -eq "Verstappen") { $hasVer = $true }
+    }
+    Assert "v1.1.38 clean contract: pre-clean Finalize keeps Hamilton" $hasHam
+    Assert "v1.1.38 clean contract: pre-clean Finalize keeps Verstappen" $hasVer
+    $res1Results = Get-DictValue $sessions1[0] "results"
+    Assert "v1.1.38 clean contract: pre-clean Finalize has 2 results" ($res1Results.Count -eq 2)
+
+    # Phase 2: BeginNewCapture -- the cleanup half of the pipeline. It must
+    # wipe the store completely (the user's "limpar os dados" request).
+    $beginMethod = $storeType.GetMethod("BeginNewCapture")
+    Assert "v1.1.38 clean contract: SessionStore exposes BeginNewCapture()" ($beginMethod -ne $null)
+    if ($beginMethod -ne $null) {
+        $beginMethod.Invoke($st, @()) | Out-Null
+    }
+
+    $sessDict = Get-Field $st "Sessions"
+    Assert "v1.1.38 clean contract: BeginNewCapture empties Sessions dictionary" ($sessDict.Count -eq 0)
+
+    # Phase 3: a fresh Finalize on the cleared store must return zero sessions,
+    # zero participants. Critical: if any residue leaks here, the NEXT race's
+    # .otk would inherit Hamilton + Verstappen as ghost participants.
+    $res2 = $finalizeMethod.Invoke($null, @($st))
+    $sessions2 = Get-DictValue $res2 "sessions"
+    Assert "v1.1.38 clean contract: post-clean Finalize emits 0 sessions" ($sessions2.Count -eq 0)
+    $participants2 = Get-DictValue $res2 "participants"
+    Assert "v1.1.38 clean contract: post-clean participants[] is empty (no residue)" ($participants2.Count -eq 0)
+}
+
+Write-Host "=== Test 30: BeginNewCapture fully resets store, no residue into next race (v1.1.38 clean contract) ===" -ForegroundColor Cyan
+[void](Test-CleanCaptureFullyResetsStoreNoDataLoss)
 
 # ---- Summary ----
 Write-Host ""

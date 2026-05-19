@@ -2,6 +2,38 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.38] - 2026-05-19
+
+### Fixed
+- **Sprint Format weekends generated multiple `.otk` files instead of a single consolidated one** (user-reported). Root cause: `Lookups.SessionType` had IDs 10..14 mismapped versus the official F1 25 UDP spec (`Data Output from F1 25 v3.pdf`, "Session types" appendix). The spec defines:
+  - `10..14` → Sprint Shootout 1/2/3/Short/One-Shot
+  - `15` → Race
+  - `16` → Race 2 (Sprint Race in Sprint Format weekends)
+  - `17` → Race 3
+  - `18` → Time Trial
+
+  The previous mapping had `10 → "Race"`, `11 → "Race2"`, `12 → "TimeTrial"`, `13 → "Sprint"`, `14 → "SprintShootout"`. Combined with `IsTerminalSession(byte id) => Lookups.SessionType[id] == "Race"`, this caused two distinct premature-export bugs:
+  1. Sprint Shootout 1 (`id=10`) was treated as "Race" → `IsTerminalSession(10) == true` → auto-export fired at the end of the first Sprint Format session, splitting the weekend.
+  2. Sprint Race / Race 2 (`id=16`) was also labeled "Race" → same premature trigger.
+
+  Fix in `Lookups.SessionType`: IDs now match the spec exactly. `IsTerminalSession` stays as `name == "Race"`, so after the fix only `id=15` (Main Race) and the online-observed Race IDs (`19, 25, 26, 29, 30, 36`) trigger terminal behaviour. Sprint Shootout (10..14), Race 2 (16, Sprint Race), Race 3 (17), and Time Trial (18) are explicitly non-terminal. Result: `SS → SQ → Sprint → Quali → Race` flows now stay in ONE `.otk` end-to-end.
+
+- **`OvertakePlugin.SessionTypeName`** (used by the SimHub status panel and log lines) realigned to the spec. Old values "Race" for ids 10/11, "Time Trial" for 12, "Sprint Shootout" for 14 are replaced with their correct F1 25 labels ("Sprint Shootout 1/2/3", "Short Sprint Shootout", "One-Shot Sprint Shootout", "Race 2", "Race 3", "Time Trial").
+
+### Changed
+- **Existing Finalizer tests** that hard-coded session-type id `10` (and one with id `16`) as a stand-in for "Race" were migrated to id `15` (the real Race id per spec). Test 1 assertion `"SessionType id = 10"` is now `"SessionType id = 15"`. Nine call sites updated; no functional change in those tests beyond reflecting the corrected mapping.
+
+### Added
+- **Test 27 updated for F1 25 spec IDs.** The Sprint Format consolidator lock-in now feeds the real F1 25 IDs: `SS=10`, `SQ=8`, `Sprint Race=16`, `Quali=5`, `Main Race=15`. Asserts that `HasClosedTerminalSession()` returns `false` after every intermediate session's FC and only flips to `true` after the Main Race (`id=15`) FC.
+- **Test 28 (`Test-SprintShootoutId10NotTerminal`):** direct regression for the bug. Feeds a fake session with `sessionType=10` ("Sprint Shootout 1") plus a Final Classification, then asserts `HasClosedTerminalSession() == false` AND `Finalize` labels the session as `"SprintShootout1"` (not `"Race"`). Before v1.1.38, this would have returned `true` and labeled it `"Race"`.
+- **Test 29 (`Test-SprintRaceId16NotTerminal`):** same shape for `sessionType=16` ("Race 2" / Sprint Race). Asserts the Sprint Race no longer fires premature auto-export and is labeled `"Race2"` (not `"Race"`).
+- **Test 30 (`Test-CleanCaptureFullyResetsStoreNoDataLoss`):** contract test for the "clean session" pipeline. Builds a complete Race in the store, calls `Finalize` and asserts the JSON has every relevant byte (sessions, drivers, results), then calls `BeginNewCapture()` and asserts the store is fully empty AND a second `Finalize` on the cleared store returns zero sessions / zero participants. Locks down the user-facing invariant: "limpar os dados sem perder dados relevantes da corrida" — every byte is captured by `Finalize` BEFORE the store is wiped, and the wipe is complete (no residue leaks to the next race).
+
+### Note
+- **Schema continues `league-1.1`.** The labels in `sessions[].sessionType.name` change for previously misnamed IDs (`"Race"`/`"Race2"`/`"TimeTrial"`/`"Sprint"`/`"SprintShootout"` → `"SprintShootout1..3"`/`"ShortSprintShootout"`/`"OneShotSprintShootout"`/`"Race2"`/`"Race3"`/`"TimeTrial"` per the F1 25 spec), and a new `"Race3"` label for `id=17` becomes possible. Consumers that key off `sessionType.id` (always numeric) are unaffected. Consumers that key off `sessionType.name == "Race"` will now correctly skip Sprint Race (`Race2`) and Race 3 — which is the desired behaviour (the Main Race is what counts).
+- **No `.otk` regenerated retroactively.** Files produced by `<= v1.1.37` keep their (incorrect) labels. Only new captures get the corrected mapping. If a downstream system needs the corrected labels for old files, it should normalize via `sessionType.id` against the new table.
+- **Sprint Race detection note for downstream consumers:** in Sprint Format weekends, the Sprint Race is now reliably labeled `"Race2"` (`id=16`), distinguished from the Main Race (`"Race"`, `id=15`). Consumers can compute Sprint points using `sessions[].sessionType.name == "Race2"` if they want to surface Sprint results separately.
+
 ## [1.1.37] - 2026-05-19
 
 ### Fixed
