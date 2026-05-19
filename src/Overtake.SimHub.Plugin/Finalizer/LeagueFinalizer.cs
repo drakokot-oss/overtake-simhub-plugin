@@ -924,15 +924,43 @@ namespace Overtake.SimHub.Plugin.Finalizer
             var sessionsOut = new List<object>();
             var sessionTypeNames = new List<string>();
             var seenSt = new HashSet<int>();
+            int droppedCarryOver = 0;
 
             foreach (var kvp in deduped)
             {
                 string sid = kvp.Key;
                 SessionRun sess = kvp.Value;
 
-                // Skip phantom sessions (UID=0, or no type with no meaningful data)
-                if (sid == "0" || (!sess.SessionType.HasValue && sess.Drivers.Count == 0))
+                // Skip phantom sessions:
+                // 1. sid == "0" — legacy malformed UID
+                // 2. No sessionType AND no drivers — legacy empty-session filter
+                // 3. v1.1.37 — FC-only carry-over from a previous lobby's results
+                //    screen. When the user starts the plugin while another race's
+                //    final-classification packets are still being repeated by F1 25
+                //    (~5s cadence), a SessionRun is created for that stale UID but
+                //    NEVER receives a Session (no trackId / sessionType) nor a
+                //    Participants packet (peak == 0). The "drivers" inside it are
+                //    Car_X placeholders synthesised from the FC rows. Filtering
+                //    the session also evicts those Car_X tags from the recomputed
+                //    global participants[] list (the downstream rebuild only walks
+                //    sessionsOut).
+                bool isCarryOver = !sess.SessionType.HasValue
+                                   && !sess.TrackId.HasValue
+                                   && sess.ParticipantsPeakNumActive == 0;
+                if (sid == "0"
+                    || (!sess.SessionType.HasValue && sess.Drivers.Count == 0)
+                    || isCarryOver)
+                {
+                    if (isCarryOver)
+                    {
+                        droppedCarryOver++;
+                        if (store.Notes.Count < 500)
+                            store.Notes.Add(string.Format(
+                                "Dropped FC-only carry-over session uid={0} drivers={1} events={2} (no Session/Participants ever received).",
+                                sid, sess.Drivers.Count, sess.Events != null ? sess.Events.Count : 0));
+                    }
                     continue;
+                }
 
                 if (sess.SessionType.HasValue && seenSt.Add(sess.SessionType.Value))
                     sessionTypeNames.Add(((Dictionary<string, object>)Lookups.Label(Lookups.SessionType, sess.SessionType, "SessionType"))["name"].ToString());
@@ -1056,6 +1084,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     {
                         { "driversWithoutTeam", driversWithoutTeam },
                         { "isSpectating", anySpectator },
+                        // v1.1.37 — sessions dropped as FC-only carry-over from a
+                        // previous lobby's results screen. >0 here means the user
+                        // started the plugin while a previous race's FC packets
+                        // were still being repeated by the game. Diagnostic only;
+                        // no action required (the carry-over data is already gone
+                        // from sessions[] / participants[]).
+                        { "carryOverSessionsDropped", droppedCarryOver },
                     }
                 },
                 { "diagnostics", new Dictionary<string, object>

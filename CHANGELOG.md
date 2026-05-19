@@ -2,6 +2,19 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.37] - 2026-05-19
+
+### Fixed
+- **Sessão fantasma "Track(None)" no `.otk` quando o plugin era iniciado com a tela de resultados de uma corrida anterior aberta (`SilverstoneReverse_20260518_224341_734A29.otk` regression):** Confirmado via `_debug.notes` que o arquivo continha 3 sessões — uma carry-over `sessionUID=8973625950122264999` com `sessionType=null`, `trackId=null`, `participantsPeakNumActive=0`, 19 drivers `Car_X` populados puramente pelo stream de `FinalClassification` repetido da corrida anterior (cadência ~5s do F1 25 enquanto a results-screen fica aberta), seguida pelas sessões reais de Quali e Race. Site Race Hub rejeitava o upload com `Track(None)` porque `sessions[0].track.name == "Track(None)"`. Auto-rotation não disparava porque `HasClosedTerminalSession()` exigia uma "Race" fechada com FC, e a carry-over não tinha `sessionType` (logo o trackId nunca havia movido pra disparar `CheckLobbyChange`). Fix em `LeagueFinalizer.Finalize`: novo branch de filtragem que descarta SessionRuns onde a tripla `(SessionType == null && TrackId == null && ParticipantsPeakNumActive == 0)` é satisfeita — combinação só possível em carry-over puro de FC. Filtragem da sessão também limpa os `Car_X` do `participants[]` global (esse é recomputado walking `sessionsOut`). Conta o que dropou em `_debug.integrity.carryOverSessionsDropped` (transparência) e adiciona uma linha em `_debug.notes` por sessão filtrada (`Dropped FC-only carry-over session uid=... drivers=... events=...`). Test 26 (`Test-CarryOverFcOnlyPhantomFiltered`) reproduz exatamente o cenário (FC stream de 19 carros em uid=100 sem Session/Participants, depois Quali+Race normais em uid=200) e valida que `sessions.Count == 1`, `participants[]` sem `Car_X`, Hamilton + Verstappen preservados e contador de drop >= 1
+
+### Added
+- **Test 27 (`Test-SprintFormatConsolidatorInvariant`):** trava regressão futura da consolidação Sprint Format. Constrói pipeline completo `SS (id=14) → SQ (id=8) → Sprint (id=13) → Quali (id=5) → Race (id=10)` todos no mesmo `trackId`, e assert que: (a) `HasClosedTerminalSession()` retorna `false` após SS+FC, SQ+FC, Sprint+FC e Quali+FC; (b) só retorna `true` após Race+FC; (c) nenhuma nota `AUTO-ROTATE` foi registrada em `store.Notes`; (d) `Finalize` emite as 5 sessões consolidadas num único arquivo. Cobre a lógica existente do `OvertakePlugin.IsTerminalSession` (só "Race" é terminal) + `SessionStore.HasClosedTerminalSession` (mesma regra) que vinha desde a v1.1.31 sem teste dedicado. Se um refactor futuro mudar uma das duas, o CI vai falhar imediatamente
+
+### Note
+- **Risco do filtro novo é praticamente zero.** Toda sessão real recebe um `Session` packet com `sessionType`+`trackId` no início, antes de qualquer `FinalClassification`. A tripla `(sessionType=null && trackId=null && peak=0)` é assinatura única de carry-over puro. Se algum dia aparecer um falso-positivo na natureza, o `_debug.integrity.carryOverSessionsDropped` + linha em `_debug.notes` permitem identificar imediatamente
+- **Sprint Format não foi quebrado em nenhum momento.** A percepção inicial do usuário ("Sprint parou de gerar 1 arquivo só") se confundiu com a sessão fantasma do arquivo reportado (que era Quali + Race + carry-over, NÃO Sprint). Test 27 está aí pra remover qualquer dúvida em releases futuras
+- **Schema continua `league-1.1`.** Apenas um novo campo opcional em `_debug.integrity.carryOverSessionsDropped` (`int`). Consumidores do schema continuam funcionando inalterados; a sessão filtrada simplesmente não aparece em `sessions[]`, mas isso é sempre a sessão "lixo" que ninguém queria mesmo
+
 ## [1.1.36] - 2026-05-18
 
 ### Added
