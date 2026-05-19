@@ -686,8 +686,11 @@ Telemetria de bateria/ERS por piloto. **Tudo em percentual (0–100)**, alinhado
 
 ## Tipos de sessão
 
+Mapping oficial conforme F1 25 UDP spec (`Data Output from F1 25 v3.pdf`, anexo "Session types"). Corrigido em v1.1.38 — capturas anteriores podem ter labels desatualizados nos IDs 10..14 e 16, mas o `id` numérico sempre é confiável.
+
 | `sessionType.id` | `sessionType.name` | Descrição |
 |---|------|-----------|
+| 0 | `Unknown` | Tipo desconhecido / sessão não iniciada |
 | 1 | `Practice1` | Treino livre 1 |
 | 2 | `Practice2` | Treino livre 2 |
 | 3 | `Practice3` | Treino livre 3 |
@@ -697,16 +700,20 @@ Telemetria de bateria/ERS por piloto. **Tudo em percentual (0–100)**, alinhado
 | 7 | `Qualifying3` | Q3 |
 | 8 | `ShortQualifying` | Qualy curta |
 | 9 | `OneShotQualifying` | Qualy one-shot |
-| 10 | `OneShotQualifying2` | Qualy one-shot (variante) |
-| 11 | `OneShotQualifying3` | Qualy one-shot (variante) |
-| 12 | `Race` (variante) | — |
-| 13 | `Race2` | Variante de Race |
-| 14 | `Race3` | Variante de Race |
-| 15 | `Race` | Corrida principal |
-| 16 | `TimeTrial` | Time Trial |
-| — | `Sprint` / `SprintShootout` | Variantes do Sprint Weekend (IDs podem variar entre patches) |
+| **10** | **`SprintShootout1`** | **Quali da Sprint (formato padrão)** |
+| 11 | `SprintShootout2` | Quali da Sprint (variante) |
+| 12 | `SprintShootout3` | Quali da Sprint (variante) |
+| 13 | `ShortSprintShootout` | Quali curta da Sprint |
+| 14 | `OneShotSprintShootout` | Quali one-shot da Sprint |
+| **15** | **`Race`** | **Corrida principal — única sessão terminal** |
+| **16** | **`Race2`** | **Sprint Race (segunda corrida do weekend Sprint Format)** |
+| 17 | `Race3` | Terceira corrida (raro) |
+| 18 | `TimeTrial` | Time Trial |
+| 19, 25, 26, 29, 30, 36 | `Race` | Race em modos online (ranked, Career '25 Online, etc.) |
 
-> O frontend deve sempre tratar `sessionType.name` como a fonte canônica, não o `id`.
+> O frontend deve sempre tratar `sessionType.name` como a fonte canônica para LABEL DE EXIBIÇÃO. Para LÓGICA crítica (ex.: identificar a Race principal), use combinação `id == 15 || name == "Race"` — assim você cobre tanto F1 25 quanto os modos online sem precisar enumerar todos os IDs.
+>
+> **Sprint Race vs Race principal:** se quiser separar Sprint Race nos resultados, use `name == "Race2"` ou `id == 16`. A pontuação do campeonato pode então ser calculada considerando ambas (pontos do Sprint + pontos da Race principal).
 
 ---
 
@@ -819,6 +826,7 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 | `league-1.1` (refinement) | **v1.1.35** | `ersTelemetry.harvestedPctAvgPerLap` (combinado MGU-K + MGU-H) **removido**. Substituído por dois campos separados: `harvestedMgukPctAvgPerLap` e `harvestedMguhPctAvgPerLap` — cada um respeita o cap regulamentar individual de 100% por fonte. Schema string permanece `"league-1.1"` (mudança em campo opcional aditivo). Consumidores que dependiam do agregado antigo devem somar os dois novos. |
 | `league-1.1` (refinement) | **v1.1.36** | Preparação para F1 26 (mod do F1 25, mesma base UDP). Campo `game` agora é **dinâmico**, derivado de `PacketHeader.PacketFormat`: `2025 → "F1_25"`, `2026 → "F1_26"`, futuras versões `"F1_<fmt>"`. Novo bloco `_debug.game` com `packetFormat`, `gameYear`, `resolvedGameLabel`, `parserMaxSupportedCars`. Parsers per-car aceitam até 26 entradas (grid F1 26 = 11×2 + wildcards). Schema string permanece `"league-1.1"`. Capturas F1 25 ficam idênticas; novas chaves só aparecem em capturas do F1 26 com IDs ainda não mapeados (que virão como `"Team(<id>)"`/`"Driver_<idx>"` até hotfix de mapping). |
 | `league-1.1` (refinement) | **v1.1.37** | Proteção contra "sessão fantasma" carry-over: se o plugin é iniciado enquanto a tela de resultados de outra corrida ainda está enviando pacotes Final Classification, a sessão fantasma resultante (`sessionType=null`, `trackId=null`, drivers `Car_X`) é filtrada antes de chegar ao JSON. Novo campo opcional `_debug.integrity.carryOverSessionsDropped` (`int`). Schema string permanece `"league-1.1"`. Filtro evita o erro "Track(None)" no upload do Race Hub e remove os `Car_X` do `participants[]` global. |
+| `league-1.1` (refinement) | **v1.1.38** | **`sessionType.name` labels corrigidos para os IDs 10..14, 16, 17, 18** conforme spec oficial F1 25 (`Data Output from F1 25 v3.pdf`). Antes: `10 → "Race"`, `11 → "Race2"`, `12 → "TimeTrial"`, `13 → "Sprint"`, `14 → "SprintShootout"`, `16 → "Race"`. Depois: `10..14 → "SprintShootout1..3/ShortSprintShootout/OneShotSprintShootout"`, `15 → "Race"` (único terminal), `16 → "Race2"` (Sprint Race), `17 → "Race3"`, `18 → "TimeTrial"`. Schema string permanece `"league-1.1"`. Capturas anteriores (`<= v1.1.37`) NÃO são regeradas — os labels antigos ficam nelas. Para frontend retro-compatível, use `sessionType.id` (sempre canônico) ou normalize labels via tabela acima. Esta correção elimina o bug de Sprint Format gerar múltiplos `.otk` em vez de UM consolidado. |
 
 **Política de versionamento:**
 - **Bump de minor** (`league-1.0` → `league-1.1`): adição de campos opcionais, retrocompatível para readers que ignoram desconhecidos.

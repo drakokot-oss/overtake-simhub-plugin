@@ -523,17 +523,31 @@ namespace Overtake.SimHub.Plugin
         /// A session is "terminal" (eligible to trigger auto-export) when it is the
         /// LAST race of the weekend.
         ///
-        /// Lookups already maps Sprint Race (id=13) to name "Sprint" and the Main Race
-        /// to name "Race" (ids 10, 11, 15, 16, 19, 25, 26, 29, 30, 36 — F1 25 emits
-        /// different IDs depending on game mode). Anything classified as "Sprint" by
-        /// Lookups is intentionally NOT terminal because a Main Race is expected after.
-        /// "Race" entries are always terminal.
+        /// Lookups (Finalizer/Lookups.cs) maps session-type IDs to names per the
+        /// official F1 25 UDP spec ("Session types" appendix):
+        ///   10..14 -> Sprint Shootout (all variants)
+        ///   15     -> Race (Main Race)
+        ///   16     -> Race 2 (Sprint Race in Sprint Format weekends)
+        ///   17     -> Race 3 (rarely seen)
+        ///   18     -> Time Trial
+        ///   19, 25, 26, 29, 30, 36 -> Race (observed in online lobbies / Career '25)
+        /// Only "Race" qualifies as terminal -- so neither Sprint Shootout (10-14)
+        /// nor Sprint Race / Race 2 (16) nor Race 3 (17) triggers auto-export
+        /// prematurely. The consolidator now keeps the full SS + SQ + Sprint +
+        /// Quali + Race Sprint Format weekend in a single .otk.
         ///
         /// v1.1.31: previous logic required raceCount >= 2 whenever a SprintShootout
         /// existed in the capture, which broke captures of "Sprint Format" lobbies that
         /// do NOT include a Sprint Race (e.g. Baku 2026-05-07: SS → OSQ → Race only).
         /// That caused auto-export to never fire for those weekends, which combined
         /// with no auto-rotation produced cross-event captures (Baku + Monaco issue).
+        ///
+        /// v1.1.38: confirmed against F1 25 spec that IDs 10..14 are Sprint Shootouts
+        /// (NOT "Race"/"Race2"/"TimeTrial"/"Sprint"/"SprintShootout" as previously
+        /// mapped). Fixing Lookups.SessionType eliminated the premature auto-export
+        /// at the end of Sprint Shootout 1 (id=10), which had been splitting Sprint
+        /// Format weekends across multiple .otk files. ID 16 (Race 2 / Sprint Race)
+        /// is now correctly NOT terminal -- only the Main Race (id=15) terminates.
         /// </summary>
         private bool IsTerminalSession(byte id)
         {
@@ -543,6 +557,10 @@ namespace Overtake.SimHub.Plugin
             return name == "Race";
         }
 
+        // Friendly name for the status panel and SimHub log. Must stay aligned
+        // with Lookups.SessionType (Finalizer/Lookups.cs). Source of truth is
+        // the official F1 25 UDP spec "Session types" appendix.
+        // v1.1.38: fixed Sprint Shootout / Race / TimeTrial ID assignments.
         private static string SessionTypeName(byte id)
         {
             switch (id)
@@ -557,13 +575,15 @@ namespace Overtake.SimHub.Plugin
                 case 7: return "Qualifying 3";
                 case 8: return "Short Qualifying";
                 case 9: return "One-Shot Qualifying";
-                case 10: return "Race";
-                case 11: return "Race 2";
-                case 12: return "Race 3";
-                case 13: return "Time Trial";
-                case 14: return "Sprint Shootout";
+                case 10: return "Sprint Shootout 1";
+                case 11: return "Sprint Shootout 2";
+                case 12: return "Sprint Shootout 3";
+                case 13: return "Short Sprint Shootout";
+                case 14: return "One-Shot Sprint Shootout";
                 case 15: return "Race";
-                case 16: return "Race";
+                case 16: return "Race 2";
+                case 17: return "Race 3";
+                case 18: return "Time Trial";
                 default: return string.Format("Session ({0})", id);
             }
         }

@@ -4,14 +4,32 @@ namespace Overtake.SimHub.Plugin.Finalizer
 {
     public static class Lookups
     {
+        // F1 25 official UDP spec (Data Output from F1 25 v3.pdf, "Session types"
+        // appendix). Verified at /forums.ea.com/blog/...12187347. IDs 10..14 are
+        // all Sprint Shootout variants, 15..17 are race variants, 18 is Time Trial.
+        // v1.1.38: corrected from previous mapping where 10/11 were "Race"/"Race2",
+        // 12 was "TimeTrial", 13 was "Sprint" and 14 was "SprintShootout" -- that
+        // mismatch caused IsTerminalSession(10) == true (because "Race"), which
+        // made auto-export fire after Sprint Shootout 1's Final Classification
+        // and split Sprint Format weekends into separate .otk files instead of
+        // consolidating SS + SQ + Sprint + Quali + Race into one.
+        //
+        // IDs above 18 keep their historically observed mapping. They've shown up
+        // in online lobbies (ranked / Career '25 Online) as race-style sessions
+        // emitting Final Classification with full grids, so we still treat them
+        // as terminal "Race" for auto-export purposes. _debug.game in the .otk
+        // surfaces the raw PacketFormat if any of these ever start meaning
+        // something else in a future game version.
         public static readonly Dictionary<int, string> SessionType = new Dictionary<int, string>
         {
             { 0, "Unknown" }, { 1, "Practice1" }, { 2, "Practice2" }, { 3, "Practice3" },
             { 4, "ShortPractice" }, { 5, "Qualifying1" }, { 6, "Qualifying2" }, { 7, "Qualifying3" },
-            { 8, "ShortQualifying" }, { 9, "OneShotQualifying" }, { 10, "Race" }, { 11, "Race2" },
-            { 12, "TimeTrial" }, { 13, "Sprint" }, { 14, "SprintShootout" },
-            { 15, "Race" }, { 16, "Race" }, { 19, "Race" }, { 24, "SprintShootout" },
-            { 25, "Race" }, { 26, "Race" }, { 29, "Race" }, { 30, "Race" }, { 36, "Race" },
+            { 8, "ShortQualifying" }, { 9, "OneShotQualifying" },
+            { 10, "SprintShootout1" }, { 11, "SprintShootout2" }, { 12, "SprintShootout3" },
+            { 13, "ShortSprintShootout" }, { 14, "OneShotSprintShootout" },
+            { 15, "Race" }, { 16, "Race2" }, { 17, "Race3" },
+            { 18, "TimeTrial" },
+            { 19, "Race" }, { 25, "Race" }, { 26, "Race" }, { 29, "Race" }, { 30, "Race" }, { 36, "Race" },
         };
 
         public static readonly Dictionary<int, string> Weather = new Dictionary<int, string>
