@@ -1534,6 +1534,212 @@ function Test-LapDataPartialBufferTolerated() {
 Write-Host "=== Test 25: LapData parser tolerant of partial buffers (v1.1.36) ===" -ForegroundColor Cyan
 [void](Test-LapDataPartialBufferTolerated)
 
+function Test-CarryOverFcOnlyPhantomFiltered() {
+    # v1.1.37 -- SilverstoneReverse_20260518_224341 regression.
+    # User started capture while a previous lobby's results screen was still
+    # repeating Final Classification packets (~5s cadence). The plugin created
+    # a SessionRun for that stale sessionUID, never received Session nor
+    # Participants for it (so trackId / sessionType stayed null,
+    # participantsPeakNumActive stayed 0), and populated 19 Car_X "drivers"
+    # purely from the FC carry-over. The site rejected the .otk with
+    # "Track(None)" because sessions[0].track.name was "Track(None)".
+    #
+    # Expected after fix: the carry-over session is dropped from sessions[]
+    # AND the Car_X tags are evicted from the global participants[] list.
+    $st = [System.Activator]::CreateInstance($storeType)
+
+    # Phase 1: stale FC carry-over for sessionUID=100 (no Session, no Participants).
+    # 19 finished cars -- replicates the user's previous race.
+    $fcStale = New-Object byte[] (1 + 22 * 46)
+    $fcStale[0] = 19
+    for ($i = 0; $i -lt 19; $i++) {
+        $off = 1 + $i * 46
+        $fcStale[$off + 0] = [byte]($i + 1)   # Position
+        $fcStale[$off + 1] = 30                # NumLaps
+        $fcStale[$off + 6] = 3                 # ResultStatus = Finished
+        [System.BitConverter]::GetBytes([uint32]90000).CopyTo($fcStale, $off + 7)
+    }
+    # Fire it 3 times to mimic the repeated FC stream the game emits.
+    for ($k = 0; $k -lt 3; $k++) {
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fcStale ([uint64]100)))))
+    }
+
+    # Sanity: store now has the carry-over session, with 19 Car_X drivers,
+    # sessionType null, trackId null, participantsPeak = 0.
+    $sessDict = Get-Field $st "Sessions"
+    Assert "v1.1.37: carry-over store has 1 session pre-Finalize" ($sessDict.Count -eq 1)
+    $stale = $sessDict["100"]
+    Assert "v1.1.37: carry-over session has no sessionType"           (-not (Get-Field $stale "SessionType").HasValue)
+    Assert "v1.1.37: carry-over session has no trackId"               (-not (Get-Field $stale "TrackId").HasValue)
+    Assert "v1.1.37: carry-over session has participantsPeak == 0"    ((Get-Field $stale "ParticipantsPeakNumActive") -eq 0)
+    Assert "v1.1.37: carry-over session has drivers populated by FC"  ((Get-Field $stale "Drivers").Count -ge 1)
+
+    # Phase 2: a real race for sessionUID=200 -- Session (Race @ trackId=10),
+    # Participants (Hamilton + Verstappen), then FC. This is the legitimate one.
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 10; $sp[7] = 10
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]200)))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+    $pp[41] = 1; $pp[44] = 1
+    $pp[58] = 0; $pp[61] = 2; $pp[63] = 1
+    $n1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($n1, 0, $pp, 65, $n1.Length)
+    $pp[98] = 1; $pp[101] = 1
+    for ($c = 2; $c -lt 22; $c++) {
+        $cst = 1 + $c * 57
+        $pp[$cst + 3] = 255; $pp[$cst + 5] = 0
+    }
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]200)))))
+
+    $fcReal = New-Object byte[] (1 + 22 * 46)
+    $fcReal[0] = 2
+    $fcReal[1] = 1; $fcReal[2] = 30; $fcReal[6] = 3
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fcReal, 1 + 7)
+    $off2 = 1 + 46
+    $fcReal[$off2 + 0] = 2; $fcReal[$off2 + 1] = 30; $fcReal[$off2 + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]85500).CopyTo($fcReal, $off2 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fcReal ([uint64]200)))))
+
+    # Finalize and verify carry-over was dropped.
+    $res = $finalizeMethod.Invoke($null, @($st))
+
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.37: Finalize emits exactly 1 real session (carry-over filtered)" ($sessions.Count -eq 1)
+
+    # Global participants[] must NOT include any Car_X -- those came only from
+    # the carry-over session, which was filtered before participants[] is rebuilt.
+    $participants = Get-DictValue $res "participants"
+    $hasCarX = $false
+    $hasHam = $false; $hasVer = $false
+    foreach ($p in $participants) {
+        if ($p -like "Car_*") { $hasCarX = $true }
+        if ($p -eq "Hamilton") { $hasHam = $true }
+        if ($p -eq "Verstappen") { $hasVer = $true }
+    }
+    Assert "v1.1.37: global participants[] has NO Car_X tags" (-not $hasCarX)
+    Assert "v1.1.37: real participants preserved (Hamilton)" $hasHam
+    Assert "v1.1.37: real participants preserved (Verstappen)" $hasVer
+
+    # _debug counter must reflect the drop, so we can spot this in the wild.
+    $dbg = Get-DictValue $res "_debug"
+    $integrity = Get-DictValue $dbg "integrity"
+    $dropped = Get-DictValue $integrity "carryOverSessionsDropped"
+    Assert "v1.1.37: _debug.integrity.carryOverSessionsDropped >= 1" ([int]$dropped -ge 1)
+}
+
+Write-Host "=== Test 26: FC-only carry-over phantom filtered (v1.1.37 SilverstoneReverse regression) ===" -ForegroundColor Cyan
+[void](Test-CarryOverFcOnlyPhantomFiltered)
+
+function Test-SprintFormatConsolidatorInvariant() {
+    # v1.1.37 -- Lock-in test for the existing Sprint Format consolidator.
+    # The invariant (since v1.1.31): SS + SQ + Sprint + Quali + Race within
+    # the SAME track must end up in ONE consolidated .otk. Two pieces of
+    # logic protect this:
+    #   1. IsTerminalSession returns true only for "Race" -- so Sprint never
+    #      triggers auto-export prematurely (it would split the file).
+    #   2. Auto-rotation only fires when trackId changes AND a "Race"
+    #      session with FC already exists. Sprint Format never changes
+    #      trackId mid-weekend, so auto-rotation stays dormant.
+    # If a future refactor breaks either piece, this test fails loudly.
+    #
+    # Session type ids per F1 25 UDP spec:
+    #   14 = SprintShootout, 8 = ShortQualifying, 13 = Sprint,
+    #    5 = Qualifying1, 10 = Race.
+    $st = [System.Activator]::CreateInstance($storeType)
+    $tid = 14   # Abu Dhabi -- any consistent trackId works
+
+    # Helper closures using script-scope dispatch. We inline the packet
+    # construction because PS function nesting + reflection gets fiddly.
+    $feedSession = {
+        param([uint64]$uid, [byte]$stype, [byte]$tidByte)
+        $sp = New-Object byte[] 700
+        $sp[0] = 1; $sp[6] = $stype; $sp[7] = $tidByte
+        $sp[124] = 0; $sp[125] = 1
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp $uid))))
+    }
+    $feedParticipants = {
+        param([uint64]$uid)
+        $pp = New-Object byte[] 1256
+        for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+        $pp[0] = 2
+        $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+        $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+        [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+        $pp[41] = 1; $pp[44] = 1
+        $pp[58] = 0; $pp[61] = 2; $pp[63] = 1
+        $n1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+        [System.Array]::Copy($n1, 0, $pp, 65, $n1.Length)
+        $pp[98] = 1; $pp[101] = 1
+        for ($c = 2; $c -lt 22; $c++) {
+            $cst = 1 + $c * 57
+            $pp[$cst + 3] = 255; $pp[$cst + 5] = 0
+        }
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp $uid))))
+    }
+    $feedFc = {
+        param([uint64]$uid)
+        $fc = New-Object byte[] (1 + 22 * 46)
+        $fc[0] = 2
+        $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+        [System.BitConverter]::GetBytes([uint32]88000).CopyTo($fc, 1 + 7)
+        $offX = 1 + 46
+        $fc[$offX + 0] = 2; $fc[$offX + 1] = 5; $fc[$offX + 6] = 3
+        [System.BitConverter]::GetBytes([uint32]88500).CopyTo($fc, $offX + 7)
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid))))
+    }
+
+    # Sprint Shootout -- terminal? No.
+    & $feedSession ([uint64]100) ([byte]14) ([byte]$tid)
+    & $feedParticipants ([uint64]100)
+    & $feedFc ([uint64]100)
+    Assert "v1.1.37 Sprint invariant: SS+FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
+
+    # Short Qualifying -- terminal? No.
+    & $feedSession ([uint64]101) ([byte]8) ([byte]$tid)
+    & $feedParticipants ([uint64]101)
+    & $feedFc ([uint64]101)
+    Assert "v1.1.37 Sprint invariant: SQ+FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
+
+    # Sprint Race -- terminal? No (this is the key assertion: "Sprint" is NOT "Race").
+    & $feedSession ([uint64]102) ([byte]13) ([byte]$tid)
+    & $feedParticipants ([uint64]102)
+    & $feedFc ([uint64]102)
+    Assert "v1.1.37 Sprint invariant: Sprint+FC does NOT count as terminal (Sprint != Race)" (-not $st.HasClosedTerminalSession())
+
+    # Qualifying -- terminal? No.
+    & $feedSession ([uint64]103) ([byte]5) ([byte]$tid)
+    & $feedParticipants ([uint64]103)
+    & $feedFc ([uint64]103)
+    Assert "v1.1.37 Sprint invariant: Quali+FC does NOT count as terminal" (-not $st.HasClosedTerminalSession())
+
+    # Main Race -- terminal? YES.
+    & $feedSession ([uint64]104) ([byte]10) ([byte]$tid)
+    & $feedParticipants ([uint64]104)
+    & $feedFc ([uint64]104)
+    Assert "v1.1.37 Sprint invariant: Race+FC IS terminal" $st.HasClosedTerminalSession()
+
+    # No AUTO-ROTATE should have been requested at any point -- trackId never moved.
+    $notes = Get-Field $st "Notes"
+    $rotateNote = $false
+    foreach ($n in $notes) { if ($n -like "*AUTO-ROTATE*") { $rotateNote = $true; break } }
+    Assert "v1.1.37 Sprint invariant: NO AUTO-ROTATE during Sprint Format (trackId stable)" (-not $rotateNote)
+
+    # Finalize must emit all 5 sessions consolidated in one file.
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.37 Sprint invariant: Finalize emits ALL 5 sessions (SS+SQ+Sprint+Quali+Race) in ONE file" ($sessions.Count -eq 5)
+}
+
+Write-Host "=== Test 27: Sprint Format consolidator invariant (v1.1.37 lock-in) ===" -ForegroundColor Cyan
+[void](Test-SprintFormatConsolidatorInvariant)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow
