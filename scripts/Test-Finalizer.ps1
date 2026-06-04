@@ -42,9 +42,9 @@ $parserType = $asm.GetType("Overtake.SimHub.Plugin.Parsers.PacketParser")
 $finalizerType = $asm.GetType("Overtake.SimHub.Plugin.Finalizer.LeagueFinalizer")
 $lookupsType = $asm.GetType("Overtake.SimHub.Plugin.Finalizer.Lookups")
 
-function New-FakePacket([int]$packetId, [byte[]]$payload, [uint64]$sessionUid = 12345) {
+function New-FakePacket([int]$packetId, [byte[]]$payload, [uint64]$sessionUid = 12345, [uint16]$packetFormat = 2025) {
     $header = New-Object byte[] 29
-    [System.BitConverter]::GetBytes([uint16]2025).CopyTo($header, 0)
+    [System.BitConverter]::GetBytes([uint16]$packetFormat).CopyTo($header, 0)
     $header[2] = 25; $header[3] = 1; $header[4] = 0; $header[5] = 1
     $header[6] = [byte]$packetId
     [System.BitConverter]::GetBytes($sessionUid).CopyTo($header, 7)
@@ -1945,6 +1945,148 @@ function Test-CleanCaptureFullyResetsStoreNoDataLoss() {
 
 Write-Host "=== Test 30: BeginNewCapture fully resets store, no residue into next race (v1.1.38 clean contract) ===" -ForegroundColor Cyan
 [void](Test-CleanCaptureFullyResetsStoreNoDataLoss)
+
+# Shared helper for v1.1.39 F1 26 tests: build a minimal Race with given
+# packetFormat, teamId and trackId. Returns the Finalize result dict.
+function Build-F126Race([uint16]$packetFormat, [byte]$teamId, [byte]$trackId, [uint64]$uid) {
+    $st = [System.Activator]::CreateInstance($storeType)
+
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = $trackId   # Race
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp $uid $packetFormat)))) | Out-Null
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 2
+    # ci=0
+    $pp[1] = 0; $pp[4] = $teamId; $pp[6] = 44
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+    $pp[41] = 1; $pp[44] = 1
+    # ci=1
+    $pp[58] = 0; $pp[61] = $teamId; $pp[63] = 1
+    $n1 = [System.Text.Encoding]::UTF8.GetBytes("Verstappen")
+    [System.Array]::Copy($n1, 0, $pp, 65, $n1.Length)
+    $pp[98] = 1; $pp[101] = 1
+    for ($c = 2; $c -lt 22; $c++) { $cst = 1 + $c * 57; $pp[$cst + 3] = 255; $pp[$cst + 5] = 0 }
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp $uid $packetFormat)))) | Out-Null
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    $fc[1] = 1; $fc[2] = 30; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fc, 1 + 7)
+    $o2 = 1 + 46
+    $fc[$o2 + 0] = 2; $fc[$o2 + 1] = 30; $fc[$o2 + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]85500).CopyTo($fc, $o2 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid $packetFormat)))) | Out-Null
+
+    return $finalizeMethod.Invoke($null, @($st))
+}
+
+function Test-F126TeamAndTrackLookups() {
+    # v1.1.39 -- teamIds 220-230 and track 42 (Madring) must resolve to names.
+    $lt = $lookupsType.GetField("Teams").GetValue($null)
+    $expected = @{
+        220='Mercedes-AMG F1 Team'; 221='Scuderia Ferrari HP'; 222='Oracle Red Bull Racing';
+        223='Atlassian Williams F1 Team'; 224='Aston Martin Aramco'; 225='BWT Alpine F1 Team';
+        226='Visa Cash App Racing Bulls'; 227='MoneyGram Haas F1 Team'; 228='McLaren Formula 1 Team';
+        229='Audi Revolut F1 Team'; 230='Cadillac Formula 1 Team'
+    }
+    foreach ($id in $expected.Keys) {
+        $name = $null
+        $ok = $lt.TryGetValue([int]$id, [ref]$name)
+        Assert "v1.1.39: teamId $id present in Lookups.Teams" $ok
+        Assert "v1.1.39: teamId $id -> '$($expected[$id])'" ($name -eq $expected[$id])
+    }
+    $tracks = $lookupsType.GetField("Tracks").GetValue($null)
+    $tn = $null
+    Assert "v1.1.39: track 42 present" ($tracks.TryGetValue([int]42, [ref]$tn))
+    Assert "v1.1.39: track 42 -> Madring" ($tn -eq 'Madring')
+}
+
+Write-Host "=== Test 31: F1 26 team (220-230) + track 42 lookups (v1.1.39) ===" -ForegroundColor Cyan
+[void](Test-F126TeamAndTrackLookups)
+
+function Test-F126ContentDetectionOn2025Format() {
+    # v1.1.39 -- 2026 content (teamId 220) on the 2025 WIRE FORMAT must:
+    #   - resolve teamName to the real F1 26 team (parser works in 2025 format)
+    #   - flag game=F1_26 (content-aware) even though packetFormat=2025
+    #   - NOT set unsupportedUdpFormat (2025 is supported)
+    $res = Build-F126Race ([uint16]2025) ([byte]229) ([byte]16) ([uint64]700)
+    Assert "v1.1.39: game label is F1_26 for 2026 content on 2025 format" ((Get-DictValue $res "game") -eq "F1_26")
+    $dbg = Get-DictValue $res "_debug"
+    $g = Get-DictValue $dbg "game"
+    Assert "v1.1.39: _debug.game.contentPack2026 = true" ((Get-DictValue $g "contentPack2026") -eq $true)
+    Assert "v1.1.39: _debug.game.formatLabel = F1_25 (wire format)" ((Get-DictValue $g "formatLabel") -eq "F1_25")
+    Assert "v1.1.39: _debug.game.unsupportedUdpFormat is null on 2025 format" ((Get-DictValue $g "unsupportedUdpFormat") -eq $null)
+    # teamName must resolve (Audi = 229)
+    $sessions = Get-DictValue $res "sessions"
+    $drivers = Get-DictValue $sessions[0] "drivers"
+    $ham = Get-DictValue $drivers "Hamilton"
+    Assert "v1.1.39: teamId 229 resolves to 'Audi Revolut F1 Team'" ((Get-DictValue $ham "teamName") -eq "Audi Revolut F1 Team")
+    # no rawSamples on supported format
+    Assert "v1.1.39: no rawSamples on 2025 format" ((Get-DictValue $dbg "rawSamples") -eq $null)
+}
+
+Write-Host "=== Test 32: F1 26 content detection on 2025 wire format (v1.1.39) ===" -ForegroundColor Cyan
+[void](Test-F126ContentDetectionOn2025Format)
+
+function Test-MadringTrackTriggersContentDetection() {
+    # v1.1.39 -- track 42 (Madring) alone (no 220-230 team) flips content to 2026.
+    $res = Build-F126Race ([uint16]2025) ([byte]0) ([byte]42) ([uint64]701)
+    Assert "v1.1.39: Madring (track 42) flips game to F1_26" ((Get-DictValue $res "game") -eq "F1_26")
+    $g = Get-DictValue (Get-DictValue $res "_debug") "game"
+    Assert "v1.1.39: Madring sets contentPack2026" ((Get-DictValue $g "contentPack2026") -eq $true)
+    $sessions = Get-DictValue $res "sessions"
+    $tk = Get-DictValue $sessions[0] "track"
+    Assert "v1.1.39: track 42 name = Madring" ((Get-DictValue $tk "name") -eq "Madring")
+}
+
+Write-Host "=== Test 33: Madring (track 42) triggers 2026 content detection (v1.1.39) ===" -ForegroundColor Cyan
+[void](Test-MadringTrackTriggersContentDetection)
+
+function Test-Unsupported2026FormatFlaggedAndSampled() {
+    # v1.1.39 -- when wire format = 2026 (unsupported), the export must:
+    #   - flag _debug.game.unsupportedUdpFormat = 2026
+    #   - still resolve game = F1_26 (packetFormat >= 2026)
+    #   - capture raw samples (one per packetId) in _debug.rawSamples
+    $res = Build-F126Race ([uint16]2026) ([byte]5) ([byte]16) ([uint64]702)
+    $dbg = Get-DictValue $res "_debug"
+    $g = Get-DictValue $dbg "game"
+    Assert "v1.1.39: unsupportedUdpFormat = 2026" ([int](Get-DictValue $g "unsupportedUdpFormat") -eq 2026)
+    Assert "v1.1.39: game = F1_26 for 2026 wire format" ((Get-DictValue $res "game") -eq "F1_26")
+    $rs = Get-DictValue $dbg "rawSamples"
+    Assert "v1.1.39: rawSamples present under unsupported format" ($rs -ne $null)
+    if ($rs -ne $null) {
+        # We sent packetId 1 (Session), 4 (Participants), 8 (FC)
+        $s1 = Get-DictValue $rs "1"
+        Assert "v1.1.39: rawSample for packetId 1 captured" ($s1 -ne $null)
+        if ($s1 -ne $null) {
+            Assert "v1.1.39: rawSample carries packetFormat 2026" ([int](Get-DictValue $s1 "packetFormat") -eq 2026)
+            $hex = Get-DictValue $s1 "hexPrefix"
+            Assert "v1.1.39: rawSample hexPrefix non-empty" (($hex -ne $null) -and ($hex.Length -gt 0))
+            # header byte 0-1 = 2026 (0xEA 0x07) little-endian -> hex starts 'ea07'
+            Assert "v1.1.39: rawSample hex begins with packetFormat 2026 (ea07)" ($hex.StartsWith("ea07"))
+        }
+    }
+}
+
+Write-Host "=== Test 34: unsupported 2026 wire format flagged + raw-sampled (v1.1.39 Phase 2 enabler) ===" -ForegroundColor Cyan
+[void](Test-Unsupported2026FormatFlaggedAndSampled)
+
+function Test-PlainF125NoFalsePositives() {
+    # v1.1.39 -- a normal F1 25 race (team 5 = Alpine F1 25, track 5 Monaco,
+    # 2025 format) must NOT be flagged as 2026 content nor unsupported.
+    $res = Build-F126Race ([uint16]2025) ([byte]5) ([byte]5) ([uint64]703)
+    Assert "v1.1.39: plain F1 25 stays game=F1_25" ((Get-DictValue $res "game") -eq "F1_25")
+    $g = Get-DictValue (Get-DictValue $res "_debug") "game"
+    Assert "v1.1.39: plain F1 25 contentPack2026 = false" ((Get-DictValue $g "contentPack2026") -eq $false)
+    Assert "v1.1.39: plain F1 25 unsupportedUdpFormat null" ((Get-DictValue $g "unsupportedUdpFormat") -eq $null)
+}
+
+Write-Host "=== Test 35: plain F1 25 has no F1 26 false positives (v1.1.39) ===" -ForegroundColor Cyan
+[void](Test-PlainF125NoFalsePositives)
 
 # ---- Summary ----
 Write-Host ""

@@ -1017,9 +1017,45 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     newestGameMinor = s.LastGameMinorVersion;
                 }
             }
-            string gameLabel = (newestPacketFormat != 0)
+            // v1.1.39 — Detect F1 26 "2026 Season Pack" CONTENT independently of
+            // the wire format. The pack runs inside F1 25 and defaults to the 2025
+            // packet format, so packetFormat alone reports F1_25 even though the
+            // content is 2026. Signals: any teamId in the 220-230 grid, or the
+            // Madring track (id 42). These survive in 2025-format captures (where
+            // the body parses cleanly); in a 2026-format capture the bodies are
+            // garbage, but packetFormat itself is read correctly, so the format
+            // path still flips the label to F1_26.
+            bool contentPack2026 = false;
+            foreach (var s in store.Sessions.Values)
+            {
+                if (s.TrackId.HasValue && s.TrackId.Value == Packets.GameInfo.F1_26TrackIdMadring)
+                    contentPack2026 = true;
+                foreach (var te in s.TeamByCarIdx.Values)
+                {
+                    if (te != null && Packets.GameInfo.IsF1_26TeamId(te.TeamId))
+                    {
+                        contentPack2026 = true;
+                        break;
+                    }
+                }
+                if (contentPack2026) break;
+            }
+
+            string formatLabel = (newestPacketFormat != 0)
                 ? Packets.GameInfo.GameNameFromPacketFormat(newestPacketFormat)
                 : "F1_25";
+            // Top-level game reflects CONTENT first: 2026-content signals (team
+            // 220-230 / track 42) force "F1_26" even on the 2025 wire format.
+            // Otherwise we trust the format-derived label, which already maps
+            // 2026 -> "F1_26" and any future/unknown format -> "F1_<fmt>"
+            // (so a real 2030 build still surfaces as "F1_2030", not "F1_26").
+            string gameLabel = contentPack2026 ? "F1_26" : formatLabel;
+
+            // Phase 2 safety (v1.1.39): when the wire format is one the parsers do
+            // not support, the parsed bodies are unreliable. Surface it loudly so
+            // the league/site never silently trusts a garbage export and the user
+            // knows to switch the game's "UDP Format" option back to 2025.
+            ushort unsupportedFmt = store.UnsupportedFormatSeen;
 
             var result = new Dictionary<string, object>
             {
@@ -1072,10 +1108,29 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "gameMajorVersion", newestPacketFormat != 0 ? (object)(int)newestGameMajor : null },
                 { "gameMinorVersion", newestPacketFormat != 0 ? (object)(int)newestGameMinor : null },
                 { "resolvedGameLabel", gameLabel },
+                // Format-level label derived purely from packetFormat (may differ
+                // from gameLabel when 2026 content rides on the 2025 wire format).
+                { "formatLabel", formatLabel },
+                // v1.1.39 — true when 2026-content signals (team 220-230 / track 42)
+                // were seen, regardless of wire format.
+                { "contentPack2026", contentPack2026 },
+                // v1.1.39 — non-null only when an UNSUPPORTED wire format was seen
+                // (e.g. 2026). When set, parsed bodies in THIS file are unreliable:
+                // the user must switch the game's "UDP Format" option back to 2025
+                // and re-capture. Raw bytes for offline mapping are in rawSamples.
+                { "unsupportedUdpFormat", unsupportedFmt != 0 ? (object)(int)unsupportedFmt : null },
                 { "parserMaxSupportedCars", Packets.GameInfo.MaxSupportedCars },
             };
 
-            result["_debug"] = new Dictionary<string, object>
+            // v1.1.39 — raw packet samples captured ONLY when an unsupported wire
+            // format was seen (one per packetId). Empty/absent in normal 2025
+            // captures. Lets us reverse-engineer the 2026 layout from a single
+            // labeled capture without a separate dump tool.
+            var rawSamples = new Dictionary<string, object>();
+            foreach (var rs in store.RawSamples)
+                rawSamples[rs.Key.ToString()] = rs.Value;
+
+            var debugBlock = new Dictionary<string, object>
             {
                 { "packetIdCounts", pktCounts },
                 { "notes", store.Notes },
@@ -1147,6 +1202,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     }
                 },
             };
+
+            if (rawSamples.Count > 0)
+                debugBlock["rawSamples"] = rawSamples;
+
+            result["_debug"] = debugBlock;
 
             return result;
         }

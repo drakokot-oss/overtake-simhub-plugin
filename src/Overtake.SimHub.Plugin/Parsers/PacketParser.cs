@@ -18,6 +18,13 @@ namespace Overtake.SimHub.Plugin.Parsers
         public CarStatusEntry[] CarStatus;
         public CarDamageEntry[] CarDamage;
         public SessionHistoryData SessionHistory;
+
+        /// <summary>
+        /// Raw packet bytes, preserved so the store can sample them when the UDP
+        /// wire format is one the parsers do not support yet (Phase 2 enabler,
+        /// v1.1.39). Always set by <see cref="PacketParser.Dispatch"/>.
+        /// </summary>
+        public byte[] RawData;
     }
 
     /// <summary>
@@ -32,7 +39,7 @@ namespace Overtake.SimHub.Plugin.Parsers
             if (header == null)
                 return null;
 
-            var result = new ParsedPacket { Header = header };
+            var result = new ParsedPacket { Header = header, RawData = data };
 
             switch (header.PacketId)
             {

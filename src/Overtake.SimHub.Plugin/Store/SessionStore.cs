@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Overtake.SimHub.Plugin.Finalizer;
 using Overtake.SimHub.Plugin.Packets;
 using Overtake.SimHub.Plugin.Parsers;
@@ -23,6 +24,23 @@ namespace Overtake.SimHub.Plugin.Store
         public Dictionary<int, int> PacketCounts = new Dictionary<int, int>();
         public List<string> Notes = new List<string>();
         public Dictionary<string, SessionRun> Sessions = new Dictionary<string, SessionRun>();
+
+        // ----------------------------------------------------------------------
+        // Raw packet sampling (Phase 2 enabler — v1.1.39)
+        // ----------------------------------------------------------------------
+        // When the UDP wire format is one the parsers do NOT support yet (e.g.
+        // 2026), the parsed bodies are garbage. To enable reverse-engineering the
+        // new layout WITHOUT shipping a separate tool, we capture ONE raw sample
+        // per packetId (first occurrence) the moment an unsupported format is
+        // observed: format + total length + a capped hex prefix. LeagueFinalizer
+        // emits these under _debug.rawSamples so a single labeled 2026 capture
+        // carries everything needed to map the new offsets. Bounded by design:
+        // one entry per packetId, RawSampleHexCap bytes each.
+        public const int RawSampleHexCap = 256;
+        /// <summary>packetId -> { format, length, hex } captured under an unsupported wire format.</summary>
+        public Dictionary<int, Dictionary<string, object>> RawSamples = new Dictionary<int, Dictionary<string, object>>();
+        /// <summary>Highest non-zero PacketFormat seen that the parsers do NOT support (0 = none).</summary>
+        public ushort UnsupportedFormatSeen;
 
         // Cross-session name resolution: "raceNumber_teamId" -> real name
         private Dictionary<string, string> _bestKnownTags = new Dictionary<string, string>();
@@ -151,6 +169,8 @@ namespace Overtake.SimHub.Plugin.Store
             LastPacketMs = 0;
             PacketCounts.Clear();
             Notes.Clear();
+            RawSamples.Clear();
+            UnsupportedFormatSeen = 0;
             LastExportedNameKeyConflicts.Clear();
             LobbyNumPlayers = 0;
 
@@ -450,6 +470,33 @@ namespace Overtake.SimHub.Plugin.Store
                 PacketCounts[pid]++;
             else
                 PacketCounts[pid] = 1;
+
+            // Phase 2 enabler (v1.1.39): if this packet's wire format is one the
+            // parsers do NOT support, the parsed body above is unreliable. Capture
+            // a single raw sample per packetId so the layout can be mapped offline.
+            // No-op for the supported 2025 format (the overwhelming common case).
+            if (!Packets.GameInfo.IsParseSupportedFormat(header.PacketFormat))
+            {
+                if (header.PacketFormat > UnsupportedFormatSeen)
+                    UnsupportedFormatSeen = header.PacketFormat;
+                if (!RawSamples.ContainsKey(pid) && parsed.RawData != null)
+                {
+                    int n = Math.Min(RawSampleHexCap, parsed.RawData.Length);
+                    var sb = new StringBuilder(n * 2);
+                    for (int b = 0; b < n; b++)
+                        sb.Append(parsed.RawData[b].ToString("x2"));
+                    RawSamples[pid] = new Dictionary<string, object>
+                    {
+                        { "packetFormat", (int)header.PacketFormat },
+                        { "length", parsed.RawData.Length },
+                        { "hexPrefix", sb.ToString() },
+                    };
+                    if (Notes.Count < 500)
+                        Notes.Add(string.Format(
+                            "RAW SAMPLE captured: packetId={0} format={1} len={2} (unsupported wire format; see _debug.rawSamples)",
+                            pid, header.PacketFormat, parsed.RawData.Length));
+                }
+            }
 
             string sid = GetSessionKey(header);
             var sess = Sessions[sid];
