@@ -2,6 +2,30 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.39] - 2026-06-04
+
+### Added (Fase 1 — suporte ao conteúdo F1 26 "2026 Season Pack")
+- **`Lookups.Teams` += os 11 construtores do F1 26 (teamIds 220–230):** `220 Mercedes-AMG F1 Team`, `221 Scuderia Ferrari HP`, `222 Oracle Red Bull Racing`, `223 Atlassian Williams F1 Team`, `224 Aston Martin Aramco`, `225 BWT Alpine F1 Team`, `226 Visa Cash App Racing Bulls`, `227 MoneyGram Haas F1 Team`, `228 McLaren Formula 1 Team`, `229 Audi Revolut F1 Team`, `230 Cadillac Formula 1 Team`. IDs confirmados empiricamente por capturas rotuladas (tela de resultados de Suzuka + corrida vs IA em Monza, zero conflitos; ordem = F1 25 +220, Sauber→Audi em 229, Cadillac nova em 230). Não há apêndice oficial da EA publicado para esses IDs até 2026-06.
+- **`Lookups.Tracks` += `42 = Madring`** (Madrid), único circuito novo do pacote 2026.
+- **Detecção de conteúdo 2026 independente do formato UDP** (`LeagueFinalizer`): o pacote 2026 roda dentro do F1 25 e por padrão usa o formato de pacote 2025, então o `packetFormat` sozinho reportaria `F1_25` mesmo sendo conteúdo de 2026. Agora, ao ver qualquer `teamId` em 220–230 **ou** `trackId == 42`, o campo de topo `game` é resolvido como `F1_26`. Novos campos em `_debug.game`: `formatLabel` (rótulo derivado só do `packetFormat`), `contentPack2026` (bool).
+
+### Added (Fase 2 — preparação para suportar qualquer formato UDP)
+- **Proteção contra formato UDP não-suportado:** `GameInfo.IsParseSupportedFormat(ushort)` define os formatos de fio cujos offsets os parsers suportam (hoje: 2025). Quando um formato não-suportado é observado (ex.: o usuário liga "UDP Format 2026" no jogo), o export agora sinaliza `_debug.game.unsupportedUdpFormat = <fmt>` e registra uma nota. Isso evita que a liga/site confie silenciosamente num `.otk` com corpos de pacote ilegíveis (nomes/teamId/ERS embaralhados).
+- **Coletor de amostras raw (`_debug.rawSamples`):** quando um formato não-suportado aparece, o store captura **uma amostra por packetId** (formato + tamanho total + prefixo hex de até 256 bytes) direto dos bytes crus. Isso embute no próprio `.otk` tudo que é preciso para mapear offline o novo layout do formato 2026 — sem ferramenta separada. `ParsedPacket.RawData` passa os bytes crus do `PacketParser.Dispatch` ao `SessionStore`. No-op em capturas 2025 normais.
+- **Ponto de extensão documentado** em `Packets/GameInfo.cs` para a Fase 2 (execução): quando o layout 2026 for conhecido (via `_debug.rawSamples` de uma captura rotulada), basta adicionar variantes de parser por formato e rotear em `PacketParser.Dispatch`.
+
+### Tests
+- **Test 31:** teamIds 220–230 → nomes corretos; track 42 → Madring.
+- **Test 32:** conteúdo 2026 em formato 2025 → `game=F1_26`, `contentPack2026=true`, `formatLabel=F1_25`, `unsupportedUdpFormat=null`, teamName resolvido (229→Audi), sem `rawSamples`.
+- **Test 33:** Madring (track 42) sozinho dispara detecção de conteúdo 2026.
+- **Test 34:** formato de fio 2026 (não-suportado) → `unsupportedUdpFormat=2026`, `game=F1_26`, `_debug.rawSamples` capturado com `packetFormat`/`length`/`hexPrefix` (hex começa em `ea07` = 2026 LE).
+- **Test 35:** corrida F1 25 normal → sem falso-positivo (`game=F1_25`, `contentPack2026=false`, `unsupportedUdpFormat=null`).
+
+### Notes
+- **Schema continua `league-1.1`.** Mudanças aditivas: novos campos opcionais em `_debug.game` (`formatLabel`, `contentPack2026`, `unsupportedUdpFormat`) e bloco opcional `_debug.rawSamples` (só presente sob formato não-suportado). O campo de topo `game` agora pode valer `F1_26`. Consumidores que leem `sessionType.id`/`teamId` numéricos não são afetados.
+- **Recomendação operacional:** manter a opção "UDP Format" do jogo em **2025**. Nesse modo o conteúdo 2026 é parseado 100%. O formato 2026 (que muda layout de Participants/CarStatus e adiciona o packetId 16) fica como Fase 2, pendente de spec oficial ou engenharia reversa via `_debug.rawSamples`.
+- **ERS no conteúdo 2026:** as porcentagens de bateria seguem calibradas para o teto de energia do F1 25 (4 MJ). O modelo 2026 (Boost/Overtake Mode, motor elétrico maior) entrega mais energia por volta, então `deployedPctAvgPerLap` pode passar de 100%. Recalibração é follow-up separado.
+
 ## [1.1.38] - 2026-05-19
 
 ### Fixed

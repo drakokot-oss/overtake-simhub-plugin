@@ -348,6 +348,18 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.39
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **DLC "F1 25 2026 Season Pack" (conteúdo do F1 26) trouxe equipes/pista novas que apareciam como `Team(220)`...`Team(230)` e `Track(42)` no site.** O usuário rodou lobbies com os 11 times de 2026 (Audi, Cadillac) e o circuito de Madri. Como esses IDs são novos e não estavam em `Lookups`, o plugin caía no fallback `Team(<id>)`. **Bloqueio:** a EA não publicou apêndice oficial de team/track IDs do F1 26; faixa 220–230 e track 42 não existem em spec pública. | **Mapeamento confirmado empiricamente** por capturas rotuladas: a tela de resultados de Suzuka (player→equipe) cruzada com os teamIds dos arquivos deu match em 10/11 sem conflito, e uma corrida vs IA em Monza re-confirmou via pilotos reais (Bortoleto=229→Audi, Bottas=230→Cadillac, etc.). Ordem = F1 25 +220, Sauber→Audi (229), Cadillac nova (230). `225=Alpine` travado por eliminação + arquivo de Madrid. `Lookups.Teams` += 220–230 (nomes da tela 2026), `Lookups.Tracks` += `42=Madring`. **Detecção de conteúdo 2026 independente do formato UDP:** `teamId∈[220,230]` ou `track==42` → `game="F1_26"` mesmo com `packetFormat=2025` (o pacote roda dentro do F1 25 e por padrão emite formato 2025). Novos campos `_debug.game`: `formatLabel`, `contentPack2026`. Tests 31–33. |
+| **Descoberta crítica: a opção "UDP Format 2026" do jogo quebra o parser.** Experimento controlado (Monza/Áustria em UDP 2025, Brazil em UDP 2026, mesma v1.1.38): em formato 2026 os corpos de Participants (nomes/teamId viram lixo: 0,1,25,255) e CarStatus (ERS = 1.9×10³²) leem offsets errados, e surge um packetId 16 novo (por frame). Em formato 2025 tudo parseia limpo. | **Proteção + preparação Fase 2.** `GameInfo.IsParseSupportedFormat` declara os formatos suportados (hoje 2025). Formato não-suportado → `_debug.game.unsupportedUdpFormat=<fmt>` + nota, pra nunca confiar silenciosamente em export ilegível. **Coletor de amostras raw:** `_debug.rawSamples` captura 1 amostra por packetId (formato+tamanho+hex até 256B) direto dos bytes crus quando o formato é não-suportado — embute no próprio `.otk` o material pra engenharia reversa do layout 2026, sem ferramenta externa. `ParsedPacket.RawData` carrega os bytes do `Dispatch` ao store. Tests 34–35. |
+
+**Princípio de design reforçado (v1.1.39):**
+- **Conteúdo ≠ formato de fio.** "Que jogo/temporada" (conteúdo: equipes, pista, pilotos) é independente de "como os bytes estão no pacote" (formato UDP). O plugin agora trata os dois eixos separadamente: `game`/`contentPack2026` (conteúdo) vs `formatLabel`/`unsupportedUdpFormat` (formato).
+- **Degradação graciosa, com evidência embutida.** Em vez de produzir lixo silencioso para o formato 2026, sinalizamos `unsupportedUdpFormat` e capturamos `rawSamples` — o próprio arquivo problemático vira a fonte de dados pra implementar o suporte. Transforma "bug report" em "spec parcial".
+- **Preparado para qualquer formato.** `IsParseSupportedFormat` + ponto de extensão documentado em `Dispatch` deixam a Fase 2 (parsers por formato) plugável sem refatorar o caminho 2025 que já funciona.
+
 ### v1.1.38
 
 | Demanda | Como foi feito |

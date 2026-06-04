@@ -40,7 +40,7 @@ Exemplo: `Spa_20260512_234130_F0EB39.otk`
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `schemaVersion` | `string` | Sempre `"league-1.1"` (v1.1.34+). Use para validar compatibilidade. |
-| `game` | `string` | Identificador do jogo que gerou a captura. A partir de **v1.1.36** é derivado dinamicamente do `PacketHeader.PacketFormat` do UDP: `2025 → "F1_25"`, `2026 → "F1_26"`, futuras versões `"F1_<fmt>"`. Capturas geradas por versões anteriores à v1.1.36 sempre serão `"F1_25"`. Use esse campo para escolher labels/branding e mappings condicionais de equipe/piloto (Cadillac, Audi etc. só aparecem em `"F1_26"`). |
+| `game` | `string` | Identificador do jogo/conteúdo que gerou a captura. **v1.1.36+**: derivado do `PacketHeader.PacketFormat` (`2025 → "F1_25"`, `2026 → "F1_26"`). **v1.1.39+**: agora é **content-aware** — se aparecerem equipes do F1 26 (`teamId` 220–230) ou o circuito de Madri (`track 42`), o valor é `"F1_26"` mesmo quando o `packetFormat` ainda é `2025` (o "2026 Season Pack" roda dentro do F1 25 e por padrão emite o formato de pacote 2025). O rótulo derivado só do formato fica em `_debug.game.formatLabel`. Use `game` para branding/mappings condicionais (Cadillac, Audi etc. só em `"F1_26"`). Capturas anteriores à v1.1.36 sempre serão `"F1_25"`. |
 | `capture` | `object` | Metadados da captura (quando começou/terminou). |
 | `participants` | `string[]` | Tags (nomes) de todos os pilotos vistos na captura. **Já filtrado de fantasmas** (Camadas 1–6). |
 | `sessions` | `array` | **Array principal.** Cada item é uma sessão (Qualifying, Race, etc.). |
@@ -734,6 +734,8 @@ Mapping oficial conforme F1 25 UDP spec (`Data Output from F1 25 v3.pdf`, anexo 
 
 ## Equipes (`teamId` → `teamName`)
 
+**F1 25 (grid de 10 equipes):**
+
 | teamId | teamName |
 |--------|----------|
 | 0 | Mercedes-AMG Petronas |
@@ -747,6 +749,24 @@ Mapping oficial conforme F1 25 UDP spec (`Data Output from F1 25 v3.pdf`, anexo 
 | 8 | McLaren Formula 1 Team |
 | 9 | Stake F1 Team Kick Sauber |
 | 255 | (My Team) — `teamName == "MyTeam"` |
+
+**F1 26 / "2026 Season Pack" (grid de 11 equipes) — adicionado em v1.1.39:**
+
+| teamId | teamName |
+|--------|----------|
+| 220 | Mercedes-AMG F1 Team |
+| 221 | Scuderia Ferrari HP |
+| 222 | Oracle Red Bull Racing |
+| 223 | Atlassian Williams F1 Team |
+| 224 | Aston Martin Aramco |
+| 225 | BWT Alpine F1 Team |
+| 226 | Visa Cash App Racing Bulls |
+| 227 | MoneyGram Haas F1 Team |
+| 228 | McLaren Formula 1 Team |
+| 229 | Audi Revolut F1 Team |
+| 230 | Cadillac Formula 1 Team |
+
+> Os IDs do F1 26 (220–230) foram confirmados empiricamente (capturas rotuladas), pois a EA não publicou apêndice oficial até 2026-06. O conteúdo F1 26 capturado em **UDP Format 2025** parseia normalmente. Capturas em **UDP Format 2026** ainda NÃO são suportadas (ver `_debug.game.unsupportedUdpFormat`).
 
 ---
 
@@ -803,6 +823,8 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 3. **Cruze `results[].tag` com `drivers[tag]`** para obter as voltas detalhadas e telemetria.
 4. **`_debug` e `exportDiagnostics` são internos** — não exibir no site. Útil para suporte:
    - `_debug.game` (v1.1.36+) traz `packetFormat`, `gameYear`, `resolvedGameLabel` e `parserMaxSupportedCars`, permitindo identificar de qual versão do jogo veio a captura sem inspecionar os pacotes brutos.
+   - `_debug.game` (v1.1.39+) também traz `formatLabel` (rótulo derivado só do `packetFormat` — o formato do fio), `contentPack2026` (`bool` — true quando aparecem equipes 220–230 ou o track 42, indicando conteúdo do F1 26 mesmo em formato de pacote 2025) e `unsupportedUdpFormat` (`int`/`null` — quando não-nulo, a opção "UDP Format" do jogo estava num formato que o parser ainda não suporta, ex.: 2026, e **os dados deste arquivo são não-confiáveis**; o usuário deve voltar para "UDP Format 2025" e recapturar).
+   - `_debug.rawSamples` (v1.1.39+) só aparece sob formato não-suportado: traz 1 amostra por `packetId` (`packetFormat`, `length`, `hexPrefix`) usada internamente para mapear o novo layout. Ignorar no frontend.
    - `_debug.integrity.carryOverSessionsDropped` (v1.1.37+) é um `int` que conta quantas "sessões fantasma" foram filtradas pela proteção contra carry-over de Final Classification de uma corrida anterior (caso o usuário tenha iniciado o plugin com a tela de resultados de outra race ainda aberta). Em capturas saudáveis o valor é `0`. Valores `>= 1` significam que a proteção atuou — útil pra orientar o usuário a iniciar o plugin antes do próximo lobby. Quando atua, também aparece em `_debug.notes` uma linha por sessão dropada: `Dropped FC-only carry-over session uid=... drivers=... events=...`.
 5. **Tempos em ms** — divida por 1000 e formate com 3 casas decimais.
 6. **`isPlayer`** — use para destacar o piloto do usuário nos resultados. Em modo espectador (`isSpectating: true`), nenhum piloto terá `isPlayer: true`.
@@ -827,6 +849,7 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 | `league-1.1` (refinement) | **v1.1.36** | Preparação para F1 26 (mod do F1 25, mesma base UDP). Campo `game` agora é **dinâmico**, derivado de `PacketHeader.PacketFormat`: `2025 → "F1_25"`, `2026 → "F1_26"`, futuras versões `"F1_<fmt>"`. Novo bloco `_debug.game` com `packetFormat`, `gameYear`, `resolvedGameLabel`, `parserMaxSupportedCars`. Parsers per-car aceitam até 26 entradas (grid F1 26 = 11×2 + wildcards). Schema string permanece `"league-1.1"`. Capturas F1 25 ficam idênticas; novas chaves só aparecem em capturas do F1 26 com IDs ainda não mapeados (que virão como `"Team(<id>)"`/`"Driver_<idx>"` até hotfix de mapping). |
 | `league-1.1` (refinement) | **v1.1.37** | Proteção contra "sessão fantasma" carry-over: se o plugin é iniciado enquanto a tela de resultados de outra corrida ainda está enviando pacotes Final Classification, a sessão fantasma resultante (`sessionType=null`, `trackId=null`, drivers `Car_X`) é filtrada antes de chegar ao JSON. Novo campo opcional `_debug.integrity.carryOverSessionsDropped` (`int`). Schema string permanece `"league-1.1"`. Filtro evita o erro "Track(None)" no upload do Race Hub e remove os `Car_X` do `participants[]` global. |
 | `league-1.1` (refinement) | **v1.1.38** | **`sessionType.name` labels corrigidos para os IDs 10..14, 16, 17, 18** conforme spec oficial F1 25 (`Data Output from F1 25 v3.pdf`). Antes: `10 → "Race"`, `11 → "Race2"`, `12 → "TimeTrial"`, `13 → "Sprint"`, `14 → "SprintShootout"`, `16 → "Race"`. Depois: `10..14 → "SprintShootout1..3/ShortSprintShootout/OneShotSprintShootout"`, `15 → "Race"` (único terminal), `16 → "Race2"` (Sprint Race), `17 → "Race3"`, `18 → "TimeTrial"`. Schema string permanece `"league-1.1"`. Capturas anteriores (`<= v1.1.37`) NÃO são regeradas — os labels antigos ficam nelas. Para frontend retro-compatível, use `sessionType.id` (sempre canônico) ou normalize labels via tabela acima. Esta correção elimina o bug de Sprint Format gerar múltiplos `.otk` em vez de UM consolidado. |
+| `league-1.1` (refinement) | **v1.1.39** | **Suporte ao conteúdo F1 26 ("2026 Season Pack").** `teamId` 220–230 → 11 equipes de 2026 (Audi, Cadillac); `track 42` → Madring. Campo de topo `game` agora considera **conteúdo**: `teamId∈[220,230]` ou `track==42` → `"F1_26"` mesmo com `packetFormat=2025`. Novos campos opcionais em `_debug.game`: `formatLabel`, `contentPack2026`, `unsupportedUdpFormat`. Novo bloco opcional `_debug.rawSamples` (só sob formato UDP não-suportado). **Importante:** capturas em "UDP Format 2026" não são suportadas (corpos de pacote com layout novo) — sinalizadas via `_debug.game.unsupportedUdpFormat`; orientar o usuário a usar "UDP Format 2025". Schema string permanece `"league-1.1"` (tudo aditivo). |
 
 **Política de versionamento:**
 - **Bump de minor** (`league-1.0` → `league-1.1`): adição de campos opcionais, retrocompatível para readers que ignoram desconhecidos.

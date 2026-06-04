@@ -123,7 +123,30 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 124, "Prema (2024)" }, { 125, "MP (2024)" }, { 126, "Trident (2024)" },
             { 127, "DAMS (2024)" }, { 128, "Invicta (2024)" }, { 129, "Rodin (2024)" },
             { 130, "AIX (2024)" }, { 131, "ART (2024)" },
+            // F1 26 "2026 Season Pack" grid (11 teams). Team IDs 220-230 were
+            // introduced by the 2026 content patch and are NOT in any public EA
+            // UDP spec appendix as of 2026-06. Confirmed empirically from labeled
+            // captures (v1.1.39): the Suzuka race results screen + an AI Monza race
+            // both bound these IDs to teams with ZERO conflicts, and the ordering
+            // matches the historical F1 25 internal order offset by +220 (Sauber
+            // rebranded to Audi at 229; Cadillac is the new 11th entry at 230).
+            // Display names taken from the in-game 2026 results screen.
+            { 220, "Mercedes-AMG F1 Team" }, { 221, "Scuderia Ferrari HP" },
+            { 222, "Oracle Red Bull Racing" }, { 223, "Atlassian Williams F1 Team" },
+            { 224, "Aston Martin Aramco" }, { 225, "BWT Alpine F1 Team" },
+            { 226, "Visa Cash App Racing Bulls" }, { 227, "MoneyGram Haas F1 Team" },
+            { 228, "McLaren Formula 1 Team" }, { 229, "Audi Revolut F1 Team" },
+            { 230, "Cadillac Formula 1 Team" },
         };
+
+        /// <summary>
+        /// Lowest team id belonging to the F1 26 "2026 Season Pack" grid (220-230).
+        /// Used as a content-pack signal: when a teamId in this range appears, the
+        /// capture is 2026 content even if the UDP packet format is still 2025
+        /// (the season pack runs inside F1 25 and defaults to the 2025 wire format).
+        /// </summary>
+        public const int F1_26TeamIdMin = 220;
+        public const int F1_26TeamIdMax = 230;
 
         public static readonly Dictionary<int, string> Platforms = new Dictionary<int, string>
         {
@@ -153,7 +176,14 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 26, "Zandvoort" }, { 27, "Imola" }, { 28, "Portimao" }, { 29, "Jeddah" },
             { 30, "Miami" }, { 31, "LasVegas" }, { 32, "Losail" }, { 33, "Lusail" },
             { 39, "Silverstone Reverse" }, { 40, "Austria Reverse" }, { 41, "Zandvoort Reverse" },
+            // F1 26 "2026 Season Pack" — the only new circuit added is Madrid
+            // ("Madring"). Track id 42 confirmed from a labeled capture (v1.1.39);
+            // not yet in any public EA UDP spec appendix as of 2026-06.
+            { 42, "Madring" },
         };
+
+        /// <summary>Track id of the F1 26-only Madrid circuit (content-pack signal).</summary>
+        public const int F1_26TrackIdMadring = 42;
 
         // Lobby settings lookups
         public static readonly Dictionary<int, string> ForecastAccuracyMap = new Dictionary<int, string>

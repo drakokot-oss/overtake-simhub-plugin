@@ -61,5 +61,68 @@ namespace Overtake.SimHub.Plugin.Packets
                 default:   return "F1_" + fmt.ToString();
             }
         }
+
+        // ----------------------------------------------------------------------
+        // UDP WIRE-FORMAT SUPPORT (Phase 2 readiness — added v1.1.39)
+        // ----------------------------------------------------------------------
+        //
+        // The "UDP Format" option in the game menu (2023/2024/2025/2026) controls
+        // the BYTE LAYOUT of each packet body, independently of which content is
+        // loaded. The header (29 bytes, PacketFormat included) is stable across
+        // formats, so we can always read PacketFormat — but the per-packet parsers
+        // (ParticipantsData, CarStatusData, ...) use FIXED 2025 offsets.
+        //
+        // Empirical finding (v1.1.39, controlled capture): a capture taken with
+        // "UDP Format = 2026" shifts the body layout of at least Participants
+        // (packetId 4) and CarStatus (packetId 7) and adds a new per-frame packet
+        // (packetId 16). The 2025-offset parsers then read garbage (corrupted
+        // names, teamIds like 0/1/25/255, astronomical ERS values). The official
+        // 2026 UDP spec deltas are not public yet, so we cannot ship 2026 offsets.
+        //
+        // STRATEGY:
+        //   * 2025 format -> fully parsed (also carries 2026 *content*: team ids
+        //     220-230, track 42 — those are content, not layout).
+        //   * Unsupported format (2026+) -> the export is flagged loudly via
+        //     _debug.game.unsupportedUdpFormat and _debug.rawSamples captures the
+        //     raw packet bytes so the layout can be reverse-engineered offline.
+        //
+        // EXTENSION POINT (Phase 2 execution): when the 2026 layout is known, add
+        // 2026 parser variants and route on PacketFormat. The cleanest seam is
+        // PacketParser.Dispatch (it already reads the header); branch per format
+        // there and call format-specific Parse overloads. Until then, this helper
+        // is the single source of truth for "can we trust the parsed body?".
+
+        /// <summary>The UDP wire formats whose packet body layout the parsers fully support.</summary>
+        public static readonly int[] SupportedParseFormats = { 2025 };
+
+        /// <summary>
+        /// True when the per-packet parsers can be trusted for this PacketFormat.
+        /// PacketFormat 0 means "header not observed yet" and is treated as
+        /// supported (capture-less exports / tests). Any future format we have not
+        /// implemented offsets for (e.g. 2026) returns false so the caller can
+        /// flag the export instead of silently trusting garbage.
+        /// </summary>
+        public static bool IsParseSupportedFormat(ushort fmt)
+        {
+            if (fmt == 0) return true;
+            for (int i = 0; i < SupportedParseFormats.Length; i++)
+                if (SupportedParseFormats[i] == fmt) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// True when a team id belongs to the F1 26 "2026 Season Pack" grid
+        /// (220-230). Used to detect 2026 content even when the wire format is
+        /// still 2025. Kept here (not in Finalizer.Lookups) so packet-layer code
+        /// can use it without referencing the Finalizer namespace.
+        /// </summary>
+        public const int F1_26TeamIdMin = 220;
+        public const int F1_26TeamIdMax = 230;
+        public const int F1_26TrackIdMadring = 42;
+
+        public static bool IsF1_26TeamId(int teamId)
+        {
+            return teamId >= F1_26TeamIdMin && teamId <= F1_26TeamIdMax;
+        }
     }
 }
