@@ -1044,11 +1044,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
             string formatLabel = (newestPacketFormat != 0)
                 ? Packets.GameInfo.GameNameFromPacketFormat(newestPacketFormat)
                 : "F1_25";
-            // Top-level game reflects CONTENT (what the league raced), not the wire
-            // format: 2026 content OR a 2026+ packet format both resolve to F1_26.
-            bool gameIsF1_26 = contentPack2026
-                || (newestPacketFormat != 0 && newestPacketFormat >= 2026);
-            string gameLabel = gameIsF1_26 ? "F1_26" : formatLabel;
+            // Top-level game reflects CONTENT first: 2026-content signals (team
+            // 220-230 / track 42) force "F1_26" even on the 2025 wire format.
+            // Otherwise we trust the format-derived label, which already maps
+            // 2026 -> "F1_26" and any future/unknown format -> "F1_<fmt>"
+            // (so a real 2030 build still surfaces as "F1_2030", not "F1_26").
+            string gameLabel = contentPack2026 ? "F1_26" : formatLabel;
 
             // Phase 2 safety (v1.1.39): when the wire format is one the parsers do
             // not support, the parsed bodies are unreliable. Surface it loudly so
