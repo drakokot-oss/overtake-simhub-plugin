@@ -348,6 +348,12 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.43
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Coletar os dados necessários para mapear as lobby settings do formato 2026** (omitidas desde a v1.1.41 por não serem mapeáveis com a amostra de 1ª ocorrência, que vem zerada). | Novo diagnóstico `_debug.sessionDeepProbe`: em formatos cujos campos profundos do Session não são mapeados (`!AreDeepSessionFieldsMapped`, ou seja, 2026), o store guarda o **último** pacote Session inteiro (hex), que já tem as settings carregadas — ao contrário do `rawSamples` (primeira ocorrência, zerada). Auto-desativa quando 2026 for mapeado; não re-sinaliza o arquivo (imports 2026 seguem ok). Test 42. **Próximo passo:** uma captura 2026 com settings não-default + os valores conhecidos → mapeio os offsets → versão futura lê `lobbySettings` no 2026. |
+
 ### v1.1.42
 
 | Demanda | Como foi feito |

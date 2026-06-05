@@ -1,7 +1,7 @@
 {
-    "version":  "1.1.42",
+    "version":  "1.1.43",
     "released":  "2026-06-05",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.42/Overtake.SimHub.Plugin-v1.1.42-Setup.exe",
-    "releaseNotes":  "**Dados de bateria (ERS) recalibrados para o F1 26**\r\n\r\nAjustamos as metricas de bateria para o novo modelo de energia de 2026, que entrega muito mais energia por volta que o de 2025.\r\n\r\n**O que muda pra voce:**\r\n\r\n- Os numeros de uso de bateria por volta agora aparecem tambem em **MJ (megajoules) absolutos** — a forma mais clara e que serve para os dois jogos.\r\n- As porcentagens de uso/regeneracao por volta agora sao calculadas sobre o **limite oficial da regulamentacao** de cada ano (FIA), entao deixam de passar de 100% no F1 26.\r\n- A carga media da bateria (storePct) continua igual, de 0 a 100%.\r\n\r\nLimites usados (regulamento FIA): deploy ate 9 MJ/volta e regeneracao MGU-K ate 8,5 MJ/volta no 2026 (4 MJ e 2 MJ no 2025). A leitura dos formatos UDP 2025 e 2026 continua automatica."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.43/Overtake.SimHub.Plugin-v1.1.43-Setup.exe",
+    "releaseNotes":  "**Coleta de diagnostico para as configuracoes de sala do F1 26**\r\n\r\nEsta versao adiciona uma coleta interna de diagnostico que nos permite mapear, numa proxima etapa, as configuracoes detalhadas da sala (assists/regras) no formato UDP 2026 — o unico bloco que ainda nao e lido nesse formato.\r\n\r\n**Nao muda nada visivel pra voce:** corridas continuam sendo geradas e lidas normalmente nos formatos 2025 e 2026, com equipes, nomes, bateria e resultados corretos. A coleta so acontece em capturas no formato 2026 e e usada apenas internamente (campo de diagnostico no arquivo).\r\n\r\nSe voce roda corridas no formato UDP 2026, basta rodar uma corrida normalmente com esta versao e compartilhar o arquivo — de preferencia com algumas configuracoes de sala diferentes do padrao (ex.: assists, regras) — que conseguimos finalizar o mapeamento."
 }

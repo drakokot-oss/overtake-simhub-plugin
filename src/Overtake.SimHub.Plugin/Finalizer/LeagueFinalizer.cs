@@ -1206,6 +1206,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (rawSamples.Count > 0)
                 debugBlock["rawSamples"] = rawSamples;
 
+            // v1.1.43 — Session deep-field probe (latest Session packet for a wire
+            // format whose deep lobby-settings block isn't mapped yet, e.g. 2026).
+            // Lets us reverse-engineer the lobby-settings offsets offline.
+            if (store.SessionDeepProbe != null)
+                debugBlock["sessionDeepProbe"] = store.SessionDeepProbe;
+
             result["_debug"] = debugBlock;
 
             return result;
