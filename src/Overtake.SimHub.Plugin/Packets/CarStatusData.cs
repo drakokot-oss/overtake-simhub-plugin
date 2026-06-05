@@ -24,25 +24,47 @@ namespace Overtake.SimHub.Plugin.Packets
         public byte NetworkPaused;            // 1 when this car is paused on the network (off 54)
         public bool ErsCaptured;              // true when bytes 29..54 were actually parsed
 
-        private const int EntrySize = 55;
+        private const int EntrySize2025 = 55;
+        // v1.1.40 — F1 26 / 2026 Season Pack grows each CarStatus entry from 55 to
+        // 59 bytes (+4 trailing, likely Active Aero / Overtake / Boost state). The
+        // ERS / fuel field offsets WITHIN the entry are unchanged, so only the
+        // stride differs. Confirmed via labeled 2026 capture — see
+        // docs/F1-26-UDP-OFFSET-MAP.md.
+        private const int EntrySize2026 = 59;
         private const int FuelOnlyMinSize = 17;
         private const int FullEntryMinSize = 55;
 
+        private static int EntrySizeFor(ushort packetFormat)
+        {
+            return packetFormat >= 2026 ? EntrySize2026 : EntrySize2025;
+        }
+
+        /// <summary>Backwards-compatible entry point — assumes the 2025 wire format.</summary>
         public static CarStatusEntry[] Parse(byte[] data)
+        {
+            return Parse(data, 2025);
+        }
+
+        /// <summary>
+        /// Parses a CarStatus packet using the entry stride for the given UDP wire
+        /// format. v1.1.40 — added 2026 stride (59) support; ERS offsets unchanged.
+        /// </summary>
+        public static CarStatusEntry[] Parse(byte[] data, ushort packetFormat)
         {
             if (data == null || data.Length < PacketHeader.Size + FuelOnlyMinSize)
                 return null;
 
             int p = PacketHeader.Size;
-            // F1 25 sends 22 entries; F1 26 (mod) is expected to send up to 24.
+            int entrySize = EntrySizeFor(packetFormat);
+            // F1 25 sends 22 entries; F1 26 (mod) sends up to 24.
             // Cap at GameInfo.MaxSupportedCars so a hypothetical larger grid in
             // future patches is not silently truncated.
-            int maxCars = Math.Min(GameInfo.MaxSupportedCars, (data.Length - p) / EntrySize);
+            int maxCars = Math.Min(GameInfo.MaxSupportedCars, (data.Length - p) / entrySize);
             var entries = new CarStatusEntry[maxCars];
 
             for (int i = 0; i < maxCars; i++)
             {
-                int off = p + i * EntrySize;
+                int off = p + i * entrySize;
                 if (off + FuelOnlyMinSize > data.Length) break;
                 var entry = new CarStatusEntry
                 {
