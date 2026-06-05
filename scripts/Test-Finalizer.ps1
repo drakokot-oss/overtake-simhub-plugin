@@ -1490,7 +1490,9 @@ function Test-ExpandedGridParsing() {
         [System.Array]::Copy($name, 0, $buf, $start + 7, $name.Length)
     }
 
-    $parseMethod = $partType.GetMethod("Parse")
+    # v1.1.40: ParticipantsData.Parse now has two overloads (1-arg = 2025,
+    # 2-arg = format-aware). Disambiguate to the single-byte[] overload.
+    $parseMethod = $partType.GetMethod("Parse", [Type[]]@([byte[]]))
     $parts = $parseMethod.Invoke($null, [object[]]@(,[byte[]]$buf))
 
     Assert "v1.1.36: parser accepts 24-active-car packet" ($parts.NumActiveCars -eq 24)
