@@ -151,5 +151,37 @@ namespace Overtake.SimHub.Plugin.Packets
         {
             return teamId >= F1_26TeamIdMin && teamId <= F1_26TeamIdMax;
         }
+
+        // ----------------------------------------------------------------------
+        // ERS / energy regulation limits (v1.1.42)
+        // ----------------------------------------------------------------------
+        // Used to express per-lap ERS deploy/harvest as a percentage of the
+        // regulation ceiling so the number stays meaningful (0..~100%) across
+        // both eras, instead of "% of the 4 MJ store" which legitimately exceeds
+        // 100% in 2026 (a car deploys/harvests more than one full store per lap).
+        //
+        // Sources (FIA 2026 F1 Power Unit Technical Regulations, Issue 7):
+        //   * Energy Store SoC delta <= 4 MJ at all times (Art. 5.4.9) -> store
+        //     capacity is 4 MJ in BOTH eras (matches the UDP m_ersStoreEnergy max).
+        //   * 2026 deploy: up to 9 MJ/lap from the CU-K HV DC bus (Art. 5.4.10 ref).
+        //   * 2026 MGU-K harvest: <= 8.5 MJ/lap (Art. 5.4.10).
+        //   * 2026 removes the MGU-H entirely (no MGU-H harvest).
+        // Current (F1 25 / 2014-2025) regs: deploy 4 MJ/lap, MGU-K harvest 2 MJ/lap,
+        //   MGU-H harvest unlimited.
+
+        /// <summary>Energy store capacity in MJ (4 MJ both eras; 100% of storePct).</summary>
+        public const double ErsStoreMaxMj = 4.0;
+
+        /// <summary>Per-lap MGU-K deployment ceiling in MJ for the given wire format.</summary>
+        public static double ErsDeployLimitMjPerLap(ushort packetFormat)
+        {
+            return packetFormat >= 2026 ? 9.0 : 4.0;
+        }
+
+        /// <summary>Per-lap MGU-K harvest ceiling in MJ for the given wire format.</summary>
+        public static double ErsHarvestMgukLimitMjPerLap(ushort packetFormat)
+        {
+            return packetFormat >= 2026 ? 8.5 : 2.0;
+        }
     }
 }

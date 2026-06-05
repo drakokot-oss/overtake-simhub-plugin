@@ -2090,12 +2090,46 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     harvestedMguhAvg = sum / harvestedMguhPerLap.Count;
                 }
 
+                // v1.1.42 — ERS recalibration for the 2026 energy model.
+                //
+                // The per-lap deploy/harvest counters are accumulated internally as
+                // "% of the 4 MJ store" (= MJ/4*100). In 2026 a car deploys up to
+                // 9 MJ and harvests up to 8.5 MJ PER LAP — far more than one full
+                // store — so that percentage routinely exceeded 100% and read as
+                // "broken". We now emit, for deploy and MGU-K harvest:
+                //   * absolute MJ per lap (regulation-agnostic, the recommended
+                //     number), and
+                //   * percentage of the FIA per-lap ceiling for the detected wire
+                //     format (deploy 4->9 MJ, MGU-K harvest 2->8.5 MJ), which stays
+                //     bounded ~0..100% in both eras.
+                // storePct* stays "% of the 4 MJ store" (still correct, 0..100%).
+                // MGU-H has no per-lap regulation ceiling (unlimited pre-2026,
+                // removed in 2026), so it is reported in MJ only; its legacy
+                // percentage (relative to the 4 MJ store) is kept for back-compat.
+                double PctToMj = Packets.GameInfo.ErsStoreMaxMj / 100.0; // %-of-4MJ -> MJ
+                double deployLimitMj = Packets.GameInfo.ErsDeployLimitMjPerLap(sess.LastPacketFormat);
+                double harvestMgukLimitMj = Packets.GameInfo.ErsHarvestMgukLimitMjPerLap(sess.LastPacketFormat);
+
+                double deployedMjAvg = deployedAvg * PctToMj;
+                double harvestedMgukMjAvg = harvestedMgukAvg * PctToMj;
+                double harvestedMguhMjAvg = harvestedMguhAvg * PctToMj;
+
+                double deployedPctOfLimit = deployLimitMj > 0 ? (deployedMjAvg / deployLimitMj) * 100.0 : 0d;
+                double harvestedMgukPctOfLimit = harvestMgukLimitMj > 0 ? (harvestedMgukMjAvg / harvestMgukLimitMj) * 100.0 : 0d;
+                // Scale factors to recalibrate the per-lap % arrays from
+                // "%-of-store(4MJ)" to "%-of-regulation-ceiling" (same basis as
+                // the recalibrated averages above).
+                double deployPctScale = deployLimitMj > 0 ? PctToMj / deployLimitMj * 100.0 : 0d;
+                double harvestMgukPctScale = harvestMgukLimitMj > 0 ? PctToMj / harvestMgukLimitMj * 100.0 : 0d;
+
+                // Per-lap % arrays (existing field names kept; values recalibrated
+                // to %-of-ceiling for deploy/MGU-K. MGU-H stays %-of-store).
                 var deployedRounded = new List<double>(deployedPerLap.Count);
                 for (int j = 0; j < deployedPerLap.Count; j++)
-                    deployedRounded.Add(Math.Round((double)deployedPerLap[j], 2));
+                    deployedRounded.Add(Math.Round((double)deployedPerLap[j] * deployPctScale, 2));
                 var hMgukRounded = new List<double>(harvestedMgukPerLap.Count);
                 for (int j = 0; j < harvestedMgukPerLap.Count; j++)
-                    hMgukRounded.Add(Math.Round((double)harvestedMgukPerLap[j], 2));
+                    hMgukRounded.Add(Math.Round((double)harvestedMgukPerLap[j] * harvestMgukPctScale, 2));
                 var hMguhRounded = new List<double>(harvestedMguhPerLap.Count);
                 for (int j = 0; j < harvestedMguhPerLap.Count; j++)
                     hMguhRounded.Add(Math.Round((double)harvestedMguhPerLap[j], 2));
@@ -2107,12 +2141,25 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     { "storePctMin", Math.Round((double)dr.ErsStorePctMin, 2) },
                     { "storePctMax", Math.Round((double)dr.ErsStorePctMax, 2) },
                     { "storePctAvg", Math.Round(storeAvg, 2) },
+                    // Absolute MJ per lap (RECOMMENDED; regulation-agnostic, same
+                    // meaning across 2025 and 2026).
+                    { "deployedMjAvgPerLap", Math.Round(deployedMjAvg, 3) },
+                    { "harvestedMgukMjAvgPerLap", Math.Round(harvestedMgukMjAvg, 3) },
+                    { "harvestedMguhMjAvgPerLap", Math.Round(harvestedMguhMjAvg, 3) },
+                    // Percentage of the FIA per-lap ceiling for this wire format
+                    // (bounded ~0..100% in both eras). Field names unchanged;
+                    // values now relative to the regulation ceiling, not the store.
                     { "deployedPctPerLap", deployedRounded },
-                    { "deployedPctAvgPerLap", Math.Round(deployedAvg, 2) },
+                    { "deployedPctAvgPerLap", Math.Round(deployedPctOfLimit, 2) },
                     { "harvestedMgukPctPerLap", hMgukRounded },
+                    { "harvestedMgukPctAvgPerLap", Math.Round(harvestedMgukPctOfLimit, 2) },
+                    // MGU-H: no per-lap regulation ceiling -> legacy %-of-store kept.
                     { "harvestedMguhPctPerLap", hMguhRounded },
-                    { "harvestedMgukPctAvgPerLap", Math.Round(harvestedMgukAvg, 2) },
                     { "harvestedMguhPctAvgPerLap", Math.Round(harvestedMguhAvg, 2) },
+                    // Regulation ceilings used (transparency / front can recompute).
+                    { "deployLimitMjPerLap", deployLimitMj },
+                    { "harvestMgukLimitMjPerLap", harvestMgukLimitMj },
+                    { "storeMaxMj", Packets.GameInfo.ErsStoreMaxMj },
                     { "deployModeLast", Lookups.LookupOrDefault(Lookups.ErsDeployModeMap, dr.ErsDeployModeLast, "ErsMode") },
                     { "samplesCount", dr.ErsSamplesCount },
                     { "samplesPaused", dr.ErsSamplesPaused },

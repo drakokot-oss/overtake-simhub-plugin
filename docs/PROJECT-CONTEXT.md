@@ -348,6 +348,16 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.42
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Recalibrar as porcentagens de ERS para o modelo de energia 2026** (no F1 26 o `deployedPctAvgPerLap`/harvested passava de 100% — lia como bug). | Pesquisa dos limites oficiais (FIA 2026 F1 Power Unit Technical Regulations, Issue 7): **deploy até 9 MJ/volta**, **harvest MGU-K ≤ 8,5 MJ/volta**, **store SoC 4 MJ** (mantido), **MGU-H removido**. `GameInfo` ganhou `ErsDeployLimitMjPerLap`/`ErsHarvestMgukLimitMjPerLap` (format-aware) + `ErsStoreMaxMj`. No `LeagueFinalizer.FinalizeDriver` (que tem `sess.LastPacketFormat`), o ERS agora emite **MJ absolutos** (`deployedMjAvgPerLap`, `harvestedMgukMjAvgPerLap`, `harvestedMguhMjAvgPerLap` — recomendados, mesma semântica nas duas eras) e recalibra os `%` existentes para **% do teto de regulamento** (deploy/9, harvest/8,5 no 2026; deploy/4, harvest/2 no 2025), ficando limitados ~0–100%. `storePct*` inalterado. Validado com os dados reais do Austria (deploy 175% do reservatório → 7,0 MJ → 77,8% do teto de 9 MJ). Tests 40 (limites) e 41 (end-to-end: deploy 7 MJ → 77,8%). |
+
+**Princípio de design reforçado (v1.1.42):**
+- **Métrica absoluta > métrica relativa quando a referência muda.** O `%` "do reservatório" deixou de fazer sentido quando o 2026 deploya 2× o reservatório por volta. MJ absoluto é estável entre eras; é a métrica recomendada. O `%` foi mantido (recalibrado para o teto de regulamento) por conveniência de UI.
+- **Ancorar em fonte oficial.** Os limites vieram do regulamento técnico da FIA (não de chute), documentados no código com o artigo (5.4.9/5.4.10).
+
 ### v1.1.41
 
 | Demanda | Como foi feito |

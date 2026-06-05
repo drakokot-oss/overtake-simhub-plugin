@@ -143,6 +143,10 @@ Com o formato 2026 totalmente suportado, dois pontos de atenção no front:
 
 1. **`lobbySettings` pode vir ausente (`null`) em capturas 2026.** O bloco detalhado de configurações da sala (assists/regras) ainda não é mapeado no formato 2026 e é **omitido** (em vez de mostrar dado incorreto). O front já deve tratar `lobbySettings` como **opcional** — se `null`, simplesmente não exibir essa seção. Todo o resto (resultados, equipes, nomes, ERS, voltas, clima) está presente.
 
-2. **ERS pode passar de 100% em conteúdo F1 26.** O modelo de energia 2026 (Boost/Overtake Mode, motor elétrico maior) entrega mais energia por volta, então `ersTelemetry.deployedPctAvgPerLap` e os `harvested...PctAvgPerLap` **podem exceder 100%**. Não trave a exibição num teto de 100% para esses campos (o `storePctAvg` continua 0–100%). Uma recalibração dessas porcentagens está planejada.
+2. **ERS recalibrado (v1.1.42).** Em vez de "% do reservatório de 4 MJ" (que passava de 100% no 2026), agora:
+   - **Use os campos em MJ absolutos** (recomendado, mesma semântica nos dois jogos): `ersTelemetry.deployedMjAvgPerLap`, `harvestedMgukMjAvgPerLap`, `harvestedMguhMjAvgPerLap`.
+   - As `%` por volta (`deployedPctAvgPerLap`, `harvestedMgukPctAvgPerLap`, e os arrays `*PctPerLap`) agora são **% do teto oficial da FIA** daquele ano (deploy 9 MJ / harvest 8,5 MJ no 2026; 4 MJ / 2 MJ no 2025) → ficam **limitadas ~0–100%**. Os campos `deployLimitMjPerLap`/`harvestMgukLimitMjPerLap`/`storeMaxMj` informam os tetos usados.
+   - `storePctAvg` continua 0–100% (carga média da bateria).
+   - Atenção: capturas **F1 25** também tiveram o `harvestedMgukPct*` recalibrado (agora sobre 2 MJ, o teto real) — valor diferente de capturas antigas. Prefira os campos **MJ** para evitar ambiguidade entre versões.
 
 3. **Nomes `Driver_N` continuam possíveis** quando o jogador está com "Show player names: off" (igual ao F1 25). Parte é recuperada pela tela de lobby. Sempre exiba o `tag` recebido.

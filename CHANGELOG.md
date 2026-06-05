@@ -2,6 +2,25 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.42] - 2026-06-05
+
+### Changed (recalibração de ERS para o modelo de energia 2026)
+- **Métricas de ERS por volta recalibradas** usando os tetos oficiais da FIA (2026 F1 Power Unit Technical Regulations, Issue 7). O modelo 2026 entrega muito mais energia por volta que o de 2025, então a antiga métrica "% do reservatório de 4 MJ" passava de 100% (lia como bug). Limites adotados (`GameInfo.ErsDeployLimitMjPerLap` / `ErsHarvestMgukLimitMjPerLap`, format-aware):
+  - **Deploy (MGU-K → rodas):** 4 MJ/volta (2025) → **9 MJ/volta (2026)** (Art. 5.4.10).
+  - **Harvest MGU-K:** 2 MJ/volta (2025) → **8,5 MJ/volta (2026)** (Art. 5.4.10).
+  - **Store (SoC):** 4 MJ nos dois (Art. 5.4.9) — `storePct*` inalterado, 0–100%.
+  - **MGU-H:** removido no 2026 (sem teto de regulamento) — reportado em MJ; `%` legado mantido como %-do-store.
+- **Novos campos em `ersTelemetry`** (MJ absolutos, recomendado — mesma semântica nos dois jogos): `deployedMjAvgPerLap`, `harvestedMgukMjAvgPerLap`, `harvestedMguhMjAvgPerLap`. Mais `deployLimitMjPerLap`, `harvestMgukLimitMjPerLap`, `storeMaxMj` (transparência dos tetos usados).
+- **Campos `%` existentes recalibrados** (nomes mantidos): `deployedPctAvgPerLap`, `deployedPctPerLap`, `harvestedMgukPctAvgPerLap`, `harvestedMgukPctPerLap` agora são **% do teto de regulamento** (não mais % do reservatório), ficando limitados ~0–100% nos dois formatos. `harvestedMguh*` segue %-do-store (MGU-H não tem teto por volta).
+
+### Tests
+- **Test 40 (`Test-ErsRegulationLimits`):** valida os tetos em `GameInfo` (deploy 4/9, harvest 2/8.5).
+- **Test 41 (`Test-ErsRecalibration2026`):** end-to-end — corrida 2026 com deploy 7 MJ / harvest 5 MJ por volta → `deployedMjAvgPerLap ≈ 7.0`, `deployedPctAvgPerLap ≈ 77.8%` (de 9 MJ, < 100), `harvestedMgukMjAvgPerLap ≈ 5.0`, `harvestedMgukPctAvgPerLap ≈ 58.8%`.
+
+### Notes
+- **Leitura automática 2025/2026 confirmada:** `PacketParser.Dispatch` lê `PacketFormat` do cabeçalho de cada pacote e escolhe o layout (2025/2026) por pacote — sem configuração manual.
+- **Impacto no front:** os `%` por volta agora são "% do teto FIA" (antes "% do reservatório"). Recomenda-se usar os novos campos **MJ** para comparação entre eras. Capturas F1 25 também mudam o `harvestedMgukPct*` (passa a ser sobre 2 MJ, o teto real) — é uma correção. Schema continua `league-1.1` (aditivo nos novos campos; recalibração de valores nos existentes).
+
 ## [1.1.41] - 2026-06-05
 
 ### Added (Fase 2 — suporte completo ao formato UDP 2026)
