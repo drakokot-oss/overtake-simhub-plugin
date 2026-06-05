@@ -1244,17 +1244,19 @@ function Test-ErsTelemetry() {
     Assert "v1.1.34: harvestedMgukPctPerLap has 3 entries" ($harvMguk.Count -eq 3)
     Assert "v1.1.34: harvestedMguhPctPerLap has 3 entries" ($harvMguh.Count -eq 3)
 
-    # v1.1.35 — separate per-source averages, each capped naturally at 100%.
-    # MGU-K samples for Hamilton: lap1 max 50% (2 MJ), lap2 max 40% (1.6 MJ),
-    # lap3 max 35% (1.4 MJ). Mean = (50+40+35)/3 = 41.67%.
-    # MGU-H samples for Hamilton: lap1 max 45%, lap2 max 35%, lap3 max 32.5%.
-    # Mean = (45+35+32.5)/3 = 37.5%.
+    # MGU-K samples for Hamilton: lap1 max 50% of store (2 MJ), lap2 40% (1.6 MJ),
+    # lap3 35% (1.4 MJ). Mean store-relative = 41.67% -> 1.667 MJ.
+    # v1.1.42 recalibration (2025 wire format): the % is now relative to the
+    # MGU-K harvest CEILING (2 MJ in 2025), so 1.667 / 2 * 100 = 83.33%.
+    # The new MJ field carries the absolute value (1.667 MJ).
+    # MGU-H stays %-of-store: mean = (45+35+32.5)/3 = 37.5%.
     Assert "v1.1.35: harvestedMgukPctAvgPerLap present" ($harvMgukAvg -ne $null)
     Assert "v1.1.35: harvestedMguhPctAvgPerLap present" ($harvMguhAvg -ne $null)
-    Assert "v1.1.35: harvestedMgukPctAvgPerLap == 41.67" ([Math]::Abs([double]$harvMgukAvg - 41.67) -lt 0.5)
+    Assert "v1.1.42: harvestedMgukPctAvgPerLap == 83.33 (% of 2 MJ ceiling)" ([Math]::Abs([double]$harvMgukAvg - 83.33) -lt 0.6)
+    Assert "v1.1.42: harvestedMgukMjAvgPerLap == 1.667 MJ" ([Math]::Abs([double](Get-DictValue $ers "harvestedMgukMjAvgPerLap") - 1.667) -lt 0.02)
     Assert "v1.1.35: harvestedMguhPctAvgPerLap == 37.5" ([Math]::Abs([double]$harvMguhAvg - 37.5) -lt 0.5)
-    Assert "v1.1.35: harvestedMgukPctAvgPerLap <= 100 (regulation cap)" ([double]$harvMgukAvg -le 100.0)
-    Assert "v1.1.35: harvestedMguhPctAvgPerLap <= 100 (regulation cap)" ([double]$harvMguhAvg -le 100.0)
+    Assert "v1.1.42: harvestedMgukPctAvgPerLap <= 100 (regulation ceiling)" ([double]$harvMgukAvg -le 100.0)
+    Assert "v1.1.35: harvestedMguhPctAvgPerLap <= 100" ([double]$harvMguhAvg -le 100.0)
     # Old combined field must be gone (would have been 79.17 = 41.67+37.5)
     $oldHarv = Get-DictValue $ers "harvestedPctAvgPerLap"
     Assert "v1.1.35: legacy harvestedPctAvgPerLap removed" ($oldHarv -eq $null)
@@ -2224,6 +2226,90 @@ function Test-LobbySettingsOmittedFor2026() {
 
 Write-Host "=== Test 39: lobbySettings omitted for 2026 (deep fields unmapped) (v1.1.41) ===" -ForegroundColor Cyan
 [void](Test-LobbySettingsOmittedFor2026)
+
+function Test-ErsRegulationLimits() {
+    # v1.1.42 -- GameInfo ERS regulation ceilings (FIA 2026 PU regs).
+    $gi = $asm.GetType("Overtake.SimHub.Plugin.Packets.GameInfo")
+    $deploy = $gi.GetMethod("ErsDeployLimitMjPerLap")
+    $harvest = $gi.GetMethod("ErsHarvestMgukLimitMjPerLap")
+    Assert "v1.1.42: deploy limit 2025 = 4 MJ"  ([double]$deploy.Invoke($null, @([uint16]2025)) -eq 4.0)
+    Assert "v1.1.42: deploy limit 2026 = 9 MJ"  ([double]$deploy.Invoke($null, @([uint16]2026)) -eq 9.0)
+    Assert "v1.1.42: harvest MGU-K limit 2025 = 2 MJ" ([double]$harvest.Invoke($null, @([uint16]2025)) -eq 2.0)
+    Assert "v1.1.42: harvest MGU-K limit 2026 = 8.5 MJ" ([double]$harvest.Invoke($null, @([uint16]2026)) -eq 8.5)
+}
+
+Write-Host "=== Test 40: ERS regulation limits (FIA 2026) (v1.1.42) ===" -ForegroundColor Cyan
+[void](Test-ErsRegulationLimits)
+
+function Test-ErsRecalibration2026() {
+    # v1.1.42 -- end-to-end ERS recalibration. Build a 2026 race where car 0
+    # deploys 7 MJ and harvests 5 MJ (MGU-K) in lap 1, then the counter resets
+    # (lap rollover). Expected: deployedMjAvgPerLap ~= 7.0, deployedPctAvgPerLap
+    # ~= 7/9*100 = 77.78; harvestedMgukMjAvgPerLap ~= 5.0, pct ~= 5/8.5*100 = 58.82.
+    $st = [System.Activator]::CreateInstance($storeType)
+    $fmt = [uint16]2026
+
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5; $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]900) $fmt)))) | Out-Null
+
+    # Participants 2026 (1 human, carIdx 0). 2026 layout: teamId@5, name@10.
+    $pp = New-Object byte[] 1500
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0           # ai=false
+    $pp[1+5] = 220       # teamId@5 (Mercedes 2026)
+    $pp[1+8] = 44        # raceNumber@8
+    $nm = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($nm, 0, $pp, 1+10, $nm.Length)   # name@10
+    $pp[1+43] = 1        # showOnlineNames@43
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]900) $fmt)))) | Out-Null
+
+    # CarStatus 2026 builder: stride 59, 1 entry. store@37, deployMode@41,
+    # harvMguk@42, deployed@50 (all floats in Joules).
+    function New-CarStatus2026([uint32]$storeJ, [uint32]$harvMgukJ, [uint32]$deployedJ) {
+        $body = New-Object byte[] 59
+        $body[0] = 0; $body[1] = 1; $body[2] = 3                       # TC/ABS/fuelMix
+        [System.BitConverter]::GetBytes([float]5.0).CopyTo($body, 5)   # fuelInTank
+        [System.BitConverter]::GetBytes([float]110.0).CopyTo($body, 9) # fuelCap (>= min)
+        [System.BitConverter]::GetBytes([float]3.0).CopyTo($body, 13)  # fuelRemLaps
+        [System.BitConverter]::GetBytes([float]$storeJ).CopyTo($body, 37)
+        $body[41] = 2                                                  # deployMode
+        [System.BitConverter]::GetBytes([float]$harvMgukJ).CopyTo($body, 42)
+        [System.BitConverter]::GetBytes([float]$deployedJ).CopyTo($body, 50)
+        return ,$body
+    }
+    # Lap 1: deployed 7 MJ, harvested MGU-K 5 MJ, store full.
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 7 (New-CarStatus2026 4000000 5000000 7000000) ([uint64]900) $fmt)))) | Out-Null
+    # Lap rollover: counters reset to 0 -> pushes lap-1 values to per-lap arrays.
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 7 (New-CarStatus2026 4000000 0 0) ([uint64]900) $fmt)))) | Out-Null
+
+    $fc = New-Object byte[] (1 + 22 * 46); $fc[0] = 1; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fc, 1 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc ([uint64]900) $fmt)))) | Out-Null
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $drivers = Get-DictValue (Get-DictValue $res "sessions")[0] "drivers"
+    $ham = Get-DictValue $drivers "Hamilton"
+    Assert "v1.1.42: Hamilton present" ($ham -ne $null)
+    if ($ham -eq $null) { return }
+    $ers = Get-DictValue $ham "ersTelemetry"
+    Assert "v1.1.42: ersTelemetry present" ($ers -ne $null)
+    if ($ers -eq $null) { return }
+    $depMj = [double](Get-DictValue $ers "deployedMjAvgPerLap")
+    $depPct = [double](Get-DictValue $ers "deployedPctAvgPerLap")
+    $harvMj = [double](Get-DictValue $ers "harvestedMgukMjAvgPerLap")
+    $harvPct = [double](Get-DictValue $ers "harvestedMgukPctAvgPerLap")
+    Assert "v1.1.42: deployedMjAvgPerLap ~= 7.0" ([Math]::Abs($depMj - 7.0) -lt 0.05)
+    Assert "v1.1.42: deployedPctAvgPerLap ~= 77.8 (of 9 MJ, bounded <100)" ([Math]::Abs($depPct - 77.78) -lt 0.5)
+    Assert "v1.1.42: harvestedMgukMjAvgPerLap ~= 5.0" ([Math]::Abs($harvMj - 5.0) -lt 0.05)
+    Assert "v1.1.42: harvestedMgukPctAvgPerLap ~= 58.8 (of 8.5 MJ)" ([Math]::Abs($harvPct - 58.82) -lt 0.5)
+    Assert "v1.1.42: deployLimitMjPerLap = 9" ([double](Get-DictValue $ers "deployLimitMjPerLap") -eq 9.0)
+    Assert "v1.1.42: storePctAvg still 0..100" (([double](Get-DictValue $ers "storePctAvg") -ge 0) -and ([double](Get-DictValue $ers "storePctAvg") -le 100))
+}
+
+Write-Host "=== Test 41: ERS recalibration end-to-end (2026 deploy 7MJ -> 77.8%) (v1.1.42) ===" -ForegroundColor Cyan
+[void](Test-ErsRecalibration2026)
 
 # ---- Summary ----
 Write-Host ""

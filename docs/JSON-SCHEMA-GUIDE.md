@@ -582,9 +582,9 @@ Snapshot de combustível. Pode ser `null` se nenhum pacote válido foi capturado
 | `fuelInTankKgFirst` / `Last` | `number` | Combustível no tanque na **primeira** e na **última** amostra (kg). |
 | `fuelRemainingLapsFirst` / `Last` | `number` | Voltas restantes estimadas pelo jogo. |
 
-### `drivers[tag].ersTelemetry` (NOVO em league-1.1, principal feature da v1.1.34/v1.1.35)
+### `drivers[tag].ersTelemetry` (NOVO em league-1.1, v1.1.34/35; **recalibrado em v1.1.42**)
 
-Telemetria de bateria/ERS por piloto. **Tudo em percentual (0–100)**, alinhado com o HUD do jogo. Capacidade regulamentar = 4 MJ = 100%.
+Telemetria de bateria/ERS por piloto. `storePct*` = % da carga do reservatório (4 MJ = 100%, ambos os jogos). **A partir da v1.1.42**, deploy/harvest têm campos em **MJ absolutos** (recomendado) e os campos `%` passam a ser **% do teto de regulamento** daquele ano (deploy 9 MJ / MGU-K harvest 8,5 MJ no 2026; 4 MJ / 2 MJ no 2025), ficando limitados ~0–100%.
 
 ```json
 {
@@ -594,14 +594,20 @@ Telemetria de bateria/ERS por piloto. **Tudo em percentual (0–100)**, alinhado
   "storePctMax":                100.0,
   "storePctAvg":                 57.29,
 
-  "deployedPctPerLap":          [77.84, 92.24, 95.24, 68.97, 74.28, ...],
-  "deployedPctAvgPerLap":        73.73,
+  "deployedMjAvgPerLap":          7.02,
+  "harvestedMgukMjAvgPerLap":     5.10,
+  "harvestedMguhMjAvgPerLap":     0.0,
 
-  "harvestedMgukPctPerLap":     [45.76, 50.01, 50.03, 50.0, 50.02, ...],
-  "harvestedMgukPctAvgPerLap":   49.83,
+  "deployedPctPerLap":          [78.0, 80.1, 77.5, ...],
+  "deployedPctAvgPerLap":        77.78,
+  "harvestedMgukPctPerLap":     [60.1, 59.8, 60.0, ...],
+  "harvestedMgukPctAvgPerLap":   58.82,
+  "harvestedMguhPctPerLap":     [0.0, 0.0, ...],
+  "harvestedMguhPctAvgPerLap":   0.0,
 
-  "harvestedMguhPctPerLap":     [48.05, 69.36, 69.52, 81.23, 74.99, ...],
-  "harvestedMguhPctAvgPerLap":   65.42,
+  "deployLimitMjPerLap":          9.0,
+  "harvestMgukLimitMjPerLap":     8.5,
+  "storeMaxMj":                   4.0,
 
   "deployModeLast":             "Medium",
   "samplesCount":                163492,
@@ -614,13 +620,15 @@ Telemetria de bateria/ERS por piloto. **Tudo em percentual (0–100)**, alinhado
 | `storePctFirst` | `number` | Carga da bateria na primeira amostra (saída da garagem). Tipicamente `100`. |
 | `storePctLast` | `number` | Carga da bateria na última amostra. |
 | `storePctMin` / `storePctMax` | `number` | Mínimo / máximo observado. `0` = descarregou completamente em algum momento. |
-| `storePctAvg` | `number` | **"economia média"** — % médio de carga da bateria ao longo da sessão (média aritmética das amostras não-pausadas). Indicador de estilo: ~80% = guardador, ~30–50% = agressivo. |
-| `deployedPctPerLap[]` | `number[]` | Energia consumida em cada volta concluída (% da capacidade). Cap regulamentar 100%. |
-| `deployedPctAvgPerLap` | `number` | **"consumo médio"** — média de `deployedPctPerLap[]`. Indicador direto de quanta bateria o piloto usou por volta. |
-| `harvestedMgukPctPerLap[]` | `number[]` | Energia regenerada pelo MGU-K (freadas/eixo das rodas) por volta. Cap regulamentar **independente** 100%. |
-| `harvestedMgukPctAvgPerLap` | `number` | Média de regen do MGU-K por volta (0–100). |
-| `harvestedMguhPctPerLap[]` | `number[]` | Energia regenerada pelo MGU-H (turbo) por volta. Cap regulamentar **independente** 100%. |
-| `harvestedMguhPctAvgPerLap` | `number` | Média de regen do MGU-H por volta (0–100). |
+| `storePctAvg` | `number` | **"economia média"** — % médio de carga da bateria (0–100). ~80% = guardador, ~30–50% = agressivo. |
+| `deployedMjAvgPerLap` | `number` | **(v1.1.42, RECOMENDADO)** Energia média **deployada por volta em MJ**. Métrica universal (2025 e 2026). |
+| `harvestedMgukMjAvgPerLap` | `number` | **(v1.1.42)** Regen média do MGU-K por volta, em MJ. |
+| `harvestedMguhMjAvgPerLap` | `number` | **(v1.1.42)** Regen média do MGU-H por volta, em MJ. **0 no F1 26** (MGU-H removido). |
+| `deployedPctAvgPerLap` | `number` | **"consumo médio"** — % do **teto de deploy** do ano (≤ ~100%). v1.1.42: antes era % do reservatório. |
+| `deployedPctPerLap[]` | `number[]` | Deploy por volta, % do teto de regulamento. |
+| `harvestedMgukPctAvgPerLap` / `[]` | `number` | Regen do MGU-K, % do teto de harvest (2 MJ 2025 / 8,5 MJ 2026). |
+| `harvestedMguhPctAvgPerLap` / `[]` | `number` | Regen do MGU-H, % do reservatório (MGU-H não tem teto por volta; **0 no F1 26**). |
+| `deployLimitMjPerLap` / `harvestMgukLimitMjPerLap` / `storeMaxMj` | `number` | **(v1.1.42)** Tetos usados (transparência; permite recomputar %). |
 | `deployModeLast` | `string` | Último modo de deploy: `"None"`, `"Medium"`, `"HotLap"`, `"Overtake"`. |
 | `samplesCount` | `number` | Total de amostras de `CarStatus` consumidas (~30–35Hz × duração). |
 | `samplesPaused` | `number` | Amostras descartadas por `networkPaused=1`. Se for alto, o piloto teve muito lag/pausa. |
@@ -850,6 +858,8 @@ O plugin SimHub gera o **mesmo schema base** com as seguintes diferenças:
 | `league-1.1` (refinement) | **v1.1.37** | Proteção contra "sessão fantasma" carry-over: se o plugin é iniciado enquanto a tela de resultados de outra corrida ainda está enviando pacotes Final Classification, a sessão fantasma resultante (`sessionType=null`, `trackId=null`, drivers `Car_X`) é filtrada antes de chegar ao JSON. Novo campo opcional `_debug.integrity.carryOverSessionsDropped` (`int`). Schema string permanece `"league-1.1"`. Filtro evita o erro "Track(None)" no upload do Race Hub e remove os `Car_X` do `participants[]` global. |
 | `league-1.1` (refinement) | **v1.1.38** | **`sessionType.name` labels corrigidos para os IDs 10..14, 16, 17, 18** conforme spec oficial F1 25 (`Data Output from F1 25 v3.pdf`). Antes: `10 → "Race"`, `11 → "Race2"`, `12 → "TimeTrial"`, `13 → "Sprint"`, `14 → "SprintShootout"`, `16 → "Race"`. Depois: `10..14 → "SprintShootout1..3/ShortSprintShootout/OneShotSprintShootout"`, `15 → "Race"` (único terminal), `16 → "Race2"` (Sprint Race), `17 → "Race3"`, `18 → "TimeTrial"`. Schema string permanece `"league-1.1"`. Capturas anteriores (`<= v1.1.37`) NÃO são regeradas — os labels antigos ficam nelas. Para frontend retro-compatível, use `sessionType.id` (sempre canônico) ou normalize labels via tabela acima. Esta correção elimina o bug de Sprint Format gerar múltiplos `.otk` em vez de UM consolidado. |
 | `league-1.1` (refinement) | **v1.1.39** | **Suporte ao conteúdo F1 26 ("2026 Season Pack").** `teamId` 220–230 → 11 equipes de 2026 (Audi, Cadillac); `track 42` → Madring. Campo de topo `game` agora considera **conteúdo**: `teamId∈[220,230]` ou `track==42` → `"F1_26"` mesmo com `packetFormat=2025`. Novos campos opcionais em `_debug.game`: `formatLabel`, `contentPack2026`, `unsupportedUdpFormat`. Novo bloco opcional `_debug.rawSamples` (só sob formato UDP não-suportado). **Importante:** capturas em "UDP Format 2026" não são suportadas (corpos de pacote com layout novo) — sinalizadas via `_debug.game.unsupportedUdpFormat`; orientar o usuário a usar "UDP Format 2025". Schema string permanece `"league-1.1"` (tudo aditivo). |
+| `league-1.1` (refinement) | **v1.1.40 / v1.1.41** | **Leitura do formato de fio UDP 2026** (Participants/CarStatus/LobbyInfo com layout 2026; roteado por `packetFormat` automaticamente). v1.1.41 promoveu 2026 a suportado → `_debug.game.unsupportedUdpFormat` deixa de aparecer para 2026. **`sessions[].lobbySettings` pode vir `null`** em capturas 2026 (bloco profundo do Session ainda não mapeado nesse formato) — tratar como opcional. Schema string permanece `"league-1.1"`. |
+| `league-1.1` (refinement) | **v1.1.42** | **ERS recalibrado para o modelo de energia 2026** (limites FIA: deploy 9 MJ, harvest MGU-K 8,5 MJ por volta no 2026; 4/2 MJ no 2025). Novos campos `ersTelemetry.deployedMjAvgPerLap`/`harvestedMgukMjAvgPerLap`/`harvestedMguhMjAvgPerLap` (MJ absolutos, recomendados) + `deployLimitMjPerLap`/`harvestMgukLimitMjPerLap`/`storeMaxMj`. Campos `%` por volta existentes recalibrados para "% do teto de regulamento" (antes "% do reservatório") — ficam ≤ ~100%. `storePct*` inalterado. Schema string permanece `"league-1.1"`. |
 
 **Política de versionamento:**
 - **Bump de minor** (`league-1.0` → `league-1.1`): adição de campos opcionais, retrocompatível para readers que ignoram desconhecidos.
