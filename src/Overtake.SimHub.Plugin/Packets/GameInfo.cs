@@ -95,17 +95,32 @@ namespace Overtake.SimHub.Plugin.Packets
         /// <summary>
         /// The UDP wire formats whose packet body layout the parsers FULLY support.
         ///
-        /// v1.1.40 note: the 2026 format is now PARTIALLY parsed — Participants
-        /// (packetId 4) and CarStatus (packetId 7) have working 2026 layouts, and
-        /// LapData/FinalClassification/CarDamage/Event plus the Session core fields
-        /// already parse identically. We intentionally keep 2026 OUT of this list
-        /// until (a) the layout is validated on a human/online capture and (b) the
-        /// deep Session fields (lobby settings/assists) and LobbyInfo are mapped.
-        /// Keeping it out means we still capture full _debug.rawSamples and still
-        /// flag _debug.game.unsupportedUdpFormat, so the data is treated as
-        /// experimental and we keep gathering the bytes needed to finish the map.
+        /// v1.1.41: 2026 is now SUPPORTED. Validated on a labeled human/online
+        /// capture AND a full 22-car AI grid (every team mapped 1:1, ERS sane,
+        /// LobbyInfo names recovered). Participants (4), CarStatus (7), LobbyInfo
+        /// (9) have 2026 layouts; LapData/FinalClassification/CarDamage/Event and
+        /// the Session core fields parse identically. The ONE field we cannot map
+        /// reliably yet — the deep Session lobby settings/assists block — is
+        /// OMITTED for 2026 (see AreDeepSessionFieldsMapped) instead of emitting
+        /// coincidental garbage. Because 2026 is supported, the raw-sample
+        /// collector and the unsupportedUdpFormat flag no longer fire for it.
         /// </summary>
-        public static readonly int[] SupportedParseFormats = { 2025 };
+        public static readonly int[] SupportedParseFormats = { 2025, 2026 };
+
+        /// <summary>
+        /// Whether the DEEP Session-packet fields (lobby settings / driver
+        /// assists block at payload offset ~639+) are reliably mapped for the
+        /// given wire format. The 2026 format shifts these by an amount we could
+        /// not pin down from a first-occurrence sample (the early Session packet
+        /// has them zeroed), so they are OMITTED for 2026 rather than guessed.
+        /// Everything else in the Session packet (track, type, weather, temps,
+        /// networkGame, safetyCarStatus, spectating, weather-forecast count) is in
+        /// the unchanged early region and stays reliable.
+        /// </summary>
+        public static bool AreDeepSessionFieldsMapped(ushort fmt)
+        {
+            return fmt < 2026;
+        }
 
         /// <summary>
         /// True when the per-packet parsers can be trusted for this PacketFormat.
