@@ -1244,17 +1244,19 @@ function Test-ErsTelemetry() {
     Assert "v1.1.34: harvestedMgukPctPerLap has 3 entries" ($harvMguk.Count -eq 3)
     Assert "v1.1.34: harvestedMguhPctPerLap has 3 entries" ($harvMguh.Count -eq 3)
 
-    # v1.1.35 — separate per-source averages, each capped naturally at 100%.
-    # MGU-K samples for Hamilton: lap1 max 50% (2 MJ), lap2 max 40% (1.6 MJ),
-    # lap3 max 35% (1.4 MJ). Mean = (50+40+35)/3 = 41.67%.
-    # MGU-H samples for Hamilton: lap1 max 45%, lap2 max 35%, lap3 max 32.5%.
-    # Mean = (45+35+32.5)/3 = 37.5%.
+    # MGU-K samples for Hamilton: lap1 max 50% of store (2 MJ), lap2 40% (1.6 MJ),
+    # lap3 35% (1.4 MJ). Mean store-relative = 41.67% -> 1.667 MJ.
+    # v1.1.42 recalibration (2025 wire format): the % is now relative to the
+    # MGU-K harvest CEILING (2 MJ in 2025), so 1.667 / 2 * 100 = 83.33%.
+    # The new MJ field carries the absolute value (1.667 MJ).
+    # MGU-H stays %-of-store: mean = (45+35+32.5)/3 = 37.5%.
     Assert "v1.1.35: harvestedMgukPctAvgPerLap present" ($harvMgukAvg -ne $null)
     Assert "v1.1.35: harvestedMguhPctAvgPerLap present" ($harvMguhAvg -ne $null)
-    Assert "v1.1.35: harvestedMgukPctAvgPerLap == 41.67" ([Math]::Abs([double]$harvMgukAvg - 41.67) -lt 0.5)
+    Assert "v1.1.42: harvestedMgukPctAvgPerLap == 83.33 (% of 2 MJ ceiling)" ([Math]::Abs([double]$harvMgukAvg - 83.33) -lt 0.6)
+    Assert "v1.1.42: harvestedMgukMjAvgPerLap == 1.667 MJ" ([Math]::Abs([double](Get-DictValue $ers "harvestedMgukMjAvgPerLap") - 1.667) -lt 0.02)
     Assert "v1.1.35: harvestedMguhPctAvgPerLap == 37.5" ([Math]::Abs([double]$harvMguhAvg - 37.5) -lt 0.5)
-    Assert "v1.1.35: harvestedMgukPctAvgPerLap <= 100 (regulation cap)" ([double]$harvMgukAvg -le 100.0)
-    Assert "v1.1.35: harvestedMguhPctAvgPerLap <= 100 (regulation cap)" ([double]$harvMguhAvg -le 100.0)
+    Assert "v1.1.42: harvestedMgukPctAvgPerLap <= 100 (regulation ceiling)" ([double]$harvMgukAvg -le 100.0)
+    Assert "v1.1.35: harvestedMguhPctAvgPerLap <= 100" ([double]$harvMguhAvg -le 100.0)
     # Old combined field must be gone (would have been 79.17 = 41.67+37.5)
     $oldHarv = Get-DictValue $ers "harvestedPctAvgPerLap"
     Assert "v1.1.35: legacy harvestedPctAvgPerLap removed" ($oldHarv -eq $null)
