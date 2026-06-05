@@ -2,6 +2,25 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.40] - 2026-06-04
+
+### Added (Fase 2 — leitura do formato UDP 2026, núcleo)
+- **Parser 2026 do Participants (packetId 4)** roteado por `packetFormat` no `PacketParser.Dispatch`. O formato 2026 mudou o layout da entrada (stride 57→60, 24 slots; `teamId` 3→5, `myTeam` 4→7, `raceNumber` 5→8, `nationality` 6→9, `name` 7→10, `yourTelemetry` 39→42, `showOnlineNames` 40→43, `platform` 43→46). Offsets confirmados por engenharia reversa de captura rotulada (`Spa_20260604_195534`) — ver `docs/F1-26-UDP-OFFSET-MAP.md`. Corrige **nomes e equipes** embaralhados em capturas 2026. `ParticipantsData.Parse` ganhou overload `(byte[], ushort packetFormat)`; o overload de 1 argumento continua assumindo 2025 (compat).
+- **Parser 2026 do CarStatus (packetId 7)**: stride 55→59 (os offsets internos do ERS são idênticos ao 2025). Corrige o **ERS/bateria** (que saía com valores absurdos no formato 2026 por desalinhamento de stride). `CarStatusEntry.Parse` ganhou overload `(byte[], ushort)`.
+- **LapData (2) / FinalClassification (8) / CarDamage (10) / Event (3)**: confirmado que o layout por-entrada é idêntico no 2026 (só mudou 22→24 carros, já suportado). Nenhuma mudança necessária. Session: campos do núcleo (pista, tipo, clima, temperaturas, `networkGame`, `safetyCar`, `isSpectating`) também intactos no 2026.
+
+### Changed
+- **`SessionStore.RawSampleHexCap` 256 → 2048:** as amostras cruas (`_debug.rawSamples`, capturadas sob formato não-suportado) agora cobrem o **pacote inteiro** (maior é ~1470 B). Isso permite mapear os campos profundos do Session (lobby settings/assists no offset ~639+) e o pacote LobbyInfo, que o limite de 256 bytes não alcançava.
+
+### Tests
+- **Test 36 (`Test-Participants2026LayoutFromRealCapture`):** alimenta o parser 2026 com os **bytes reais** do pacote Participants da captura de Spa e valida `entry0=NORRIS/teamId 228 (McLaren)`, `entry1=ALONSO/224 (Aston)`, `entry2=SAINZ/223 (Williams)`, `driverId`/`raceNumber` corretos; e confirma que o layout 2025 nos mesmos bytes NÃO produz teamId 228 (prova que o roteamento por formato importa).
+- **Test 37 (`Test-CarStatus2026StrideFromRealCapture`):** alimenta o parser 2026 com os bytes reais do CarStatus e valida `car0 store=4 MJ`, `deployMode=3`, `car1 store=4 MJ` (stride 59 correto); confirma que o stride 2025 (55) desalinha o car1 (não dá 4 MJ) — prova do fix.
+
+### Notes
+- **2026 continua marcado como EXPERIMENTAL** (`_debug.game.unsupportedUdpFormat=2026` permanece, e as amostras cruas continuam sendo capturadas). Motivo: o mapeamento do Participants foi validado em pilotos da **IA**; falta validar em **captura online com humanos**, e ainda faltam os campos profundos do Session + o LobbyInfo. Enquanto isso, o site deve continuar tratando esses arquivos como não-confiáveis para corridas oficiais — **use UDP Format 2025 para corridas valendo** (funciona 100% com conteúdo 2026).
+- **Por que lançar já:** com o núcleo parseando, uma captura 2026 nesta versão já mostra nomes/equipes/ERS corretos no `.otk` — é assim que validamos em dados de humanos. E o `RawSampleHexCap` maior faz a próxima captura trazer tudo que falta (Session profundo + LobbyInfo) para fechar a paridade total na v1.1.41.
+- Schema continua `league-1.1` (aditivo). `LapData/FC/CarDamage` já aceitavam 24 carros desde a v1.1.36.
+
 ## [1.1.39] - 2026-06-04
 
 ### Added (Fase 1 — suporte ao conteúdo F1 26 "2026 Season Pack")

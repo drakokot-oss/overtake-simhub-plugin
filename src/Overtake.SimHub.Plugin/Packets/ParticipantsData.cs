@@ -43,9 +43,42 @@ namespace Overtake.SimHub.Plugin.Packets
     /// </summary>
     public class ParticipantsData
     {
-        private const int Stride = 57;
-        private const int NameOffset = 7;
         private const int NameLen = 32;
+
+        /// <summary>
+        /// Byte layout of a single ParticipantData entry. Differs between the
+        /// 2025 and 2026 UDP wire formats (the 2026 "Season Pack" inserts fields
+        /// before teamId and grows the stride 57 -> 60). Offsets confirmed by
+        /// reverse-engineering a labeled 2026 capture — see
+        /// docs/F1-26-UDP-OFFSET-MAP.md. aiControlled (0), driverId (1) and
+        /// networkId (2) are identical across formats.
+        /// </summary>
+        private struct Layout
+        {
+            public int Stride;
+            public int OffTeamId, OffMyTeam, OffRaceNumber, OffNationality;
+            public int OffName, OffYourTelemetry, OffShowOnlineNames, OffPlatform;
+        }
+
+        private static readonly Layout L2025 = new Layout
+        {
+            Stride = 57, OffTeamId = 3, OffMyTeam = 4, OffRaceNumber = 5, OffNationality = 6,
+            OffName = 7, OffYourTelemetry = 39, OffShowOnlineNames = 40, OffPlatform = 43,
+        };
+
+        // v1.1.40 — F1 26 / 2026 Season Pack wire format. +2 bytes before teamId
+        // (offsets 3,4 unknown=255) and +1 byte before myTeam (offset 6 unknown=1);
+        // every later field shifts by +3 and the stride grows to 60.
+        private static readonly Layout L2026 = new Layout
+        {
+            Stride = 60, OffTeamId = 5, OffMyTeam = 7, OffRaceNumber = 8, OffNationality = 9,
+            OffName = 10, OffYourTelemetry = 42, OffShowOnlineNames = 43, OffPlatform = 46,
+        };
+
+        private static Layout LayoutFor(ushort packetFormat)
+        {
+            return packetFormat >= 2026 ? L2026 : L2025;
+        }
 
         public byte NumActiveCars;
         /// <summary>
@@ -56,26 +89,26 @@ namespace Overtake.SimHub.Plugin.Packets
         /// <summary>Tags for active entries only (0..NumActiveCars-1).</summary>
         public Dictionary<int, string> TagsByCarIdx;
 
-        private static ParticipantEntry ParseEntry(byte[] data, int start, int i)
+        private static ParticipantEntry ParseEntry(byte[] data, int start, int i, Layout lay)
         {
             return new ParticipantEntry
             {
                 AiControlled = data[start + 0] != 0,
                 DriverId = data[start + 1],
                 NetworkId = (start + 2 < data.Length) ? data[start + 2] : (byte)255,
-                TeamId = data[start + 3],
-                MyTeam = data[start + 4] != 0,
-                RaceNumber = data[start + 5],
-                Nationality = data[start + 6],
-                YourTelemetry = (start + 39 < data.Length) ? data[start + 39] : (byte)0,
-                ShowOnlineNames = (start + 40 < data.Length) ? data[start + 40] : (byte)0,
-                Platform = (start + 43 < data.Length) ? data[start + 43] : (byte)255,
+                TeamId = (start + lay.OffTeamId < data.Length) ? data[start + lay.OffTeamId] : (byte)255,
+                MyTeam = (start + lay.OffMyTeam < data.Length) && data[start + lay.OffMyTeam] != 0,
+                RaceNumber = (start + lay.OffRaceNumber < data.Length) ? data[start + lay.OffRaceNumber] : (byte)0,
+                Nationality = (start + lay.OffNationality < data.Length) ? data[start + lay.OffNationality] : (byte)0,
+                YourTelemetry = (start + lay.OffYourTelemetry < data.Length) ? data[start + lay.OffYourTelemetry] : (byte)0,
+                ShowOnlineNames = (start + lay.OffShowOnlineNames < data.Length) ? data[start + lay.OffShowOnlineNames] : (byte)0,
+                Platform = (start + lay.OffPlatform < data.Length) ? data[start + lay.OffPlatform] : (byte)255,
             };
         }
 
-        private static string ParseName(byte[] data, int start, int fallbackIndex)
+        private static string ParseName(byte[] data, int start, int fallbackIndex, Layout lay)
         {
-            int nameStart = start + NameOffset;
+            int nameStart = start + lay.OffName;
             int maxLen = Math.Min(NameLen, data.Length - nameStart);
             if (maxLen <= 0) return string.Format("Driver_{0}", fallbackIndex);
 
@@ -95,10 +128,23 @@ namespace Overtake.SimHub.Plugin.Packets
             return raw;
         }
 
+        /// <summary>Backwards-compatible entry point — assumes the 2025 wire format.</summary>
         public static ParticipantsData Parse(byte[] data)
+        {
+            return Parse(data, 2025);
+        }
+
+        /// <summary>
+        /// Parses a Participants packet using the byte layout for the given UDP
+        /// wire format (<paramref name="packetFormat"/> from the packet header).
+        /// v1.1.40 — added 2026 layout support.
+        /// </summary>
+        public static ParticipantsData Parse(byte[] data, ushort packetFormat)
         {
             if (data == null || data.Length < PacketHeader.Size + 1)
                 return null;
+
+            Layout lay = LayoutFor(packetFormat);
 
             int p = PacketHeader.Size;
             byte numActive = data[p];
@@ -112,12 +158,12 @@ namespace Overtake.SimHub.Plugin.Packets
             // Names are only tracked for active entries (0..numActive-1).
             for (int i = 0; i < GameInfo.MaxSupportedCars; i++)
             {
-                int start = baseOff + i * Stride;
-                if (start + Stride > data.Length)
+                int start = baseOff + i * lay.Stride;
+                if (start + lay.Stride > data.Length)
                     break;
 
-                var entry = ParseEntry(data, start, i);
-                entry.Name = ParseName(data, start, i);
+                var entry = ParseEntry(data, start, i, lay);
+                entry.Name = ParseName(data, start, i, lay);
                 entries[i] = entry;
 
                 if (i < numActive)

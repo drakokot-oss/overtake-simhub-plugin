@@ -348,6 +348,17 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.40
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Fase 2 — fazer o plugin LER o formato UDP 2026 (não só detectar/sinalizar).** A v1.1.39 detectava o formato 2026 e capturava amostras cruas, mas não parseava (dados embaralhados). Com o mapa de offsets pronto (engenharia reversa da captura `Spa_20260604_195534` via `_debug.rawSamples`), implementamos o núcleo. | **Parsers format-aware roteados por `packetFormat` no `Dispatch`.** `ParticipantsData` e `CarStatusEntry` ganharam overload `(byte[], ushort)`; o de 1 arg continua 2025 (compat). **Participants 2026:** stride 57→60, offsets deslocados (teamId@5, myTeam@7, raceNumber@8, nationality@9, name@10, yourTelemetry@42, showOnlineNames@43, platform@46) — corrige nomes/equipes. **CarStatus 2026:** stride 55→59 (offsets ERS idênticos) — corrige bateria. **LapData/FC/CarDamage/Event + núcleo do Session:** confirmado layout idêntico (só 22→24 carros, já suportado). `RawSampleHexCap` 256→2048 para a próxima captura cobrir o pacote inteiro (Session profundo @639+ e LobbyInfo). Tests 36/37 validam os parsers 2026 contra os **bytes reais** da captura (NORRIS→McLaren 228, ALONSO→Aston 224, SAINZ→Williams 223; ERS store 4 MJ com stride 59 e lixo com 55). **Decisão consciente:** 2026 permanece fora de `SupportedParseFormats` (continua marcado `unsupportedUdpFormat` + capturando amostras) até validar em captura online com humanos e mapear Session-profundo + LobbyInfo — então a liga usa **UDP Format 2025** para corridas valendo. |
+
+**Princípio de design reforçado (v1.1.40):**
+- **Parsers parametrizados por layout, roteados por formato.** Em vez de duplicar parsers inteiros, o layout (stride + offsets) vira dado selecionado pelo `packetFormat`. Adicionar um formato futuro é adicionar uma `Layout`, não reescrever o parser.
+- **Validar com bytes reais.** Os Tests 36/37 usam o hex cru capturado em campo como fixture — regressão contra dados de verdade, não sintéticos. O `_debug.rawSamples` (Fase 2 enabler da v1.1.39) virou também a fonte das fixtures de teste.
+- **Lançar o núcleo cedo para validar, sem declarar suporte total.** O parsing do núcleo já roda (nomes/equipes/ERS corretos no `.otk`), mas o formato continua "experimental" até a validação em humanos + campos secundários. Isso transforma o próprio teste do usuário no mecanismo de validação, sem arriscar dados sujos em produção.
+
 ### v1.1.39
 
 | Demanda | Como foi feito |

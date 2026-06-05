@@ -92,7 +92,19 @@ namespace Overtake.SimHub.Plugin.Packets
         // there and call format-specific Parse overloads. Until then, this helper
         // is the single source of truth for "can we trust the parsed body?".
 
-        /// <summary>The UDP wire formats whose packet body layout the parsers fully support.</summary>
+        /// <summary>
+        /// The UDP wire formats whose packet body layout the parsers FULLY support.
+        ///
+        /// v1.1.40 note: the 2026 format is now PARTIALLY parsed — Participants
+        /// (packetId 4) and CarStatus (packetId 7) have working 2026 layouts, and
+        /// LapData/FinalClassification/CarDamage/Event plus the Session core fields
+        /// already parse identically. We intentionally keep 2026 OUT of this list
+        /// until (a) the layout is validated on a human/online capture and (b) the
+        /// deep Session fields (lobby settings/assists) and LobbyInfo are mapped.
+        /// Keeping it out means we still capture full _debug.rawSamples and still
+        /// flag _debug.game.unsupportedUdpFormat, so the data is treated as
+        /// experimental and we keep gathering the bytes needed to finish the map.
+        /// </summary>
         public static readonly int[] SupportedParseFormats = { 2025 };
 
         /// <summary>

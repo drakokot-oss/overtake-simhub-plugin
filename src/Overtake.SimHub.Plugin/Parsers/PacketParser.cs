@@ -53,10 +53,14 @@ namespace Overtake.SimHub.Plugin.Parsers
                     result.Event = EventData.Parse(data);
                     break;
                 case 4:
-                    result.Participants = ParticipantsData.Parse(data);
+                    // v1.1.40 — format-aware: 2026 Season Pack shifts the
+                    // Participants entry layout (stride 57->60, teamId/name moved).
+                    result.Participants = ParticipantsData.Parse(data, header.PacketFormat);
                     break;
                 case 7:
-                    result.CarStatus = CarStatusEntry.Parse(data);
+                    // v1.1.40 — format-aware: 2026 grows the CarStatus stride
+                    // 55->59 (ERS offsets unchanged).
+                    result.CarStatus = CarStatusEntry.Parse(data, header.PacketFormat);
                     break;
                 case 8:
                     result.FinalClassification = FinalClassificationData.Parse(data);

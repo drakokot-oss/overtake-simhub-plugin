@@ -1490,7 +1490,9 @@ function Test-ExpandedGridParsing() {
         [System.Array]::Copy($name, 0, $buf, $start + 7, $name.Length)
     }
 
-    $parseMethod = $partType.GetMethod("Parse")
+    # v1.1.40: ParticipantsData.Parse now has two overloads (1-arg = 2025,
+    # 2-arg = format-aware). Disambiguate to the single-byte[] overload.
+    $parseMethod = $partType.GetMethod("Parse", [Type[]]@([byte[]]))
     $parts = $parseMethod.Invoke($null, [object[]]@(,[byte[]]$buf))
 
     Assert "v1.1.36: parser accepts 24-active-car packet" ($parts.NumActiveCars -eq 24)
@@ -2087,6 +2089,78 @@ function Test-PlainF125NoFalsePositives() {
 
 Write-Host "=== Test 35: plain F1 25 has no F1 26 false positives (v1.1.39) ===" -ForegroundColor Cyan
 [void](Test-PlainF125NoFalsePositives)
+
+function HexToBytes([string]$h) {
+    $n = [int]($h.Length / 2)
+    $b = New-Object byte[] $n
+    for ($i = 0; $i -lt $n; $i++) { $b[$i] = [Convert]::ToByte($h.Substring($i * 2, 2), 16) }
+    return ,$b
+}
+
+function Test-Participants2026LayoutFromRealCapture() {
+    # v1.1.40 -- validates the 2026 Participants parser against REAL bytes from a
+    # labeled UDP-Format-2026 capture (Spa_20260604_195534). First 3 AI entries
+    # are NORRIS/ALONSO/SAINZ. Confirms teamId@5, name@10, stride 60.
+    $partType = $asm.GetType("Overtake.SimHub.Plugin.Packets.ParticipantsData")
+    $parse2 = $partType.GetMethod("Parse", [Type[]]@([byte[]], [uint16]))
+
+    $hex = "ea071901140104250f50569780d69400000000000000000000000015ff16013600ffffe40100040a4e4f52524953000000000000000000000000000000000000000000000000000001000000ff03ff80004f4f4f2e2e2effffff010300ffffe001000e4d414c4f4e534f000000000000000000000000000000000000000000000000000001000000ff03229971f9ff84191919ffffff010000ffffdf0100374d5341494e5a00000000000000000000000000000000000000000000000000000001000000ff031868db001dbf1b1b65ffffff010900ffffde010003165645525354415050454e0000000000000000000000000000000000000000000001000000"
+    $data = HexToBytes $hex
+
+    # Parse with 2026 layout
+    $pd = $parse2.Invoke($null, @([byte[]]$data, [uint16]2026))
+    Assert "v1.1.40: 2026 Participants parsed" ($pd -ne $null)
+    if ($pd -eq $null) { return }
+    $entries = Get-Field $pd "Entries"
+    $e0 = $entries[0]; $e1 = $entries[1]; $e2 = $entries[2]
+    Assert "v1.1.40: entry0 name = NORRIS"        ((Get-Field $e0 "Name") -eq "NORRIS")
+    Assert "v1.1.40: entry0 teamId = 228 (McLaren)" ([int](Get-Field $e0 "TeamId") -eq 228)
+    Assert "v1.1.40: entry0 driverId = 54"        ([int](Get-Field $e0 "DriverId") -eq 54)
+    Assert "v1.1.40: entry0 raceNumber = 4"       ([int](Get-Field $e0 "RaceNumber") -eq 4)
+    Assert "v1.1.40: entry1 name = ALONSO"        ((Get-Field $e1 "Name") -eq "ALONSO")
+    Assert "v1.1.40: entry1 teamId = 224 (Aston)" ([int](Get-Field $e1 "TeamId") -eq 224)
+    Assert "v1.1.40: entry2 name = SAINZ"         ((Get-Field $e2 "Name") -eq "SAINZ")
+    Assert "v1.1.40: entry2 teamId = 223 (Williams)" ([int](Get-Field $e2 "TeamId") -eq 223)
+
+    # Parsing the SAME bytes with the 2025 layout must NOT yield McLaren@0
+    # (proves the format actually matters / old parser produced garbage).
+    $pd25 = $parse2.Invoke($null, @([byte[]]$data, [uint16]2025))
+    $e025 = (Get-Field $pd25 "Entries")[0]
+    Assert "v1.1.40: 2025 layout on 2026 bytes does NOT give teamId 228" ([int](Get-Field $e025 "TeamId") -ne 228)
+}
+
+Write-Host "=== Test 36: 2026 Participants parser vs real capture (v1.1.40) ===" -ForegroundColor Cyan
+[void](Test-Participants2026LayoutFromRealCapture)
+
+function Test-CarStatus2026StrideFromRealCapture() {
+    # v1.1.40 -- validates the 2026 CarStatus parser against REAL bytes from the
+    # same capture. ERS offsets are unchanged; only the stride is 55->59. Car 0
+    # and car 1 both have a full 4 MJ store at the start; reading car 1 with the
+    # OLD stride (55) yields garbage (0), proving the stride fix.
+    $csType = $asm.GetType("Overtake.SimHub.Plugin.Packets.CarStatusEntry")
+    $parse2 = $csType.GetMethod("Parse", [Type[]]@([byte[]], [uint16]))
+
+    $hex = "ea071901140107250f50569780d69400000000000000000000000015ff0001033a006666b6400000dc42d39b5e402b33a00f090000001110000090aac648000000000024744a0300000000000000004054094b00000000000001033a006666b6400000dc42d39b5e402b33a00f09000000111000002629c948000000000024744a0300000000000000004054094b00000000000001033a006666b6400000dc42d39b5e402b33a00f09000000111000004973c448000000000024744a0300000000000000004054094b00000000000001033a006666b6400000dc42d39b5e402b33a00f0900000011100000a5bbc648000000000024744a030000000000000000"
+    $data = HexToBytes $hex
+
+    $cs = $parse2.Invoke($null, @([byte[]]$data, [uint16]2026))
+    Assert "v1.1.40: 2026 CarStatus parsed" ($cs -ne $null -and $cs.Length -ge 2)
+    if ($cs -eq $null -or $cs.Length -lt 2) { return }
+    $store0 = [float](Get-Field $cs[0] "ErsStoreEnergy")
+    $mode0 = [int](Get-Field $cs[0] "ErsDeployMode")
+    $store1 = [float](Get-Field $cs[1] "ErsStoreEnergy")
+    Assert "v1.1.40: car0 ERS store = 4 MJ"        ([Math]::Abs($store0 - 4000000) -lt 1)
+    Assert "v1.1.40: car0 ERS deployMode = 3"      ($mode0 -eq 3)
+    Assert "v1.1.40: car1 ERS store = 4 MJ (stride 59 correct)" ([Math]::Abs($store1 - 4000000) -lt 1)
+
+    # Same bytes with the 2025 stride (55) misaligns car 1 -> not 4 MJ.
+    $cs25 = $parse2.Invoke($null, @([byte[]]$data, [uint16]2025))
+    $store1_25 = [float](Get-Field $cs25[1] "ErsStoreEnergy")
+    Assert "v1.1.40: car1 with WRONG 2025 stride is NOT 4 MJ (proves fix)" ([Math]::Abs($store1_25 - 4000000) -ge 1)
+}
+
+Write-Host "=== Test 37: 2026 CarStatus stride parser vs real capture (v1.1.40) ===" -ForegroundColor Cyan
+[void](Test-CarStatus2026StrideFromRealCapture)
 
 # ---- Summary ----
 Write-Host ""

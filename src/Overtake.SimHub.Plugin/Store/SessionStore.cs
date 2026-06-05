@@ -36,7 +36,14 @@ namespace Overtake.SimHub.Plugin.Store
         // emits these under _debug.rawSamples so a single labeled 2026 capture
         // carries everything needed to map the new offsets. Bounded by design:
         // one entry per packetId, RawSampleHexCap bytes each.
-        public const int RawSampleHexCap = 256;
+        //
+        // v1.1.40 — raised 256 -> 2048 so a single sample now covers the FULL
+        // body of every F1 packet (largest is ~1470 B). This lets us map the
+        // deep Session fields (lobby settings / assists at offset ~639+) and the
+        // LobbyInfo packet, which the previous 256-byte cap could not reach.
+        // Cost: ~one extra packet's worth of hex per packetId, only present in
+        // captures that used an unsupported wire format (never in normal 2025).
+        public const int RawSampleHexCap = 2048;
         /// <summary>packetId -> { format, length, hex } captured under an unsupported wire format.</summary>
         public Dictionary<int, Dictionary<string, object>> RawSamples = new Dictionary<int, Dictionary<string, object>>();
         /// <summary>Highest non-zero PacketFormat seen that the parsers do NOT support (0 = none).</summary>
