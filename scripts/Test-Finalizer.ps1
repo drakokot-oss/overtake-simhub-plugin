@@ -2311,6 +2311,32 @@ function Test-ErsRecalibration2026() {
 Write-Host "=== Test 41: ERS recalibration end-to-end (2026 deploy 7MJ -> 77.8%) (v1.1.42) ===" -ForegroundColor Cyan
 [void](Test-ErsRecalibration2026)
 
+function Test-SessionDeepProbe2026() {
+    # v1.1.43 -- a 2026 Session packet must produce _debug.sessionDeepProbe (the
+    # diagnostic that captures the LATEST Session packet so the deep lobby-settings
+    # offsets can be reverse-engineered). A 2025 capture must NOT (deep fields are
+    # already mapped). The probe must NOT re-flag the file as unsupported.
+    $res26 = Build-F126Race ([uint16]2026) ([byte]221) ([byte]42) ([uint64]920)
+    $dbg26 = Get-DictValue $res26 "_debug"
+    $probe = Get-DictValue $dbg26 "sessionDeepProbe"
+    Assert "v1.1.43: 2026 produces _debug.sessionDeepProbe" ($probe -ne $null)
+    if ($probe -ne $null) {
+        Assert "v1.1.43: probe carries packetFormat 2026" ([int](Get-DictValue $probe "packetFormat") -eq 2026)
+        $hx = Get-DictValue $probe "hexPrefix"
+        Assert "v1.1.43: probe hex non-empty + starts ea07 (2026)" (($hx -ne $null) -and $hx.StartsWith("ea07"))
+    }
+    # Must NOT re-flag the file (2026 stays supported).
+    $g26 = Get-DictValue $dbg26 "game"
+    Assert "v1.1.43: probe does not set unsupportedUdpFormat" ((Get-DictValue $g26 "unsupportedUdpFormat") -eq $null)
+
+    $res25 = Build-F126Race ([uint16]2025) ([byte]5) ([byte]5) ([uint64]921)
+    $probe25 = Get-DictValue (Get-DictValue $res25 "_debug") "sessionDeepProbe"
+    Assert "v1.1.43: 2025 does NOT produce sessionDeepProbe (deep fields mapped)" ($probe25 -eq $null)
+}
+
+Write-Host "=== Test 42: Session deep-field probe for 2026 (v1.1.43 diagnostic) ===" -ForegroundColor Cyan
+[void](Test-SessionDeepProbe2026)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

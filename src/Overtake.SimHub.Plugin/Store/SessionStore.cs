@@ -48,6 +48,13 @@ namespace Overtake.SimHub.Plugin.Store
         public Dictionary<int, Dictionary<string, object>> RawSamples = new Dictionary<int, Dictionary<string, object>>();
         /// <summary>Highest non-zero PacketFormat seen that the parsers do NOT support (0 = none).</summary>
         public ushort UnsupportedFormatSeen;
+        /// <summary>
+        /// v1.1.43 — latest full Session-packet raw bytes when the wire format's
+        /// deep Session fields are not mapped yet (2026). Used to reverse-engineer
+        /// the lobby-settings offsets from a packet that already has them loaded.
+        /// Null otherwise. Emitted as _debug.sessionDeepProbe.
+        /// </summary>
+        public Dictionary<string, object> SessionDeepProbe;
 
         // Cross-session name resolution: "raceNumber_teamId" -> real name
         private Dictionary<string, string> _bestKnownTags = new Dictionary<string, string>();
@@ -178,6 +185,7 @@ namespace Overtake.SimHub.Plugin.Store
             Notes.Clear();
             RawSamples.Clear();
             UnsupportedFormatSeen = 0;
+            SessionDeepProbe = null;
             LastExportedNameKeyConflicts.Clear();
             LobbyNumPlayers = 0;
 
@@ -503,6 +511,31 @@ namespace Overtake.SimHub.Plugin.Store
                             "RAW SAMPLE captured: packetId={0} format={1} len={2} (unsupported wire format; see _debug.rawSamples)",
                             pid, header.PacketFormat, parsed.RawData.Length));
                 }
+            }
+
+            // v1.1.43 — Session deep-field probe. The deep Session block (lobby
+            // settings / assists, payload offset ~639+) is NOT mapped for the 2026
+            // wire format yet, so we omit lobbySettings there. To finish the map we
+            // need a LATE Session packet (settings load AFTER the first one, which
+            // ships them zeroed). The general raw sampler only keeps the FIRST
+            // packet, so here we keep the LATEST Session packet (overwrite) whenever
+            // the format's deep fields are unmapped. Self-disables once 2026 deep
+            // fields become mapped (AreDeepSessionFieldsMapped). Diagnostic only —
+            // does NOT flag the file (unsupportedUdpFormat stays null) so 2026
+            // imports keep working while we gather this.
+            if (pid == 1 && parsed.RawData != null
+                && !Packets.GameInfo.AreDeepSessionFieldsMapped(header.PacketFormat))
+            {
+                int n = Math.Min(RawSampleHexCap, parsed.RawData.Length);
+                var sb = new StringBuilder(n * 2);
+                for (int b = 0; b < n; b++)
+                    sb.Append(parsed.RawData[b].ToString("x2"));
+                SessionDeepProbe = new Dictionary<string, object>
+                {
+                    { "packetFormat", (int)header.PacketFormat },
+                    { "length", parsed.RawData.Length },
+                    { "hexPrefix", sb.ToString() },
+                };
             }
 
             string sid = GetSessionKey(header);

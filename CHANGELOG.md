@@ -2,6 +2,18 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.43] - 2026-06-05
+
+### Added (diagnóstico para mapear lobby settings do 2026)
+- **`_debug.sessionDeepProbe`:** quando o formato de fio é um cujos campos profundos do Session NÃO estão mapeados (2026), o store guarda o **último** pacote Session inteiro (hex completo) em `SessionDeepProbe`, emitido como `_debug.sessionDeepProbe`. Diferente do `_debug.rawSamples` (que pega a *primeira* ocorrência, com as settings zeradas), este guarda o **mais recente** — que já tem as lobby settings carregadas. É o insumo que faltava para mapear os offsets de `lobbySettings` no 2026. Auto-desativa quando `GameInfo.AreDeepSessionFieldsMapped` passar a incluir 2026. **Não re-sinaliza** o arquivo (`unsupportedUdpFormat` continua null), então imports 2026 seguem funcionando.
+
+### Tests
+- **Test 42 (`Test-SessionDeepProbe2026`):** captura 2026 produz `_debug.sessionDeepProbe` (com `packetFormat=2026`, hex começando em `ea07`) e NÃO seta `unsupportedUdpFormat`; captura 2025 NÃO produz o probe (campos profundos já mapeados).
+
+### Notes
+- **Sem mudança visível** para o usuário: parsing de 2025/2026 inalterado (equipes, nomes, ERS, resultados). O probe é só diagnóstico interno e só aparece em capturas 2026.
+- **Como concluir o mapeamento:** rodar uma corrida 2026 com esta versão, **com algumas lobby settings diferentes do padrão** (assists/regras), e compartilhar o `.otk`. Com o `sessionDeepProbe` (Session tardio, settings carregadas) + os valores conhecidos, mapeio os offsets e uma versão futura passa a ler `lobbySettings` no 2026.
+
 ## [1.1.42] - 2026-06-05
 
 ### Changed (recalibração de ERS para o modelo de energia 2026)
