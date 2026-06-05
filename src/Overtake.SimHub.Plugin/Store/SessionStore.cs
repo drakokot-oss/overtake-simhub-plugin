@@ -565,6 +565,13 @@ namespace Overtake.SimHub.Plugin.Store
 
         private void IngestSession(SessionRun sess, SessionData s, long nowMs)
         {
+            // v1.1.41: are the DEEP Session fields (VSC/red-flag counts, lobby
+            // settings/assists at payload offset ~639+) reliably mapped for this
+            // wire format? Only 2025. For 2026 these shifted by an amount we could
+            // not pin down, so we skip them (the finalizer omits lobbySettings;
+            // safetyCar.fullDeploys still comes from SCAR events, which are fine).
+            bool deepMapped = Packets.GameInfo.AreDeepSessionFieldsMapped(sess.LastPacketFormat);
+
             sess.SessionType = s.SessionType;
             sess.TrackId = s.TrackId;
 
@@ -574,10 +581,13 @@ namespace Overtake.SimHub.Plugin.Store
             sess.Weather = s.Weather;
             sess.SafetyCarStatus = s.SafetyCarStatus;
 
-            if (s.NumVirtualSafetyCarPeriods > sess.NumVSCDeployments)
-                sess.NumVSCDeployments = s.NumVirtualSafetyCarPeriods;
-            if (s.NumRedFlagPeriods > sess.NumRedFlagPeriods)
-                sess.NumRedFlagPeriods = s.NumRedFlagPeriods;
+            if (deepMapped)
+            {
+                if (s.NumVirtualSafetyCarPeriods > sess.NumVSCDeployments)
+                    sess.NumVSCDeployments = s.NumVirtualSafetyCarPeriods;
+                if (s.NumRedFlagPeriods > sess.NumRedFlagPeriods)
+                    sess.NumRedFlagPeriods = s.NumRedFlagPeriods;
+            }
             sess.NetworkGame = s.NetworkGame;
 
             sess.LatestTrackTempC = s.TrackTempC;
@@ -618,12 +628,17 @@ namespace Overtake.SimHub.Plugin.Store
 
             // Lobby settings — keep updating until we see non-zero data.
             // Early Session packets may arrive before the game populates lobby fields.
-            bool hasData = s.CarDamage != 0 || s.Collisions != 0 || s.RuleSet != 0
+            //
+            // Deep lobby settings/assists: only when this wire format has them
+            // reliably mapped (see deepMapped at the top). For 2026 we SKIP them
+            // entirely so LobbySettingsCaptured stays false and the finalizer omits
+            // the lobbySettings block instead of emitting coincidental garbage.
+            bool hasData = deepMapped && (s.CarDamage != 0 || s.Collisions != 0 || s.RuleSet != 0
                 || s.SafetyCarSetting != 0 || s.RedFlagsSetting != 0
                 || s.SteeringAssist != 0 || s.GearboxAssist != 0
-                || s.FormationLap != 0 || s.EqualCarPerformance != 0;
+                || s.FormationLap != 0 || s.EqualCarPerformance != 0);
 
-            if (!sess.LobbySettingsCaptured || hasData)
+            if (deepMapped && (!sess.LobbySettingsCaptured || hasData))
             {
                 sess.ForecastAccuracy = s.ForecastAccuracy;
                 sess.SteeringAssist = s.SteeringAssist;

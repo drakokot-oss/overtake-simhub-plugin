@@ -1,7 +1,9 @@
 # F1 26 (2026 Season Pack) — UDP Format 2026 Offset Map
 
-> **Status (v1.1.40):** Participants (4) e CarStatus (7) **IMPLEMENTADOS** e roteados por formato; LapData/FC/CarDamage/Event e o núcleo do Session já funcionavam. **Pendente:** campos profundos do Session (lobby settings/assists @639+) e LobbyInfo (9) — precisam de captura com `RawSampleHexCap=2048` (entregue na v1.1.40) passando pela tela de lobby. ERS: recalibração de % é follow-up.
+> **Status (v1.1.41):** Participants (4), CarStatus (7) e **LobbyInfo (9) IMPLEMENTADOS** e roteados por formato; LapData/FC/CarDamage/Event e o núcleo do Session funcionam. **2026 promovido a formato totalmente suportado.** Único pendente: bloco profundo de lobby settings/assists do Session (@639+) — **omitido (null)** no 2026 em vez de adivinhado, pois a amostra de primeira-ocorrência traz esses bytes zerados. Mapeá-lo exigiria uma amostra de um pacote Session tardio. ERS: recalibração de % é follow-up.
 > **Origem:** mapa de engenharia reversa (mantido como referência da implementação).
+>
+> **LobbyInfo (9) 2026:** stride 42→43, `teamId`@1 (inalterado), `platform` 3→4, `name` 4→5 (32B), `carNumber` 36→37, `yourTelemetry`@38, `showOnlineNames`@39, `readyStatus`@42. Confirmado com ground-truth (ERT Drako%: teamId 228, Steam=1, carNumber 73).
 > **Fonte:** captura rotulada `Spa_20260604_195534_7D3526.otk` (gerada na v1.1.39 com **UDP Format = 2026**), via `_debug.rawSamples` (1 amostra crua por packetId, prefixo de 256 bytes).
 > **Contexto:** o "2026 Season Pack" roda dentro do F1 25. Com **UDP Format = 2025** tudo já funciona (só faltavam os Lookups, entregues na v1.1.39). Este documento cobre o **formato de fio 2026**, que muda o layout de alguns pacotes.
 

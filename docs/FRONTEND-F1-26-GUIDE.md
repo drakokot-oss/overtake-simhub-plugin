@@ -5,13 +5,17 @@
 
 ---
 
+> **Atualização v1.1.41 (2026-06-05):** o formato **UDP 2026 agora é totalmente suportado**. Arquivos capturados em UDP Format 2026 (a partir do plugin v1.1.41) **não vêm mais marcados como experimentais** e podem ser importados normalmente. Veja a seção 4 (atualizada) e a seção 8 (novidades v1.1.41).
+
 ## 1. TL;DR — ação rápida
 
 1. **Adicionar os nomes das 11 equipes do F1 26** (`teamId` 220–230) na tabela de equipes do front (seção 2).
 2. **Adicionar o circuito de Madri** (`track.id 42` → "Madring").
 3. **Ler o novo campo `game`** (pode valer `"F1_26"`) para separar campeonatos 2025 × 2026.
-4. **Tratar o flag `_debug.game.unsupportedUdpFormat`**: se vier preenchido, o arquivo é **não-confiável** — bloquear/avisar no upload (seção 4). **Essa é a mudança mais importante.**
-5. (Opcional) Para arquivos antigos do F1 26 com `Team(220)` gravado, aplicar um fallback numérico usando a tabela da seção 2.
+4. **Manter o tratamento do flag `_debug.game.unsupportedUdpFormat`** (seção 4): se vier preenchido, o arquivo é não-confiável → bloquear/avisar. A partir da v1.1.41 ele **não aparece mais** para arquivos 2026 normais (só protege contra plugins antigos / formatos futuros desconhecidos).
+5. **Tratar `lobbySettings` como opcional/ausente** em arquivos 2026 (seção 8) — pode vir `null`.
+6. **Não assumir teto de 100%** nos campos de ERS de conteúdo F1 26 (seção 8).
+7. (Opcional) Para arquivos antigos do F1 26 com `Team(220)` gravado, aplicar fallback numérico (seção 5).
 
 ---
 
@@ -51,11 +55,13 @@ A partir do plugin **v1.1.39**, o `.otk` já vem com o `teamName` correto preenc
 
 ---
 
-## 4. ⚠️ O mais importante: flag de formato UDP não-suportado
+## 4. Flag de formato UDP não-suportado (atualizado v1.1.41)
 
-O jogo tem uma opção **"UDP Format"** (2025 / 2026). O plugin **só suporta o formato 2025** por enquanto (o formato 2026 muda o layout dos pacotes e ainda está em desenvolvimento — Fase 2).
+O jogo tem uma opção **"UDP Format"** (2025 / 2026). **A partir do plugin v1.1.41, os DOIS formatos são suportados** — capturas em UDP 2025 ou 2026 produzem dados corretos.
 
-Se um usuário capturar com **UDP Format = 2026**, o arquivo sai com **dados incorretos** (nomes, equipes e bateria embaralhados). A partir da v1.1.39 o plugin **detecta e sinaliza** isso no próprio arquivo:
+O flag `_debug.game.unsupportedUdpFormat` continua existindo como **proteção**: ele só fica preenchido quando o arquivo veio de um formato que o plugin **não** sabe ler (ex.: um plugin antigo `< v1.1.41` que gerou um arquivo 2026, ou um formato futuro `2027+`). **Mantenha a regra de bloqueio** — ela protege contra esses casos. Para arquivos 2026 gerados pela v1.1.41+, o flag é `null` e o upload passa normalmente.
+
+Exemplo de um arquivo NÃO-confiável (plugin antigo ou formato futuro):
 
 ```jsonc
 {
@@ -126,7 +132,17 @@ Os labels de `sessionType.name` foram corrigidos conforme a spec oficial. Para a
 | `game` | `string` | Agora pode ser `"F1_26"` (content-aware). |
 | `_debug.game.formatLabel` | `string` | Rótulo derivado só do formato de pacote (pode diferir de `game`). |
 | `_debug.game.contentPack2026` | `bool` | `true` se há equipes 220–230 ou track 42. |
-| `_debug.game.unsupportedUdpFormat` | `int`/`null` | **≠ null ⇒ arquivo não-confiável** (ver seção 4). |
+| `_debug.game.unsupportedUdpFormat` | `int`/`null` | **≠ null ⇒ arquivo não-confiável** (ver seção 4). A partir da v1.1.41, `null` para arquivos 2026 normais. |
 | `_debug.rawSamples` | `object` | Uso interno do plugin. Ignorar. |
 
 Tudo aditivo — arquivos do F1 25 continuam idênticos e nada no front quebra.
+
+## 8. Novidades da v1.1.41 (suporte completo ao UDP 2026)
+
+Com o formato 2026 totalmente suportado, dois pontos de atenção no front:
+
+1. **`lobbySettings` pode vir ausente (`null`) em capturas 2026.** O bloco detalhado de configurações da sala (assists/regras) ainda não é mapeado no formato 2026 e é **omitido** (em vez de mostrar dado incorreto). O front já deve tratar `lobbySettings` como **opcional** — se `null`, simplesmente não exibir essa seção. Todo o resto (resultados, equipes, nomes, ERS, voltas, clima) está presente.
+
+2. **ERS pode passar de 100% em conteúdo F1 26.** O modelo de energia 2026 (Boost/Overtake Mode, motor elétrico maior) entrega mais energia por volta, então `ersTelemetry.deployedPctAvgPerLap` e os `harvested...PctAvgPerLap` **podem exceder 100%**. Não trave a exibição num teto de 100% para esses campos (o `storePctAvg` continua 0–100%). Uma recalibração dessas porcentagens está planejada.
+
+3. **Nomes `Driver_N` continuam possíveis** quando o jogador está com "Show player names: off" (igual ao F1 25). Parte é recuperada pela tela de lobby. Sempre exiba o `tag` recebido.

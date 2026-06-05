@@ -348,6 +348,17 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.41
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Fechar o suporte ao formato UDP 2026 e validar em produção (humanos + grid completo).** A v1.1.40 leu o núcleo (Participants/CarStatus) mas mantinha 2026 como experimental, faltando LobbyInfo e validação em humanos. | **Validação:** 4 capturas em UDP 2026/v1.1.40 — Austria offline (grid 22, **11/11 equipes corretas** incl. Cadillac/Audi/Hadjar/Bortoleto/Lindblad, ERS 22/22 com storePctAvg coerente) + 3 lobbies online (Brazil/Silverstone/Spa) com humanos (times/plataformas corretos; nomes ocultos viram placeholder, como no F1 25). **LobbyInfo 2026:** parser roteado por formato (stride 42→43, platform 3→4, name 4→5, carNumber 36→37; teamId@1 inalterado), confirmado por ground-truth (ERT Drako%: teamId 228, Steam, carNum 73). **lobbySettings profundo OMITIDO no 2026:** os offsets @639+ deslocaram por valor não-fixável (a amostra de 1ª ocorrência os traz zerados), então `GameInfo.AreDeepSessionFieldsMapped` (só 2025) faz o store pular esses campos → `lobbySettings` sai null em vez de lixo coincidente (VSC/red-flag do Session idem; `safetyCar.fullDeploys` segue vindo de eventos). **2026 promovido a `SupportedParseFormats`** → flag `unsupportedUdpFormat` e amostragem raw param de disparar. Tests 34 (atualizado), 38 (LobbyInfo real bytes), 39 (lobbySettings omitido no 2026). |
+
+**Princípio de design reforçado (v1.1.41):**
+- **Omitir > adivinhar.** O bloco profundo do Session não era mapeável com confiança, então é omitido (null) explicitamente no 2026 — melhor um campo ausente e honesto do que um valor coincidente que engana a liga (anti-cheat depende de assists corretos).
+- **Validar em produção antes de declarar suporte.** Só promovemos 2026 a "suportado" depois de bater 11/11 equipes num grid real + lobbies com humanos. O ciclo "lança núcleo experimental → usuário captura → valida → promove" evitou declarar suporte cedo demais.
+- **Ground-truth é rei.** Cada offset do LobbyInfo foi ancorado num valor conhecido (o próprio gamertag/numero do usuário), não em suposição.
+
 ### v1.1.40
 
 | Demanda | Como foi feito |

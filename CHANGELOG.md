@@ -2,6 +2,25 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.41] - 2026-06-05
+
+### Added (Fase 2 — suporte completo ao formato UDP 2026)
+- **2026 promovido a formato totalmente suportado** (`GameInfo.SupportedParseFormats = { 2025, 2026 }`). Validado em captura rotulada de grid completo (Austria offline, 22 carros, **11/11 equipes corretas** incl. Cadillac/Audi e os pilotos novos Hadjar/Bortoleto/Lindblad) + 3 lobbies online com humanos (`Brazil/Silverstone/Spa_20260605`). Consequências: o coletor de amostras raw e o flag `_debug.game.unsupportedUdpFormat` **não disparam mais** para 2026.
+- **Parser 2026 do LobbyInfo (packetId 9)** roteado por `packetFormat`: stride 42→43, `platform` 3→4, `name` 4→5, `carNumber` 36→37 (teamId@1 inalterado). Offsets confirmados por ground-truth (ERT Drako%: teamId 228, Steam, carNumber 73, "Show player names" on). Recupera nomes de jogadores na tela de lobby também no formato 2026. `LobbyInfoData.Parse` ganhou overload `(byte[], ushort)`.
+
+### Changed
+- **Bloco profundo de lobby settings/assists do Session OMITIDO para 2026.** Os offsets desses campos (payload ~639+) deslocaram no formato 2026 por um valor que não conseguimos fixar a partir da amostra de primeira-ocorrência (o pacote Session inicial os traz zerados). Em vez de emitir dado coincidente/incorreto, `lobbySettings` é **omitido (null)** em capturas 2026 (`GameInfo.AreDeepSessionFieldsMapped` = só 2025). Idem para os contadores de VSC/red-flag derivados do Session (o `safetyCar.fullDeploys` continua vindo de eventos SCAR, confiável). Todos os campos do **núcleo** do Session (pista, tipo, clima, temperaturas, `networkGame`, `safetyCarStatus`, spectating, contagem de forecast) ficam intactos.
+
+### Tests
+- **Test 34 atualizado:** 2026 agora é suportado → assert que `unsupportedUdpFormat` é `null` e que **não** há `_debug.rawSamples` numa captura 2026.
+- **Test 38 (`Test-LobbyInfo2026FromRealCapture`):** parser 2026 do LobbyInfo contra os **bytes reais** da captura de Brazil → `ERT Drako%` (teamId 228, Steam, carNumber 73, showOnlineNames=1) e os "Player" (showOnlineNames=0); layout 2025 nos mesmos bytes lê carNumber errado (prova).
+- **Test 39 (`Test-LobbySettingsOmittedFor2026`):** mesma corrida com deep-fields não-zero → 2025 popula `lobbySettings` (controle), 2026 **omite** (null).
+
+### Notes
+- **Validação ERS 2026:** o CarStatus 2026 (v1.1.40) foi confirmado em produção — 22/22 drivers com ERS, `storePctAvg` coerente (93–98%). Os campos `deployedPctAvgPerLap`/harvested passam de 100% porque o modelo de energia 2026 (Boost/Overtake) entrega mais energia por volta — **recalibração das porcentagens é follow-up separado** (o parsing está correto).
+- **Anomalia menor observada:** um entry `\x01ERT Drako%` (byte de controle no início do nome) num dos lobbies — sob investigação; não afeta o núcleo.
+- Schema continua `league-1.1`. Para 2026, `lobbySettings` pode vir ausente (null) — consumidores devem tratar como opcional (já era opcional).
+
 ## [1.1.40] - 2026-06-04
 
 ### Added (Fase 2 — leitura do formato UDP 2026, núcleo)

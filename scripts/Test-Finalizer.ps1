@@ -2048,34 +2048,22 @@ function Test-MadringTrackTriggersContentDetection() {
 Write-Host "=== Test 33: Madring (track 42) triggers 2026 content detection (v1.1.39) ===" -ForegroundColor Cyan
 [void](Test-MadringTrackTriggersContentDetection)
 
-function Test-Unsupported2026FormatFlaggedAndSampled() {
-    # v1.1.39 -- when wire format = 2026 (unsupported), the export must:
-    #   - flag _debug.game.unsupportedUdpFormat = 2026
-    #   - still resolve game = F1_26 (packetFormat >= 2026)
-    #   - capture raw samples (one per packetId) in _debug.rawSamples
+function Test-2026FormatNowSupported() {
+    # v1.1.41 -- 2026 is now a SUPPORTED wire format. A 2026 capture must:
+    #   - resolve game = F1_26
+    #   - NOT flag _debug.game.unsupportedUdpFormat (now null)
+    #   - NOT carry _debug.rawSamples (sampler only fires for unsupported formats)
+    # (Was Test 34 in v1.1.39, when 2026 was still experimental/sampled.)
     $res = Build-F126Race ([uint16]2026) ([byte]5) ([byte]16) ([uint64]702)
     $dbg = Get-DictValue $res "_debug"
     $g = Get-DictValue $dbg "game"
-    Assert "v1.1.39: unsupportedUdpFormat = 2026" ([int](Get-DictValue $g "unsupportedUdpFormat") -eq 2026)
-    Assert "v1.1.39: game = F1_26 for 2026 wire format" ((Get-DictValue $res "game") -eq "F1_26")
-    $rs = Get-DictValue $dbg "rawSamples"
-    Assert "v1.1.39: rawSamples present under unsupported format" ($rs -ne $null)
-    if ($rs -ne $null) {
-        # We sent packetId 1 (Session), 4 (Participants), 8 (FC)
-        $s1 = Get-DictValue $rs "1"
-        Assert "v1.1.39: rawSample for packetId 1 captured" ($s1 -ne $null)
-        if ($s1 -ne $null) {
-            Assert "v1.1.39: rawSample carries packetFormat 2026" ([int](Get-DictValue $s1 "packetFormat") -eq 2026)
-            $hex = Get-DictValue $s1 "hexPrefix"
-            Assert "v1.1.39: rawSample hexPrefix non-empty" (($hex -ne $null) -and ($hex.Length -gt 0))
-            # header byte 0-1 = 2026 (0xEA 0x07) little-endian -> hex starts 'ea07'
-            Assert "v1.1.39: rawSample hex begins with packetFormat 2026 (ea07)" ($hex.StartsWith("ea07"))
-        }
-    }
+    Assert "v1.1.41: game = F1_26 for 2026 wire format" ((Get-DictValue $res "game") -eq "F1_26")
+    Assert "v1.1.41: unsupportedUdpFormat is NULL (2026 supported)" ((Get-DictValue $g "unsupportedUdpFormat") -eq $null)
+    Assert "v1.1.41: no rawSamples for supported 2026" ((Get-DictValue $dbg "rawSamples") -eq $null)
 }
 
-Write-Host "=== Test 34: unsupported 2026 wire format flagged + raw-sampled (v1.1.39 Phase 2 enabler) ===" -ForegroundColor Cyan
-[void](Test-Unsupported2026FormatFlaggedAndSampled)
+Write-Host "=== Test 34: 2026 wire format now supported (no flag, no samples) (v1.1.41) ===" -ForegroundColor Cyan
+[void](Test-2026FormatNowSupported)
 
 function Test-PlainF125NoFalsePositives() {
     # v1.1.39 -- a normal F1 25 race (team 5 = Alpine F1 25, track 5 Monaco,
@@ -2161,6 +2149,81 @@ function Test-CarStatus2026StrideFromRealCapture() {
 
 Write-Host "=== Test 37: 2026 CarStatus stride parser vs real capture (v1.1.40) ===" -ForegroundColor Cyan
 [void](Test-CarStatus2026StrideFromRealCapture)
+
+function Test-LobbyInfo2026FromRealCapture() {
+    # v1.1.41 -- validates the 2026 LobbyInfo parser against REAL bytes from a
+    # labeled MP lobby capture (Brazil_20260605_140356). entry0 is the user
+    # (ERT Drako%, teamId 228, Steam, carNumber 73, names shown); entries 1/2 are
+    # players with "Show player names" OFF (-> name "Player"). Confirms stride 43,
+    # teamId@1, platform@4, name@5, carNumber@37, yourTelemetry@38, showOnlineNames@39.
+    $lobType = $asm.GetType("Overtake.SimHub.Plugin.Packets.LobbyInfoData")
+    $parse2 = $lobType.GetMethod("Parse", [Type[]]@([byte[]], [uint16]))
+
+    $hex = "ea071901140109000000000000000010b51244000000000000000002ff0300e4010901455254c2a04472616b6f25000000000000000000000000000000000000000000490101f2000000dd011c03506c6179657200000000000000000000000000000000000000000000000000002a000064000100df011c03506c6179657200000000000000000000000000000000000000000000000000005f00007b0001"
+    $data = HexToBytes $hex
+
+    $ld = $parse2.Invoke($null, @([byte[]]$data, [uint16]2026))
+    Assert "v1.1.41: 2026 LobbyInfo parsed" ($ld -ne $null)
+    if ($ld -eq $null) { return }
+    $entries = Get-Field $ld "Entries"
+    $e0 = $entries[0]
+    Assert "v1.1.41: lobby entry0 name = 'ERT Drako%'"  ((Get-Field $e0 "Name") -like "ERT*Drako%")
+    Assert "v1.1.41: lobby entry0 teamId = 228"          ([int](Get-Field $e0 "TeamId") -eq 228)
+    Assert "v1.1.41: lobby entry0 platform = 1 (Steam)"  ([int](Get-Field $e0 "Platform") -eq 1)
+    Assert "v1.1.41: lobby entry0 carNumber = 73"        ([int](Get-Field $e0 "CarNumber") -eq 73)
+    Assert "v1.1.41: lobby entry0 showOnlineNames = 1"   ([int](Get-Field $e0 "ShowOnlineNames") -eq 1)
+    $e1 = $entries[1]
+    Assert "v1.1.41: lobby entry1 teamId = 221 (Ferrari)" ([int](Get-Field $e1 "TeamId") -eq 221)
+    Assert "v1.1.41: lobby entry1 showOnlineNames = 0 (hidden)" ([int](Get-Field $e1 "ShowOnlineNames") -eq 0)
+
+    # 2025 layout on the same bytes must NOT yield the correct name at offset 5.
+    $ld25 = $parse2.Invoke($null, @([byte[]]$data, [uint16]2025))
+    $e025 = (Get-Field $ld25 "Entries")[0]
+    Assert "v1.1.41: 2025 layout misreads carNumber (proves format matters)" ([int](Get-Field $e025 "CarNumber") -ne 73)
+}
+
+Write-Host "=== Test 38: 2026 LobbyInfo parser vs real capture (v1.1.41) ===" -ForegroundColor Cyan
+[void](Test-LobbyInfo2026FromRealCapture)
+
+function Test-LobbySettingsOmittedFor2026() {
+    # v1.1.41 -- the deep Session lobby-settings block is NOT reliably mapped for
+    # the 2026 wire format, so it must be OMITTED (null) rather than emit garbage.
+    # Build a 2026 race whose Session packet carries non-zero deep-field bytes;
+    # the finalizer must still omit lobbySettings. For 2025 the same data yields a
+    # populated lobbySettings (control).
+    function Build-RaceWithLobbySettings([uint16]$fmt, [uint64]$uid) {
+        $st = [System.Activator]::CreateInstance($storeType)
+        $sp = New-Object byte[] 753
+        $sp[0] = 1; $sp[6] = 15; $sp[7] = 5
+        $sp[124] = 0; $sp[125] = 1
+        # Deep lobby-settings bytes (F1 25 offsets, payload-relative -> +29).
+        $sp[666] = 1   # ruleSet = Race (non-zero -> hasData)
+        $sp[649] = 1   # collisions-ish non-zero
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp $uid $fmt)))) | Out-Null
+        $pp = New-Object byte[] 1256
+        for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+        $pp[0] = 1; $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+        $nm = [System.Text.Encoding]::UTF8.GetBytes("Hamilton"); [System.Array]::Copy($nm, 0, $pp, 8, $nm.Length)
+        $pp[41] = 1; $pp[44] = 1
+        for ($c = 1; $c -lt 22; $c++) { $cst = 1 + $c * 57; $pp[$cst + 3] = 255; $pp[$cst + 5] = 0 }
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp $uid $fmt)))) | Out-Null
+        $fc = New-Object byte[] (1 + 22 * 46); $fc[0] = 1; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+        [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fc, 1 + 7)
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid $fmt)))) | Out-Null
+        return $finalizeMethod.Invoke($null, @($st))
+    }
+
+    $res25 = Build-RaceWithLobbySettings ([uint16]2025) ([uint64]810)
+    $ls25 = Get-DictValue (Get-DictValue $res25 "sessions")[0] "lobbySettings"
+    Assert "v1.1.41: 2025 lobbySettings IS populated (control)" ($ls25 -ne $null)
+
+    $res26 = Build-RaceWithLobbySettings ([uint16]2026) ([uint64]811)
+    $ls26 = Get-DictValue (Get-DictValue $res26 "sessions")[0] "lobbySettings"
+    Assert "v1.1.41: 2026 lobbySettings is OMITTED (null, not garbage)" ($ls26 -eq $null)
+}
+
+Write-Host "=== Test 39: lobbySettings omitted for 2026 (deep fields unmapped) (v1.1.41) ===" -ForegroundColor Cyan
+[void](Test-LobbySettingsOmittedFor2026)
 
 # ---- Summary ----
 Write-Host ""

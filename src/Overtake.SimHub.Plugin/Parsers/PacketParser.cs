@@ -66,7 +66,9 @@ namespace Overtake.SimHub.Plugin.Parsers
                     result.FinalClassification = FinalClassificationData.Parse(data);
                     break;
                 case 9:
-                    result.LobbyInfo = LobbyInfoData.Parse(data);
+                    // v1.1.41 — format-aware: 2026 shifts the LobbyInfo entry
+                    // layout (stride 42->43, name 4->5).
+                    result.LobbyInfo = LobbyInfoData.Parse(data, header.PacketFormat);
                     break;
                 case 10:
                     result.CarDamage = CarDamageEntry.Parse(data);
