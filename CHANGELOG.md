@@ -2,6 +2,26 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.44] - 2026-06-16
+
+### Added (alerta de versao desatualizada com severidade escalonada)
+- **Motivacao:** um usuario rodando uma build muito antiga (v1.1.27) capturou uma sessao em **UDP Format 2026**; o parser 2025-only dessa build produziu um `.otk` com nomes/teamIds/raceNumbers embaralhados (mojibake). O container estava integro (HMAC ok, AES decifrou, JSON valido) — o **conteudo** e que saiu como lixo. O banner amarelo passivo "Nova versao disponivel" nao comunicava esse risco. Esta release escala o alerta e o conecta a deteccao de formato nao suportado.
+- **`UpdateAdvisor.cs` (classe pura, sem dependencia de SimHub/WPF):** `enum UpdateSeverity { UpToDate, UpdateAvailable, UpdateRequired, UnsupportedFormat }` e `UpdateAdvisor.Evaluate(current, latest, minSupported, unsupportedFormatSeen)`. Precedencia: **formato UDP nao suportado ao vivo** (falha confirmada na captura atual) > **abaixo do minimo suportado** > **update disponivel** > em dia. Parser de versao tolera `X.Y.Z`, `X.Y.Z.W`, prefixo `v` e entrada invalida (fallback `UpToDate`, sem alarme falso). `StatusToken(severity)` retorna token ASCII estavel.
+- **`minSupportedVersion` em `version.json` (= `1.1.41`):** primeira build com suporte completo ao formato UDP 2026. `OvertakePlugin.CheckForUpdates` passa a ler tambem `minSupportedVersion` e `installerUrl`. Builds abaixo do minimo entram em `UpdateRequired` (banner vermelho) e logam `[Overtake] UPDATE REQUIRED ... Exports may be corrupted`.
+- **Dashboard properties novas (read-only):** `Overtake.UpdateStatus` (token de severidade), `Overtake.LatestVersion`, `Overtake.PluginVersion`. Permitem que o narrador coloque o status na tela do rig e perceba o alerta **sem abrir o painel de settings** (o ponto cego que deixou o usuario na v1.1.27 sem aviso efetivo).
+- **Botao "Baixar e atualizar" no banner:** baixa o instalador de `installerUrl` para `%TEMP%` e o abre (com confirmacao; o usuario fecha o SimHub e conclui). Fallback para a pagina de download em caso de falha. Sem auto-update silencioso (a DLL fica travada pelo SimHub em runtime; rodar `.exe` sem confirmacao seria risco de confianca).
+
+### Changed
+- **Banner de update (`SettingsControl`) dirigido por severidade e reavaliado a cada tick** (antes era one-shot quando `UpdateAvailable`): amarelo para `UpdateAvailable` (texto atual), **vermelho forte** para `UpdateRequired` ("Sua versao esta MUITO desatualizada e pode gerar arquivos corrompidos ... Atualize antes da proxima corrida.") e **vermelho** para `UnsupportedFormat` ("O jogo esta enviando um formato UDP que ESTA versao nao entende. O arquivo vai sair ILEGIVEL ... mude 'UDP Format' do jogo para 2025."). A reavaliacao por tick permite que `UnsupportedFormat` apareca no meio de uma captura.
+
+### Tests
+- **Test 43 (`Test-UpdateAdvisorSeverity`):** 12 cenarios sobre `UpdateAdvisor.Evaluate`/`StatusToken` via reflection — em dia, mais novo que o latest, atras-mas-acima-do-minimo, exatamente no minimo (=> `UpdateAvailable`, nao `Required`), abaixo do minimo (caso v1.1.27 => `UpdateRequired`), abaixo do minimo com latest vazio (network falhou), formato nao suportado sobrepondo tudo (em build atual e antiga), versao de 4 partes, prefixo `v`, versao invalida (=> `UpToDate`, sem falso alarme) e campo `minSupportedVersion` ausente.
+
+### Note
+- **NADA muda no nucleo do plugin.** O pipeline `UDP -> parse -> store -> finalize -> .otk` esta intocado: `PacketParser`, `SessionStore` (ingest/parse), `LeagueFinalizer`, `OtkWriter` e todos os `Packets/*` nao foram editados. A unica leitura do lado de dados e o getter `CurrentUnsupportedFormat`, que apenas LE `SessionStore.UnsupportedFormatSeen` (calculado desde a v1.1.39). Schema do `.otk` inalterado.
+- **Limite retroativo conhecido (catch-22):** este alerta so protege quem ja estiver na v1.1.44+. Builds antigas (ex.: v1.1.27) continuam exibindo apenas o banner passivo do codigo que ja tem instalado. O `minSupportedVersion` prepara o terreno: dali em diante qualquer build abaixo do minimo dispara o alerta vermelho.
+- **Por que `minSupportedVersion = 1.1.41`:** a v1.1.40 parseava apenas o nucleo 2026 (experimental); a v1.1.41 foi a primeira com suporte 2026 completo e validado (Participants/CarStatus/LobbyInfo). Abaixo dela, capturas em formato 2026 saem corrompidas.
+
 ## [1.1.43] - 2026-06-05
 
 ### Added (diagnóstico para mapear lobby settings do 2026)

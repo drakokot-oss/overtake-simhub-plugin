@@ -281,29 +281,187 @@ namespace Overtake.SimHub.Plugin.UI
                 LblExportResult.Foreground = GreenBrush;
             }
 
-            // Update notification
-            if (_plugin.UpdateAvailable && UpdateBanner.Visibility != Visibility.Visible)
+            // Update notification — severity-driven, re-evaluated every tick so a
+            // live UnsupportedFormat signal can escalate the banner mid-session.
+            RefreshUpdateBanner();
+        }
+
+        private void RefreshUpdateBanner()
+        {
+            UpdateSeverity severity = _plugin.CurrentUpdateSeverity;
+
+            if (severity == UpdateSeverity.UpToDate)
             {
-                UpdateBanner.Visibility = Visibility.Visible;
-                LblUpdateVersion.Text = string.Format(
-                    "v{0}  \u2192  v{1}", OvertakePlugin.PluginVersion, _plugin.LatestVersion);
-                if (!string.IsNullOrEmpty(_plugin.LatestReleaseNotes))
-                {
-                    LblReleaseNotes.Text = _plugin.LatestReleaseNotes
-                        .Replace("### Fixed\r\n", "").Replace("### Fixed\n", "")
-                        .Replace("### Added\r\n", "").Replace("### Added\n", "")
-                        .Replace("### Changed\r\n", "").Replace("### Changed\n", "")
-                        .Trim();
-                    if (LblReleaseNotes.Text.Length > 200)
-                        LblReleaseNotes.Text = LblReleaseNotes.Text.Substring(0, 200) + "...";
-                    LblReleaseNotes.Visibility = Visibility.Visible;
-                }
-                if (!string.IsNullOrEmpty(_plugin.UpdateDownloadUrl))
-                {
-                    try { LnkUpdate.NavigateUri = new Uri(_plugin.UpdateDownloadUrl); }
-                    catch { /* invalid url */ }
-                }
+                UpdateBanner.Visibility = Visibility.Collapsed;
+                return;
             }
+
+            UpdateBanner.Visibility = Visibility.Visible;
+
+            string current = OvertakePlugin.PluginVersion;
+            string latest = _plugin.LatestVersion;
+            LblUpdateVersion.Text = string.IsNullOrEmpty(latest)
+                ? string.Format("v{0}", current)
+                : string.Format("v{0}  \u2192  v{1}", current, latest);
+
+            switch (severity)
+            {
+                case UpdateSeverity.UnsupportedFormat:
+                    ApplyBannerTheme(critical: true);
+                    LblUpdateTitle.Text = "\u26A0 Formato UDP nao suportado";
+                    LblUpdateWarning.Text =
+                        "O jogo esta enviando um formato UDP que ESTA versao nao "
+                        + "entende. O arquivo vai sair ILEGIVEL (nomes e equipes "
+                        + "embaralhados). Atualize o plugin OU, como solucao "
+                        + "imediata, mude a opcao \"UDP Format\" do jogo para 2025.";
+                    LblUpdateWarning.Visibility = Visibility.Visible;
+                    break;
+
+                case UpdateSeverity.UpdateRequired:
+                    ApplyBannerTheme(critical: true);
+                    LblUpdateTitle.Text = "\u26A0 Atualizacao necessaria";
+                    LblUpdateWarning.Text =
+                        "Sua versao esta MUITO desatualizada e pode gerar arquivos "
+                        + "corrompidos (ex.: capturas no formato F1 26 saem com nomes "
+                        + "e equipes embaralhados). Atualize antes da proxima corrida.";
+                    LblUpdateWarning.Visibility = Visibility.Visible;
+                    break;
+
+                default: // UpdateAvailable
+                    ApplyBannerTheme(critical: false);
+                    LblUpdateTitle.Text = "Nova versao disponivel";
+                    LblUpdateWarning.Visibility = Visibility.Collapsed;
+                    break;
+            }
+
+            if (!string.IsNullOrEmpty(_plugin.LatestReleaseNotes))
+            {
+                LblReleaseNotes.Text = _plugin.LatestReleaseNotes
+                    .Replace("### Fixed\r\n", "").Replace("### Fixed\n", "")
+                    .Replace("### Added\r\n", "").Replace("### Added\n", "")
+                    .Replace("### Changed\r\n", "").Replace("### Changed\n", "")
+                    .Trim();
+                if (LblReleaseNotes.Text.Length > 200)
+                    LblReleaseNotes.Text = LblReleaseNotes.Text.Substring(0, 200) + "...";
+                LblReleaseNotes.Visibility = Visibility.Visible;
+            }
+
+            if (!string.IsNullOrEmpty(_plugin.UpdateDownloadUrl))
+            {
+                try { LnkUpdate.NavigateUri = new Uri(_plugin.UpdateDownloadUrl); }
+                catch { /* invalid url */ }
+            }
+
+            // The one-click installer button only makes sense when we actually
+            // resolved an installer URL; otherwise fall back to the page link.
+            BtnUpdateNow.Visibility = string.IsNullOrEmpty(_plugin.InstallerUrl)
+                ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        private static readonly SolidColorBrush BannerBgYellow = new SolidColorBrush(Color.FromRgb(0x2D, 0x2A, 0x10));
+        private static readonly SolidColorBrush BannerBgRed = new SolidColorBrush(Color.FromRgb(0x3A, 0x16, 0x16));
+        private static readonly SolidColorBrush BannerBorderYellow = new SolidColorBrush(Color.FromRgb(0xFF, 0xD5, 0x4F));
+        private static readonly SolidColorBrush BannerBorderRed = new SolidColorBrush(Color.FromRgb(0xF4, 0x43, 0x36));
+        private static readonly SolidColorBrush BannerTextDark = new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x2E));
+        private static readonly SolidColorBrush BannerTextLight = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF));
+
+        private void ApplyBannerTheme(bool critical)
+        {
+            UpdateBanner.Background = critical ? BannerBgRed : BannerBgYellow;
+            UpdateBanner.BorderBrush = critical ? BannerBorderRed : BannerBorderYellow;
+            LblUpdateTitle.Foreground = critical ? BannerBorderRed : BannerBorderYellow;
+            LblUpdateVersion.Foreground = critical ? BannerBorderRed : BannerBorderYellow;
+            BtnUpdateNow.Background = critical ? BannerBorderRed : BannerBorderYellow;
+            BtnUpdateNow.Foreground = critical ? BannerTextLight : BannerTextDark;
+        }
+
+        private void BtnUpdateNow_Click(object sender, RoutedEventArgs e)
+        {
+            string installerUrl = _plugin.InstallerUrl;
+            if (string.IsNullOrEmpty(installerUrl))
+            {
+                // No direct installer: open the downloads page instead.
+                string page = string.IsNullOrEmpty(_plugin.UpdateDownloadUrl)
+                    ? "https://racehub.overtakef1.com/downloads"
+                    : _plugin.UpdateDownloadUrl;
+                try { Process.Start(new ProcessStartInfo(page) { UseShellExecute = true }); }
+                catch { /* browser not available */ }
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                "Vamos baixar o instalador da versao mais recente e abri-lo.\n\n"
+                + "Feche o SimHub quando o instalador pedir, conclua a instalacao e "
+                + "reabra o SimHub.\n\nContinuar?",
+                "Atualizar Overtake Telemetry",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            BtnUpdateNow.IsEnabled = false;
+            BtnUpdateNow.Content = "Baixando...";
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                string error = null;
+                string savedPath = null;
+                try
+                {
+                    System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
+                    string fileName = "Overtake-Telemetry-Setup.exe";
+                    try
+                    {
+                        string leaf = Path.GetFileName(new Uri(installerUrl).LocalPath);
+                        if (!string.IsNullOrEmpty(leaf)) fileName = leaf;
+                    }
+                    catch { /* keep default name */ }
+
+                    savedPath = Path.Combine(Path.GetTempPath(), fileName);
+                    using (var client = new System.Net.WebClient())
+                    {
+                        client.Headers[System.Net.HttpRequestHeader.UserAgent] =
+                            "OvertakeTelemetry/" + OvertakePlugin.PluginVersion;
+                        client.DownloadFile(installerUrl, savedPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                }
+
+                Dispatcher.Invoke(() =>
+                {
+                    if (error == null && savedPath != null && File.Exists(savedPath))
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo(savedPath) { UseShellExecute = true });
+                            LblExportResult.Text = "Instalador aberto. Feche o SimHub para concluir.";
+                            LblExportResult.Foreground = TealBrush;
+                        }
+                        catch (Exception ex)
+                        {
+                            error = ex.Message;
+                        }
+                    }
+
+                    if (error != null)
+                    {
+                        BtnUpdateNow.IsEnabled = true;
+                        BtnUpdateNow.Content = "Baixar e atualizar";
+                        LblExportResult.Text = "Falha ao baixar: " + error;
+                        LblExportResult.Foreground = RedBrush;
+                        try
+                        {
+                            string page = string.IsNullOrEmpty(_plugin.UpdateDownloadUrl)
+                                ? "https://racehub.overtakef1.com/downloads"
+                                : _plugin.UpdateDownloadUrl;
+                            Process.Start(new ProcessStartInfo(page) { UseShellExecute = true });
+                        }
+                        catch { /* browser not available */ }
+                    }
+                });
+            });
         }
 
         private string ResolveOutputFolder()

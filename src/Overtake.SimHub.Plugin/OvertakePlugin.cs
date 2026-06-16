@@ -45,6 +45,8 @@ namespace Overtake.SimHub.Plugin
         private string _latestVersion = "";
         private string _updateDownloadUrl = "";
         private string _latestReleaseNotes = "";
+        private string _minSupportedVersion = "";
+        private string _installerUrl = "";
 
         public PluginManager PluginManager { get; set; }
 
@@ -117,6 +119,14 @@ namespace Overtake.SimHub.Plugin
             this.AttachDelegate("Overtake.SessionType", () => _sessionType);
             this.AttachDelegate("Overtake.ActiveDrivers", () => ActiveDriverCount());
             this.AttachDelegate("Overtake.SessionsCount", () => _store.Sessions.Count);
+
+            // Update advisory — surfaced as dashboard properties so a streamer can
+            // put it on the rig screen and notice it WITHOUT opening this panel
+            // (the failure mode that bit the v1.1.27 user). UpdateStatus is one of
+            // UpToDate / UpdateAvailable / UpdateRequired / UnsupportedFormat.
+            this.AttachDelegate("Overtake.PluginVersion", () => PluginVersion);
+            this.AttachDelegate("Overtake.LatestVersion", () => _latestVersion);
+            this.AttachDelegate("Overtake.UpdateStatus", () => UpdateAdvisor.StatusToken(CurrentUpdateSeverity));
 
             global::SimHub.Logging.Current.Info("[Overtake] Plugin initialized");
 
@@ -325,6 +335,40 @@ namespace Overtake.SimHub.Plugin
             }
         }
 
+        internal string MinSupportedVersion
+        {
+            get { return _minSupportedVersion; }
+        }
+
+        internal string InstallerUrl
+        {
+            get { return _installerUrl; }
+        }
+
+        /// <summary>
+        /// The UDP wire format the current build cannot parse, observed live in the
+        /// active capture (0 = none / all good). Pre-2026 builds never set this;
+        /// the current build only sets it for formats beyond its support window.
+        /// </summary>
+        internal int CurrentUnsupportedFormat
+        {
+            get { return _store != null ? _store.UnsupportedFormatSeen : 0; }
+        }
+
+        /// <summary>
+        /// How urgently the user should update, combining the version gap with a
+        /// live unsupported-wire-format signal. Drives the settings banner and the
+        /// <c>Overtake.UpdateStatus</c> dashboard property.
+        /// </summary>
+        internal UpdateSeverity CurrentUpdateSeverity
+        {
+            get
+            {
+                return UpdateAdvisor.Evaluate(
+                    PluginVersion, _latestVersion, _minSupportedVersion, CurrentUnsupportedFormat);
+            }
+        }
+
         internal void SaveSettings()
         {
             this.SaveCommonSettings("OvertakeSettings", _settings);
@@ -507,7 +551,17 @@ namespace Overtake.SimHub.Plugin
                     object notes;
                     if (data.TryGetValue("releaseNotes", out notes) && notes != null)
                         _latestReleaseNotes = notes.ToString();
-                    if (UpdateAvailable)
+                    object minVer;
+                    if (data.TryGetValue("minSupportedVersion", out minVer) && minVer != null)
+                        _minSupportedVersion = minVer.ToString();
+                    object installer;
+                    if (data.TryGetValue("installerUrl", out installer) && installer != null)
+                        _installerUrl = installer.ToString();
+                    if (CurrentUpdateSeverity == UpdateSeverity.UpdateRequired)
+                        global::SimHub.Logging.Current.Info(string.Format(
+                            "[Overtake] UPDATE REQUIRED: running v{0} is below minimum supported v{1} (latest v{2}). Exports may be corrupted.",
+                            PluginVersion, _minSupportedVersion, _latestVersion));
+                    else if (UpdateAvailable)
                         global::SimHub.Logging.Current.Info(
                             string.Format("[Overtake] Update available: v{0} -> v{1}", PluginVersion, _latestVersion));
                 }
