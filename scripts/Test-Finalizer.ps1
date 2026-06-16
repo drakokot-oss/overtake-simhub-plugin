@@ -2337,6 +2337,41 @@ function Test-SessionDeepProbe2026() {
 Write-Host "=== Test 42: Session deep-field probe for 2026 (v1.1.43 diagnostic) ===" -ForegroundColor Cyan
 [void](Test-SessionDeepProbe2026)
 
+function Test-UpdateAdvisorSeverity() {
+    # v1.1.44 -- the update advisory must escalate severity so an out-of-date user
+    # (the v1.1.27 -> F1 26 garbage-export case) gets a LOUD warning, not the old
+    # passive yellow banner. Pure logic, loaded via reflection.
+    $advisorType = $asm.GetType("Overtake.SimHub.Plugin.UpdateAdvisor")
+    Assert "v1.1.44: UpdateAdvisor type exists" ($advisorType -ne $null)
+    if ($advisorType -eq $null) { return }
+    $eval = $advisorType.GetMethod("Evaluate")
+    $tok = $advisorType.GetMethod("StatusToken")
+    Assert "v1.1.44: Evaluate method exists" ($eval -ne $null)
+    Assert "v1.1.44: StatusToken method exists" ($tok -ne $null)
+    if ($eval -eq $null -or $tok -eq $null) { return }
+
+    function Sev([string]$cur, [string]$latest, [string]$min, [int]$fmt) {
+        $sev = $eval.Invoke($null, [object[]]@($cur, $latest, $min, [int]$fmt))
+        return $tok.Invoke($null, [object[]]@($sev))
+    }
+
+    Assert "v1.1.44: current==latest -> UpToDate" ((Sev "1.1.43" "1.1.43" "1.1.41" 0) -eq "UpToDate")
+    Assert "v1.1.44: current newer than latest -> UpToDate" ((Sev "1.1.44" "1.1.43" "1.1.41" 0) -eq "UpToDate")
+    Assert "v1.1.44: behind latest, above min -> UpdateAvailable" ((Sev "1.1.42" "1.1.43" "1.1.41" 0) -eq "UpdateAvailable")
+    Assert "v1.1.44: exactly at min -> UpdateAvailable (not Required)" ((Sev "1.1.41" "1.1.43" "1.1.41" 0) -eq "UpdateAvailable")
+    Assert "v1.1.44: below min (1.1.27 case) -> UpdateRequired" ((Sev "1.1.27" "1.1.43" "1.1.41" 0) -eq "UpdateRequired")
+    Assert "v1.1.44: below min even if latest check failed -> UpdateRequired" ((Sev "1.1.27" "" "1.1.41" 0) -eq "UpdateRequired")
+    Assert "v1.1.44: live unsupported format outranks everything -> UnsupportedFormat" ((Sev "1.1.43" "1.1.43" "1.1.41" 2027) -eq "UnsupportedFormat")
+    Assert "v1.1.44: unsupported format on old build too -> UnsupportedFormat" ((Sev "1.1.27" "1.1.43" "1.1.41" 2027) -eq "UnsupportedFormat")
+    Assert "v1.1.44: 4-part current version parses -> UpdateRequired" ((Sev "1.1.27.0" "1.1.43" "1.1.41" 0) -eq "UpdateRequired")
+    Assert "v1.1.44: v-prefixed versions parse" ((Sev "v1.1.42" "v1.1.43" "v1.1.41" 0) -eq "UpdateAvailable")
+    Assert "v1.1.44: garbage current version is safe (no false alarm) -> UpToDate" ((Sev "not-a-version" "1.1.43" "1.1.41" 0) -eq "UpToDate")
+    Assert "v1.1.44: missing min field -> UpdateAvailable (no spurious Required)" ((Sev "1.1.27" "1.1.43" "" 0) -eq "UpdateAvailable")
+}
+
+Write-Host "=== Test 43: Update advisory severity escalation (v1.1.44) ===" -ForegroundColor Cyan
+[void](Test-UpdateAdvisorSeverity)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

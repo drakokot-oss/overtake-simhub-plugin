@@ -47,19 +47,36 @@
                                    HorizontalAlignment="Right" />
                         <Border x:Name="UpdateBanner" Visibility="Collapsed"
                                 Background="#2D2A10" CornerRadius="6" Padding="10,8"
-                                Margin="0,6,0,0" MaxWidth="260">
+                                Margin="0,6,0,0" MaxWidth="280"
+                                BorderBrush="#FFD54F" BorderThickness="1">
                             <StackPanel>
+                                <TextBlock x:Name="LblUpdateTitle"
+                                           Foreground="#FFD54F" FontSize="12" FontWeight="Bold"
+                                           TextWrapping="Wrap"
+                                           Text="Nova versao disponivel" />
                                 <TextBlock x:Name="LblUpdateVersion"
                                            Foreground="#FFD54F" FontSize="11" FontWeight="SemiBold"
-                                           Text="Nova versao disponivel" />
+                                           Margin="0,2,0,0" />
+                                <TextBlock x:Name="LblUpdateWarning"
+                                           Foreground="#FF8A80" FontSize="11"
+                                           TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Visibility="Collapsed" />
                                 <TextBlock x:Name="LblReleaseNotes"
                                            Foreground="#B0A870" FontSize="10"
                                            TextWrapping="Wrap" Margin="0,4,0,6"
                                            Visibility="Collapsed" />
-                                <TextBlock FontSize="10">
+                                <Button x:Name="BtnUpdateNow"
+                                        Content="Baixar e atualizar"
+                                        Margin="0,6,0,0" Padding="10,5"
+                                        HorizontalAlignment="Left"
+                                        Background="#FFD54F" Foreground="#1A1A2E"
+                                        FontWeight="SemiBold" BorderThickness="0"
+                                        Cursor="Hand"
+                                        Click="BtnUpdateNow_Click" />
+                                <TextBlock FontSize="10" Margin="0,5,0,0">
                                     <Hyperlink x:Name="LnkUpdate" Foreground="#FFD54F"
                                                RequestNavigate="Hyperlink_RequestNavigate">
-                                        Baixar atualizacao
+                                        Abrir pagina de download
                                     </Hyperlink>
                                 </TextBlock>
                             </StackPanel>
