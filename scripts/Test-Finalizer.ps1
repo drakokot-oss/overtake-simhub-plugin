@@ -2613,7 +2613,8 @@ function Test-F126MyTeamBodyLayoutProbe() {
 
     $probeType = $asm.GetType("Overtake.SimHub.Plugin.Packets.WireLayoutProbe")
     $tryProbe = $probeType.GetMethod("TryProbe")
-    $bodyFmt = $tryProbe.Invoke($null, @((New-FakePacket 4 $pp ([uint64]950) ([uint16]2026)), 4))
+    $probeRaw = New-FakePacket 4 $pp ([uint64]950) ([uint16]2026)
+    $bodyFmt = $tryProbe.Invoke($null, [object[]]@(,[byte[]]$probeRaw, [int]4))
     Assert "v1.1.46: probe picks bodyWireFormat 2025" ([int]$bodyFmt -eq 2025)
 
     # End-to-end: lobby + two participant packets -> fullMyTeamGrid + export names.
