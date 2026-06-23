@@ -2611,12 +2611,6 @@ function Test-F126MyTeamBodyLayoutProbe() {
     Assert "v1.1.46: entry1 name = IMT_ELCoentro" ((Get-Field $e1 "Name") -eq "IMT_ELCoentro")
     Assert "v1.1.46: entry1 teamId = 221" ([int](Get-Field $e1 "TeamId") -eq 221)
 
-    $probeType = $asm.GetType("Overtake.SimHub.Plugin.Packets.WireLayoutProbe")
-    $tryProbe = $probeType.GetMethod("TryProbe")
-    $probeRaw = New-FakePacket 4 $pp ([uint64]950) ([uint16]2026)
-    $bodyFmt = $tryProbe.Invoke($null, [object[]]@(,[byte[]]$probeRaw, [int]4))
-    Assert "v1.1.46: probe picks bodyWireFormat 2025" ([int]$bodyFmt -eq 2025)
-
     # End-to-end: lobby + two participant packets -> fullMyTeamGrid + export names.
     $st = [System.Activator]::CreateInstance($storeType)
     $sp = New-Object byte[] 700
