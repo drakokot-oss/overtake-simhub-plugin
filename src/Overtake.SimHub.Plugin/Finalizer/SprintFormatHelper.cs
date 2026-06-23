@@ -61,6 +61,18 @@ namespace Overtake.SimHub.Plugin.Finalizer
             return false;
         }
 
+        public static int CountWireRaceSessions(IEnumerable<SessionRun> sessions)
+        {
+            int n = 0;
+            if (sessions == null) return 0;
+            foreach (var s in sessions)
+            {
+                if (s != null && s.SessionType.HasValue && s.SessionType.Value == 15)
+                    n++;
+            }
+            return n;
+        }
+
         private static IList<SessionRun> AsList(IEnumerable<SessionRun> sessions)
         {
             var list = sessions as IList<SessionRun>;
@@ -89,6 +101,19 @@ namespace Overtake.SimHub.Plugin.Finalizer
         }
 
         /// <summary>
+        /// F1 26 mislabels Sprint Race as wire id=15. When TWO id=15 sessions exist,
+        /// the chronologically first is the Sprint Race; a lone id=15 is always Main.
+        /// </summary>
+        public static bool IsSprintRaceMislabeledAsWire15(SessionRun sess, IList<SessionRun> allSessions)
+        {
+            if (sess == null || !sess.SessionType.HasValue || sess.SessionType.Value != 15)
+                return false;
+            if (CountWireRaceSessions(allSessions) < 2)
+                return false;
+            return IsFirstWireRaceSession(sess, allSessions);
+        }
+
+        /// <summary>
         /// Should auto-export fire when a session with this wire id just ended?
         /// Called at SEND time with the current store state.
         /// </summary>
@@ -110,13 +135,15 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 return false;
             if (!IsRaceWireType(sess.SessionType.Value)) return false;
             if (!HasSprintShootout(allSessions)) return true;
+            // F1 25 Sprint Format: Sprint Race is wire id=16 — only one id=15 exists.
+            if (CountWireRaceSessions(allSessions) < 2) return true;
             if (!HasAnyQualifying(allSessions)) return false;
             return !IsFirstWireRaceSession(sess, AsList(allSessions));
         }
 
         /// <summary>
-        /// Export label id: remap wire id=15 to 16 (Race2) for the Sprint Race when
-        /// it is the first wire-id=15 session in this capture.
+        /// Export label id: remap wire id=15 to 16 (Race2) only when F1 26 sent TWO
+        /// Race (id=15) sessions and this is the first one (Sprint Race).
         /// </summary>
         public static int GetExportSessionTypeId(SessionRun sess, IEnumerable<SessionRun> allSessions)
         {
@@ -125,7 +152,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             int wireId = sess.SessionType.Value;
             if (wireId != 15) return wireId;
             if (!HasSprintShootout(allSessions)) return wireId;
-            if (IsFirstWireRaceSession(sess, AsList(allSessions))) return 16;
+            if (IsSprintRaceMislabeledAsWire15(sess, AsList(allSessions))) return 16;
             return 15;
         }
     }
