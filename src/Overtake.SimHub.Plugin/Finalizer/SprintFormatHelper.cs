@@ -61,6 +61,32 @@ namespace Overtake.SimHub.Plugin.Finalizer
             return false;
         }
 
+        /// <summary>Main qualifying (Q1/Q2/Q3), not Sprint Shootout nor Short Quali.</summary>
+        public static bool HasMainQualifying(IEnumerable<SessionRun> sessions)
+        {
+            if (sessions == null) return false;
+            foreach (var s in sessions)
+            {
+                if (s != null && s.SessionType.HasValue)
+                {
+                    int id = s.SessionType.Value;
+                    if (id >= 5 && id <= 7) return true;
+                }
+            }
+            return false;
+        }
+
+        public static bool HasSprintRaceSessionId16(IEnumerable<SessionRun> sessions)
+        {
+            if (sessions == null) return false;
+            foreach (var s in sessions)
+            {
+                if (s != null && s.SessionType.HasValue && s.SessionType.Value == 16)
+                    return true;
+            }
+            return false;
+        }
+
         public static int CountWireRaceSessions(IEnumerable<SessionRun> sessions)
         {
             int n = 0;
@@ -122,8 +148,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (!IsRaceWireType(closingSessionTypeId)) return false;
             if (store == null || !HasSprintShootout(store.Sessions.Values)) return true;
 
-            // Sprint-format weekend: defer until Main Quali has been seen.
-            return HasAnyQualifying(store.Sessions.Values);
+            var all = store.Sessions.Values;
+            // F1 26: defer while Main Quali is still pending (mislabeled Sprint on id=15).
+            if (CountWireRaceSessions(all) < 2 && HasMainQualifying(all)
+                && !HasSprintRaceSessionId16(all))
+                return false;
+            return HasAnyQualifying(all);
         }
 
         /// <summary>
@@ -135,10 +165,20 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 return false;
             if (!IsRaceWireType(sess.SessionType.Value)) return false;
             if (!HasSprintShootout(allSessions)) return true;
-            // F1 25 Sprint Format: Sprint Race is wire id=16 — only one id=15 exists.
-            if (CountWireRaceSessions(allSessions) < 2) return true;
-            if (!HasAnyQualifying(allSessions)) return false;
-            return !IsFirstWireRaceSession(sess, AsList(allSessions));
+
+            int wireRaceCount = CountWireRaceSessions(allSessions);
+            if (wireRaceCount >= 2)
+            {
+                if (!HasMainQualifying(allSessions)) return false;
+                return !IsFirstWireRaceSession(sess, AsList(allSessions));
+            }
+
+            // Single wire-id=15: Main Race when F1 25 Sprint used id=16, or Baku-style
+            // (no Main Quali yet). Still open when F1 26 mislabeled Sprint is the only
+            // id=15 and Main Quali already happened (second id=15 not captured yet).
+            if (HasMainQualifying(allSessions) && !HasSprintRaceSessionId16(allSessions))
+                return false;
+            return true;
         }
 
         /// <summary>
