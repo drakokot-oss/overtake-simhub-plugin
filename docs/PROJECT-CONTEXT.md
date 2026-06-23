@@ -2,6 +2,8 @@
 
 Referência técnica interna para desenvolvimento e manutenção do plugin.
 
+**Versão publicada:** `v1.1.46` (2026-06-22) — ver [CHANGELOG.md](../CHANGELOG.md) para histórico completo.
+
 ---
 
 ## Arquitetura — Pipeline de dados
@@ -14,9 +16,12 @@ F1 25 Game  →  UDP Packets  →  UdpReceiver  →  PacketParser  →  SessionS
 | Componente | Arquivo | Responsabilidade |
 |------------|---------|-----------------|
 | **UdpReceiver** | `UdpReceiver.cs` | Escuta UDP na porta configurada; forward opcional para SimHub (20777) |
-| **PacketParser** | `Parsers/PacketParser.cs` | Despacha bytes brutos → objetos tipados por `packetId` (1–11) |
-| **SessionStore** | `Store/SessionStore.cs` | Acumula estado: sessões, drivers, voltas, stints, penalidades, lobby |
-| **LeagueFinalizer** | `Finalizer/LeagueFinalizer.cs` | Transforma store → JSON `league-1.0` com dedup, phantom filter, awards |
+| **PacketParser** | `Parsers/PacketParser.cs` | Despacha bytes brutos → objetos tipados por `packetId`; roteia layout 2025/2026 por `packetFormat` + override sticky |
+| **WireLayoutProbe** | `Packets/WireLayoutProbe.cs` | Quando header=2026, pontua body 2025 vs 2026 (My Team online) e fixa o vencedor |
+| **SessionStore** | `Store/SessionStore.cs` | Acumula estado; `ParsePacket()` resolve layout sticky (`ResolvedBodyWireFormat`) |
+| **LeagueFinalizer** | `Finalizer/LeagueFinalizer.cs` | Transforma store → JSON `league-1.1` com dedup, phantom filter, awards |
+| **ExportNumbers** | `Finalizer/ExportNumbers.cs` | NaN/Infinity → `null`; `SanitizeForJson` antes de serializar |
+| **SprintFormatHelper** | `Finalizer/SprintFormatHelper.cs` | F1 26 Sprint Race (wire id=15) — defer auto-export até Quali existir |
 | **OtkWriter** | `Security/OtkWriter.cs` | Encripta JSON → `.otk` (AES-256-CBC + HMAC-SHA256) |
 | **KeyStore** | `Security/KeyStore.cs` | Chaves AES/HMAC ofuscadas via XOR split |
 
@@ -38,7 +43,48 @@ F1 25 Game  →  UDP Packets  →  UdpReceiver  →  PacketParser  →  SessionS
 
 ---
 
-## Resolução de nomes
+## F1 26 — header 2026 vs corpo 2025/2026 (My Team online)
+
+Desde a v1.1.40 mapeamos o **formato de fio 2026 "Season Pack"** (career/AI) com strides novos: Participants 60, LobbyInfo 43, CarStatus 59. A v1.1.46 descobriu uma **segunda variante**: lobbies **My Team online F1 26** podem enviar `packetFormat: 2026` no header mas manter o **corpo no layout 2025** (Participants 57, LobbyInfo 42, CarStatus 55).
+
+### Sintoma (parser 2026 cego neste cenário)
+
+- Nomes `Driver_X`, mojibake, fragmentos (`KITO`, `RODOLFO`, `\x01\t\x04TSL MARTINS`)
+- `teamId`/`myTeam`/`raceNumber` desalinhados → equipes erradas (`MyTeam`, `Mercedes`, `Team(83)`)
+- `lobbyResolved: 0`, `fullMyTeamGrid: false`
+- ERS/combustível lixo ou NaN (CarStatus stride errado)
+- **Posições/tempos/FC intactos** — LapData e FinalClassification não mudam de layout
+
+### Causa raiz
+
+Offsets 2026 deslocam `name` +3 bytes vs 2025 (`name@10` vs `@7`). Ler 2026 em wire 2025 = gamertag truncado/deslocado. Evidência: `_debug` do `Catalunya_20260622_231048_05C0F3.otk` tinha gamertags embutidos em strings corrompidas (`PRT_martbryt`, `TSL MARTINS`).
+
+### Solução (v1.1.46)
+
+```
+PacketParser.Dispatch(data, bodyWireFormatOverride?)
+  └─ Participants / LobbyInfo / CarStatus: Parse(..., packetFormat, override)
+       └─ se header >= 2026 e override null → ProbeBodyWireFormat(data)
+            pontua 2025 vs 2026 por pacote
+
+SessionStore.ParsePacket(raw)
+  └─ 1º pacote probeable fixa ResolvedBodyWireFormat (sticky por captura)
+  └─ OvertakePlugin usa ParsePacket (não Dispatch direto)
+
+_debug.game.bodyWireFormat → 2025 ou 2026 (diagnóstico)
+```
+
+| Pacote | Critério de probe (2025 vs 2026) |
+|--------|----------------------------------|
+| **Participants (4)** | grid 100% MyTeam + qualidade de nomes; penaliza `Driver_X` |
+| **LobbyInfo (9)** | `carNumber` 1..99, teamId 220..235, nomes legíveis |
+| **CarStatus (7)** | `fuelCapacity` ~80–130 kg, ERS store 0..4 MJ, deployMode ≤3 |
+
+Grids **career/AI** (stride 60 real, ex. Spa v1.1.40) continuam escolhendo layout **2026** — Tests 36–38 inalterados.
+
+Referência de offsets: [F1-26-UDP-OFFSET-MAP.md](F1-26-UDP-OFFSET-MAP.md). Patch manual de OTK legado: `scripts/Patch-CatalunyaOtk.py`.
+
+---
 
 O F1 25 tem vários cenários que afetam como os nomes dos pilotos aparecem na telemetria:
 
@@ -206,8 +252,10 @@ Quando um jogador real liga o jogo com `showOnlineNames=OFF` E o lobby do F1 25 
 
 ### Detecção
 
-`DetectFullMyTeamGrid`: todos os slots ativos com `MyTeam=true` + `TeamId!=255` + online.
-Requer 2 pacotes Participants consecutivos (streak ≥ 2) para ativar `_captureFullMyTeam`.
+`DetectFullMyTeamGrid`: todos os slots ativos com `MyTeam=true` + `TeamId!=255` + online (`NetworkGame==1`).
+Requer 2 pacotes Participants consecutivos **no mesmo sessionUID** (streak ≥ 2) para ativar `_captureFullMyTeam`.
+
+**Pré-requisito v1.1.46:** `ParticipantsData` deve ler offsets corretos. Sem probe de layout, My Team F1 26 online raramente passa em `DetectFullMyTeamGrid` (flags/teamId lidos errados).
 
 ### Comportamento
 
@@ -233,10 +281,24 @@ SEND (fim sessão Race)
 
 **SSTA (nova sessão)** reseta flags se export não foi armado, prevenindo export duplicado.
 
-`IsTerminalSession` (a partir da v1.1.31) confia exclusivamente em `Lookups.SessionType[id] == "Race"`:
+`IsTerminalSession` (a partir da v1.1.31) confia em `Lookups.SessionType[id] == "Race"`:
 - `id=13 "Sprint"` → não terminal (espera-se a Main Race em seguida)
 - `id=10/11/15/16/19/25/26/29/30/36 "Race"` → terminal
-- A heurística antiga `hasSprintShootout && raceCount <= 1` foi removida porque quebrava em fins de semana com SprintShootout sem SprintRace (Baku 2026-05-07).
+
+**Exceção F1 26 Sprint Format (v1.1.45 — `SprintFormatHelper`):** o jogo reporta Corrida Sprint e Corrida principal **ambas com wire id=15** (`"Race"`). Sem contexto, auto-export disparava ao fim da Sprint (`Austria_20260622_215918_77AEAC.otk`).
+
+```
+IsTerminalRaceClosing(15, store):
+  se store já tem Sprint Shootout (ids 10..14)
+  E ainda NÃO tem Qualifying (ids 5..9)
+  → id=15 NÃO é terminal (defer)
+
+GetExportSessionTypeId(15, store):
+  primeiro Race (wire 15) antes da Quali → exporta como Race2 (id=16)
+
+LeagueFinalizer.Finalize:
+  dedup por tipo de EXPORTAÇÃO (não wire id) — dois id=15 não colapsam
+```
 
 ---
 
@@ -347,6 +409,30 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 ---
 
 ## Problemas conhecidos resolvidos
+
+### v1.1.46
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Lobby My Team F1 26 online — nomes/equipes quebrados apesar de `packetFormat: 2026`** (`Catalunya_20260622_231048_05C0F3.otk`: posições/tempos OK, mas `Driver_X`/mojibake, `lobbyResolved: 0`, ERS NaN). Header 2026 + corpo ainda no stride 2025 (57/42/55). | **`WireLayoutProbe` + probe por pacote** quando header ≥ 2026: pontua 2025 vs 2026 em Participants (full-MyTeam-grid + nomes), LobbyInfo (carNumber/teamId), CarStatus (fuel/ERS). Vencedor vira **`ResolvedBodyWireFormat` sticky** via `SessionStore.ParsePacket`. Overloads `Parse(..., bodyWireFormatOverride)` em Participants/LobbyInfo/CarStatus. `_debug.game.bodyWireFormat`. Test 47 (sintético estilo Catalunya). **Patch offline:** `scripts/Patch-CatalunyaOtk.py` remapeia tags via `carIdx` + ordem da quali vs screenshots quando o `.otk` já foi capturado com plugin antigo. |
+
+**Princípio de design (v1.1.46):**
+- **Header ≠ corpo.** `packetFormat` no cabeçalho de 29 bytes é confiável para rotear, mas o EA pode enviar corpo legacy em lobbies My Team — probe + sticky evita re-adivinhar a cada pacote.
+- **Career e My Team online são dois "2026".** O mapa da v1.1.40 (Spa career/AI) continua válido; a exceção My Team é detectada em runtime, não hardcoded.
+
+### v1.1.45
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **JSON com token literal `NaN` quebrava import no Race Hub** (178× em `Catalunya_...otk`: `deployedPctPerLap`, `deployedPctAvgPerLap`, `fuelCapacityKg`). | `ExportNumbers`: `RoundOrNull`, `RoundListOrNull`, `AverageOrNull`, `IsFinite`; `SanitizeForJson` recursivo antes de `JavaScriptSerializer` em `OvertakePlugin.ExportLeagueJson`. Tests 44–46. |
+| **F1 26 Sprint Format — auto-export na Corrida Sprint perdia Quali + Main Race** (`Austria_20260622_215918_77AEAC.otk`, wire id=15 para Sprint e Main). | `SprintFormatHelper`: defer terminal id=15 até Quali existir; export remapeia 1º Race → `Race2`; dedup por tipo de exportação. Test 44. |
+| **Gamertags com byte de controle no prefixo** (`\tPRT_martbryt`). | `PacketStrings.SanitizePlayerName` — strip `char.IsControl`. Test 46. |
+
+### v1.1.44
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Usuário em build antiga (v1.1.27) capturou UDP 2026 → `.otk` ilegível sem alerta efetivo.** | `UpdateAdvisor`: severidade `UpdateRequired` / `UnsupportedFormat`; `minSupportedVersion` em `version.json` (= 1.1.41); banner vermelho no dashboard; botão "Baixar e atualizar". Test 43. Pipeline UDP inalterado. |
 
 ### v1.1.43
 
@@ -549,3 +635,32 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 | Driver_16 fantasma (0 voltas, Qualifying) | `ShouldSkipFcAiGridFillerRow` muito permissivo online | Filtro online: generic + 0 laps + 0 bestLap + sem nome |
 | Driver_18 duplicado (Race, carIdx reassign) | Sem filtro para seat duplicado por reconexão | `RemovePhantomDuplicateSeats` remove generic 0-lap com seat já owned |
 | Vencedor em P11 (espectador, FC não recebido) | `Laps.Count` < real por gaps; fallback ranking errado | `EffectiveLapCount` usa max(Count, maxLapNumber) |
+
+---
+
+## Caso de estudo — Catalunya My Team F1 26 (jun/2026)
+
+Arquivo: `Catalunya_20260622_231048_05C0F3.otk` (724 KB, HMAC OK, `schemaVersion: league-1.1`, `game: F1_26`, `packetFormat: 2026`).
+
+### Ground truth (screenshots in-game)
+
+**Quali (14 classificados):** IMT_ELCoentro 1:13.269, AYT Cleber Benedet 1:13.346, [FRW] Zoltraak 1:13.362, FRW MIGUEL15, TSL MARTINS, IMT GabzKk, DUT Sopena, BRPRO CHOKITO, BRPRO RODOLFO, PDK_Snake, DUT Muniz, LHT_MARCUS77, PRT_martbryt, PDK_dede_ttsl (+ PRT Douglas, LHT_FEITOSA, WILLIAM7_EXTREME, AYT_Ayrton sem tempo / NC).
+
+**Corrida (18):** [FRW] Zoltraak P1, AYT Cleber Benedet P2, IMT_ELCoentro P3, AYT_Ayrton P4, … KITO P18, PRT_martbryt NC.
+
+### O que o `.otk` v1.1.45 tinha vs ground truth
+
+| Área | Status no OTK capturado (pre-1.1.46) |
+|------|--------------------------------------|
+| Posições/tempos FC | ✓ batem com broadcast |
+| Nomes | ✗ `Driver_X`, mojibake, fragmentos |
+| Equipes | ✗ `MyTeam`, Mercedes, Team(83)… |
+| Import JSON | ✗ 178× token `NaN` |
+| Lobby | ✗ `lobbyResolved: 0`, `fullMyTeamGrid: false` |
+| ERS | ✗ valores absurdos + NaN |
+
+Mapeamento quali por `carIdx` (via `results[].bestLapTimeMs` + ordem P1..P18) permitiu patch manual — ver `scripts/Patch-CatalunyaOtk.py` → `Catalunya_..._FIXED.otk`.
+
+### Próximo passo de validação
+
+Re-capturar o mesmo lobby com plugin **≥ v1.1.46** e confirmar: `_debug.game.bodyWireFormat = 2025`, gamertags limpos, `fullMyTeamGrid: true`, zero `NaN`, import OK no Race Hub.

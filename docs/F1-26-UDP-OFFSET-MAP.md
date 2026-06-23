@@ -1,6 +1,6 @@
 # F1 26 (2026 Season Pack) — UDP Format 2026 Offset Map
 
-> **Status (v1.1.41):** Participants (4), CarStatus (7) e **LobbyInfo (9) IMPLEMENTADOS** e roteados por formato; LapData/FC/CarDamage/Event e o núcleo do Session funcionam. **2026 promovido a formato totalmente suportado.** Único pendente: bloco profundo de lobby settings/assists do Session (@639+) — **omitido (null)** no 2026 em vez de adivinhado, pois a amostra de primeira-ocorrência traz esses bytes zerados. Mapeá-lo exigiria uma amostra de um pacote Session tardio. ERS: recalibração de % é follow-up.
+> **Status (v1.1.46):** Participants (4), CarStatus (7) e LobbyInfo (9) **roteados por formato** com **probe automático 2025 vs 2026** quando header ≥ 2026. Career/AI usa stride 2026 (mapa abaixo); **My Team online F1 26** pode manter corpo 2025 — ver seção 8. LapData/FC/CarDamage/Event e núcleo do Session OK. Bloco profundo Session (@639+) ainda omitido (null). ERS: recalibração v1.1.42.
 > **Origem:** mapa de engenharia reversa (mantido como referência da implementação).
 >
 > **LobbyInfo (9) 2026:** stride 42→43, `teamId`@1 (inalterado), `platform` 3→4, `name` 4→5 (32B), `carNumber` 36→37, `yourTelemetry`@38, `showOnlineNames`@39, `readyStatus`@42. Confirmado com ground-truth (ERT Drako%: teamId 228, Steam=1, carNumber 73).
@@ -129,3 +129,22 @@ Pacote novo, enviado **por frame** (mesma frequência de Motion/CarTelemetry/Car
 7. **Testes**: amostras desta captura viram fixtures de regressão (Participants→nomes/equipes corretos; CarStatus→ERS coerente).
 
 > Limitação da amostra atual: prefixo de 256 bytes por pacote cobre o cabeçalho + as primeiras entradas (suficiente para mapear strides e a 1ª entrada). Para validar um carro específico (ex.: o Gasly em carIdx 21) ou os campos finais dos pacotes grandes, aumentar `RawSampleHexCap` e refazer uma captura curta.
+
+---
+
+## 8. Exceção My Team online — header 2026, corpo 2025 (v1.1.46)
+
+A captura `Catalunya_20260622_231048_05C0F3.otk` (My Team online, 18 pilotos, Barcelona) provou que **`packetFormat: 2026` no header não garante stride 2026 no corpo** para este tipo de lobby.
+
+| Pacote | Career/AI (Spa v1.1.40) | My Team online (Catalunya) |
+|--------|---------------------------|----------------------------|
+| Participants | stride **60**, name@10 | stride **57**, name@7 |
+| LobbyInfo | stride **43**, name@5 | stride **42**, name@4 |
+| CarStatus | stride **59** | stride **55** |
+| LapData / FC | idêntico | idêntico (posições/tempos OK) |
+
+**Detecção:** `WireLayoutProbe` + `ParticipantsData.ProbeBodyWireFormat` (e equivalentes) pontuam os dois layouts; sinais fortes de My Team: todos os slots ativos com `myTeam=true`, nomes legíveis só no layout 2025.
+
+**Diagnóstico no `.otk`:** `_debug.game.bodyWireFormat = 2025` indica que o probe escolheu corpo legacy.
+
+**Patch offline de capturas antigas:** `scripts/Patch-CatalunyaOtk.py` (mapeia `carIdx` → gamertag via ordem da quali + screenshots; não re-parseia UDP cru).
