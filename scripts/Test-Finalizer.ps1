@@ -2632,7 +2632,7 @@ function Test-F126MyTeamBodyLayoutProbe() {
 
     $pp1 = New-ParticipantsMyTeam2026Body 3
     Ingest-ViaParsePacket $st (New-FakePacket 4 $pp1 ([uint64]951) $fmt)
-    Ingest-ViaParsePacket $st (New-FakePacket 4 $pp1 ([uint64]952) $fmt)
+    Ingest-ViaParsePacket $st (New-FakePacket 4 $pp1 ([uint64]951) $fmt)
 
     $resolved = Get-Field $st "ResolvedBodyWireFormat"
     Assert "v1.1.46: store pins bodyWireFormat 2025" ($resolved -ne $null -and [int]$resolved -eq 2025)
