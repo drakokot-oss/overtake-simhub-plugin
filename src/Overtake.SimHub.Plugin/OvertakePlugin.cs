@@ -422,6 +422,7 @@ namespace Overtake.SimHub.Plugin
                 Directory.CreateDirectory(outputDir);
 
                 var payload = LeagueFinalizer.Finalize(_store);
+                ExportNumbers.SanitizeForJson(payload);
 
                 var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
                 string json = serializer.Serialize(payload);
@@ -596,19 +597,14 @@ namespace Overtake.SimHub.Plugin
         /// That caused auto-export to never fire for those weekends, which combined
         /// with no auto-rotation produced cross-event captures (Baku + Monaco issue).
         ///
-        /// v1.1.38: confirmed against F1 25 spec that IDs 10..14 are Sprint Shootouts
-        /// (NOT "Race"/"Race2"/"TimeTrial"/"Sprint"/"SprintShootout" as previously
-        /// mapped). Fixing Lookups.SessionType eliminated the premature auto-export
-        /// at the end of Sprint Shootout 1 (id=10), which had been splitting Sprint
-        /// Format weekends across multiple .otk files. ID 16 (Race 2 / Sprint Race)
-        /// is now correctly NOT terminal -- only the Main Race (id=15) terminates.
+        /// v1.1.45: F1 26 may report the Sprint Race as id=15 ("Race") instead of
+        /// id=16 ("Race2"). When the capture already has a Sprint Shootout, defer
+        /// terminal export until a Qualifying session (5..9) appears — see
+        /// SprintFormatHelper.IsTerminalRaceClosing.
         /// </summary>
         private bool IsTerminalSession(byte id)
         {
-            string name;
-            if (!Finalizer.Lookups.SessionType.TryGetValue(id, out name))
-                return false;
-            return name == "Race";
+            return SprintFormatHelper.IsTerminalRaceClosing(id, _store);
         }
 
         // Friendly name for the status panel and SimHub log. Must stay aligned

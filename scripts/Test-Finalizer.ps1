@@ -2372,6 +2372,177 @@ function Test-UpdateAdvisorSeverity() {
 Write-Host "=== Test 43: Update advisory severity escalation (v1.1.44) ===" -ForegroundColor Cyan
 [void](Test-UpdateAdvisorSeverity)
 
+function Test-F126SprintRaceId15NotTerminal() {
+    # v1.1.45 -- F1 26 reports Sprint Race as sessionType id=15 ("Race"), same as
+    # Main Race. Without sprint-context deferral, auto-export fired at Sprint end
+    # (Austria_20260622_215918_77AEAC.otk regression).
+    $st = [System.Activator]::CreateInstance($storeType)
+    $sprintHelper = $asm.GetType("Overtake.SimHub.Plugin.Finalizer.SprintFormatHelper")
+    $isClosing = $sprintHelper.GetMethod("IsTerminalRaceClosing")
+    $getExportId = $sprintHelper.GetMethod("GetExportSessionTypeId")
+    Assert "v1.1.45: SprintFormatHelper type exists" ($sprintHelper -ne $null)
+    if ($sprintHelper -eq $null) { return }
+
+    $feed = {
+        param([uint64]$uid, [byte]$stype)
+        $sp = New-Object byte[] 700
+        $sp[0] = 1; $sp[6] = $stype; $sp[7] = 14
+        $sp[124] = 0; $sp[125] = 1
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp $uid))))
+    }
+    $feedFc = {
+        param([uint64]$uid)
+        $fc = New-Object byte[] (1 + 22 * 46)
+        $fc[0] = 1; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+        [System.BitConverter]::GetBytes([uint32]88000).CopyTo($fc, 1 + 7)
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid))))
+    }
+
+    # Sprint Shootout + Sprint Race (wire id=15) before any Qualifying.
+    & $feed ([uint64]200) ([byte]10)
+    & $feedFc ([uint64]200)
+    & $feed ([uint64]201) ([byte]15)
+    & $feedFc ([uint64]201)
+
+    $closing = $isClosing.Invoke($null, [object[]]@([byte]15, $st))
+    Assert "v1.1.45: id=15 Sprint Race before Quali is NOT terminal closing" (-not $closing)
+    Assert "v1.1.45: HasClosedTerminalSession false before Main Quali" (-not $st.HasClosedTerminalSession())
+
+    # Main Qualifying arrives -- still not terminal (Quali itself is not Race).
+    & $feed ([uint64]202) ([byte]5)
+    & $feedFc ([uint64]202)
+    Assert "v1.1.45: HasClosedTerminalSession still false after Quali only" (-not $st.HasClosedTerminalSession())
+
+    # Main Race (second wire id=15) after Quali -- now terminal.
+    & $feed ([uint64]203) ([byte]15)
+    & $feedFc ([uint64]203)
+    Assert "v1.1.45: HasClosedTerminalSession true after Main Race post-Quali" $st.HasClosedTerminalSession()
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.45: sprint weekend emits 4 sessions (SS+Sprint+Quali+Race)" ($sessions.Count -eq 4)
+
+    # First wire id=15 session (uid 201) exports as Race2 (Sprint Race).
+    $sprintSess = $null
+    foreach ($s in $sessions) {
+        if ((Get-DictValue $s "sessionUID").ToString() -eq "201") { $sprintSess = $s; break }
+    }
+    Assert "v1.1.45: sprint race session found" ($sprintSess -ne $null)
+    if ($sprintSess -eq $null) { return }
+    $stObj = Get-DictValue $sprintSess "sessionType"
+    $stName = (Get-DictValue $stObj "name").ToString()
+    Assert "v1.1.45: first wire-id=15 exports as Race2 (Sprint Race)" ($stName -eq "Race2")
+}
+
+Write-Host "=== Test 44: F1 26 Sprint Race as id=15 deferred until Quali (v1.1.45) ===" -ForegroundColor Cyan
+[void](Test-F126SprintRaceId15NotTerminal)
+
+function Test-ExportJsonNoNanToken() {
+    # v1.1.45 -- non-finite ERS/fuel values must serialize as null, never the
+    # literal JSON token NaN (breaks JSON.parse on the import server).
+    $st = [System.Activator]::CreateInstance($storeType)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+    [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+    $pp[41] = 1; $pp[44] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp))))
+
+    # One CarStatus packet marks ErsCaptured; we poison per-lap arrays with NaN.
+    $cs = New-Object byte[] (2 * 55)
+    for ($zi = 0; $zi -lt $cs.Length; $zi++) { $cs[$zi] = 0 }
+    [System.BitConverter]::GetBytes([float]4000000).CopyTo($cs, 29)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 7 $cs))))
+
+    $sessRun = $st.Sessions.Values | Select-Object -First 1
+    $driver = $sessRun.Drivers.Values | Select-Object -First 1
+    $driver.ErsCaptured = $true
+    $driver.DeployedPctPerLap.Add([float]::NaN)
+    $driver.DeployedPctPerLap.Add([float]::NaN)
+    $driver.FuelCaptured = $true
+    $driver.FuelCapacityKg = [float]::NaN
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 1; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fc, 1 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $exportNums = $asm.GetType("Overtake.SimHub.Plugin.Finalizer.ExportNumbers")
+    $sanitize = $exportNums.GetMethod("SanitizeForJson")
+    $sanitize.Invoke($null, @($res)) | Out-Null
+
+    [void][System.Reflection.Assembly]::LoadWithPartialName("System.Web.Extensions")
+    $ser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $ser.MaxJsonLength = [int]::MaxValue
+    $json = $ser.Serialize($res)
+
+    Assert "v1.1.45: serialized JSON contains no literal NaN token" (-not ($json -match '(^|[^A-Za-z])NaN([^A-Za-z]|$)'))
+    $sess0 = (Get-DictValue $res "sessions")[0]
+    $drivers = Get-DictValue $sess0 "drivers"
+    $ham = Get-DictValue $drivers "Hamilton"
+    if ($ham -eq $null) { $ham = $drivers.Values | Select-Object -First 1 }
+    $ers = Get-DictValue $ham "ersTelemetry"
+    $deployedArr = Get-DictValue $ers "deployedPctPerLap"
+    $allNullOrFinite = $true
+    foreach ($x in $deployedArr) {
+        if ($x -ne $null -and [double]::IsNaN([double]$x)) { $allNullOrFinite = $false; break }
+    }
+    Assert "v1.1.45: deployedPctPerLap has no NaN elements" $allNullOrFinite
+    Assert "v1.1.45: fuelCapacityKg is null" ((Get-DictValue (Get-DictValue $ham "fuelTelemetry") "fuelCapacityKg") -eq $null)
+}
+
+Write-Host "=== Test 45: ERS/fuel NaN -> null in JSON export (v1.1.45) ===" -ForegroundColor Cyan
+[void](Test-ExportJsonNoNanToken)
+
+function Test-PlayerNameControlCharStrip() {
+    # v1.1.45 -- strip ASCII control chars from UDP name fields (e.g. leading TAB).
+    $pktStrings = $asm.GetType("Overtake.SimHub.Plugin.Packets.PacketStrings")
+    $sanitize = $pktStrings.GetMethod("SanitizePlayerName")
+    $clean = $sanitize.Invoke($null, @("`tPRT_martbryt"))
+    Assert "v1.1.45: SanitizePlayerName strips leading TAB" ($clean -eq "PRT_martbryt")
+
+    $st = [System.Activator]::CreateInstance($storeType)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp))))
+
+    $pp = New-Object byte[] 1256
+    for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+    $pp[0] = 1
+    $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("`tPRT_martbryt")
+    [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+    $pp[41] = 1; $pp[44] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 1; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fc, 1 + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc))))
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $drivers = Get-DictValue (Get-DictValue $res "sessions")[0] "drivers"
+    Assert "v1.1.45: driver key has no control chars" ($drivers.ContainsKey("PRT_martbryt"))
+    $dbg = Get-DictValue $res "_debug"
+    $lobby = Get-DictValue (Get-DictValue $dbg "diagnostics") "lobbyInfo"
+    $bkt = Get-DictValue $lobby "bestKnownTags"
+    $hasClean = $false
+    foreach ($kv in $bkt.GetEnumerator()) {
+        if ($kv.Value -eq "PRT_martbryt") { $hasClean = $true; break }
+    }
+    Assert "v1.1.45: bestKnownTags stores sanitized name" $hasClean
+}
+
+Write-Host "=== Test 46: Player name control-char sanitization (v1.1.45) ===" -ForegroundColor Cyan
+[void](Test-PlayerNameControlCharStrip)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

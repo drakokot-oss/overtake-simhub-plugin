@@ -224,16 +224,11 @@ namespace Overtake.SimHub.Plugin.Store
         /// </summary>
         public bool HasClosedTerminalSession()
         {
-            foreach (var sess in Sessions.Values)
+            var all = Sessions.Values;
+            foreach (var sess in all)
             {
-                if (sess == null || sess.FinalClassification == null) continue;
-                if (!sess.SessionType.HasValue) continue;
-                string name;
-                if (Finalizer.Lookups.SessionType.TryGetValue(sess.SessionType.Value, out name)
-                    && name == "Race")
-                {
+                if (Finalizer.SprintFormatHelper.IsTerminalRaceSession(sess, all))
                     return true;
-                }
             }
             return false;
         }

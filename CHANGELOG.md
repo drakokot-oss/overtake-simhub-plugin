@@ -2,6 +2,30 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.45] - 2026-06-22
+
+### Fixed (NaN no JSON quebrava import do Race Hub)
+- **Sintoma:** `.otk` descriptografado com HMAC/AES validos mas `JSON.parse` falhava no servidor — token literal `NaN` (178 ocorrencias em `Catalunya_20260622_231048_05C0F3.otk`). Campos afetados: `deployedPctPerLap` (arrays por volta), `deployedPctAvgPerLap`, `fuelCapacityKg` quando nao havia amostra valida de CarStatus (`yourTelemetry: restricted`, volta sem pacote, media de lista vazia).
+- **`ExportNumbers.cs`:** `RoundOrNull`, `RoundListOrNull`, `AverageOrNull`, `IsFinite`; medias em `LeagueFinalizer.FinalizeDriver` ignoram elementos nao-finitos antes de dividir.
+- **`ExportNumbers.SanitizeForJson`:** varredura recursiva do payload antes de `JavaScriptSerializer.Serialize` em `OvertakePlugin.ExportLeagueJson` — ultima linha de defesa (`NaN`/`Infinity` -> `null`).
+- **Schema:** campos ERS/fuel sao `number | null`; `null` e o valor correto quando nao houve CarStatus valido.
+
+### Fixed (Sprint Format F1 26 — auto-export prematuro na Corrida Sprint)
+- **Regressao:** `Austria_20260622_215918_77AEAC.otk` — F1 26 reporta Corrida Sprint com `sessionType` id=15 (`"Race"`), mesmo id da Corrida principal. `IsTerminalSession(15)` disparava auto-export + auto-clean ao fim da Sprint; Quali + Corrida principal perdidas.
+- **`SprintFormatHelper.cs`:** quando a captura ja tem Sprint Shootout (ids 10..14), id=15 so e terminal se uma sessao de Qualifying (ids 5..9) ja existe no store. `GetExportSessionTypeId` remapeia o primeiro `Race` (wire 15) para `Race2` (id 16) na exportacao. `IsTerminalRaceSession` alimenta `SessionStore.HasClosedTerminalSession`.
+- **`LeagueFinalizer.Finalize`:** dedup de sessoes por **tipo de exportacao** (nao wire id) — dois `id=15` (Sprint + Main) nao colapsam mais.
+
+### Changed
+- **`PacketStrings.SanitizePlayerName`:** remove `char.IsControl` de nomes UDP (`ParticipantsData.ParseName`, `LobbyInfoData`). Corrige gamertags com byte de controle no prefixo (ex. `\tPRT_martbryt`).
+
+### Tests
+- **Test 44 (`Test-F126SprintRaceId15NotTerminal`):** Sprint Shootout + Corrida wire id=15 antes da Quali nao fecha captura; apos Quali + Main Race fecha; primeiro id=15 exporta como `Race2`.
+- **Test 45 (`Test-ExportJsonNoNanToken`):** payload com `float.NaN` em `DeployedPctPerLap`/`FuelCapacityKg` serializa sem token `NaN`.
+- **Test 46 (`Test-PlayerNameControlCharStrip`):** TAB no inicio do nome vira tag limpa em `participants`/`bestKnownTags`.
+
+### Note
+- **Nomes/equipes em lobby My Team F1 26 online NAO corrigidos nesta release** (`Catalunya_20260622_231048_05C0F3.otk`): posicoes/tempos/FC intactos, mas `Participants`/`LobbyInfo` offsets para grid custom 18-car ainda desalinhados vs captura career/AI usada na v1.1.40. Follow-up v1.1.46 com remapeamento a partir de raw samples desse lobby.
+
 ## [1.1.44] - 2026-06-16
 
 ### Added (alerta de versao desatualizada com severidade escalonada)

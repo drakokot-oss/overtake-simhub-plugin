@@ -123,7 +123,7 @@ namespace Overtake.SimHub.Plugin.Packets
                 if (string.IsNullOrWhiteSpace(raw))
                     raw = string.Format("Player #{0}", entry.CarNumber);
 
-                entry.Name = raw;
+                entry.Name = PacketStrings.SanitizePlayerName(raw);
                 entries[i] = entry;
             }
 
