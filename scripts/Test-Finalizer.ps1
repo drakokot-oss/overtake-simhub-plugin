@@ -2599,12 +2599,10 @@ function Test-F126MyTeamBodyLayoutProbe() {
     }
 
     $partType = $asm.GetType("Overtake.SimHub.Plugin.Packets.ParticipantsData")
-    $parse3 = $partType.GetMethods() | Where-Object {
-        $_.Name -eq "Parse" -and $_.GetParameters().Count -eq 3
-    } | Select-Object -First 1
+    $parse2 = $partType.GetMethod("Parse", [Type[]]@([byte[]], [uint16]))
     $pp = (New-ParticipantsMyTeam2026Body 3)[0]
     $pkt = (New-FakePacket 4 $pp ([uint64]950) $fmt)[0]
-    $pd = $parse3.Invoke($null, @([byte[]]$pkt, $fmt, $null))
+    $pd = $parse2.Invoke($null, @([byte[]]$pkt, $fmt))
     Assert "v1.1.46: My Team participants parsed" ($pd -ne $null)
     if ($pd -eq $null) { return }
     $e0 = (Get-Field $pd "Entries")[0]
