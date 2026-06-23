@@ -173,12 +173,16 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 return !IsFirstWireRaceSession(sess, AsList(allSessions));
             }
 
-            // Single wire-id=15: Main Race when F1 25 Sprint used id=16, or Baku-style
-            // (no Main Quali yet). Still open when F1 26 mislabeled Sprint is the only
-            // id=15 and Main Quali already happened (second id=15 not captured yet).
+            // Single wire-id=15 in a Sprint-format weekend.
             if (HasMainQualifying(allSessions) && !HasSprintRaceSessionId16(allSessions))
-                return false;
-            return true;
+                return false; // F1 26 mislabel: Main Quali done, Main Race (2nd id=15) pending.
+            if (!HasMainQualifying(allSessions) && HasAnyQualifying(allSessions))
+                return true; // Baku-style: Short/OS Quali done, lone Race is Main.
+            if (!HasMainQualifying(allSessions) && !HasAnyQualifying(allSessions))
+                return false; // F1 26 mislabel: Sprint Race ended before Main Quali.
+            if (HasSprintRaceSessionId16(allSessions))
+                return true; // F1 25: Sprint on id=16, lone id=15 is Main Race.
+            return false;
         }
 
         /// <summary>
