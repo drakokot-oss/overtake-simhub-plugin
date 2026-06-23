@@ -2599,8 +2599,7 @@ function Test-F126MyTeamBodyLayoutProbe() {
     }
 
     $pp = New-ParticipantsMyTeam2026Body 3
-    $pkt = (New-FakePacket 4 $pp ([uint64]950) ([uint16]2026))[0]
-    $parsed = Dispatch $pkt
+    $parsed = Dispatch (New-FakePacket 4 $pp ([uint64]950) ([uint16]2026))
     Assert "v1.1.46: Dispatch returned packet" ($parsed -ne $null)
     $pd = Get-Field $parsed "Participants"
     Assert "v1.1.46: My Team participants parsed" ($pd -ne $null)
@@ -2614,7 +2613,7 @@ function Test-F126MyTeamBodyLayoutProbe() {
 
     $probeType = $asm.GetType("Overtake.SimHub.Plugin.Packets.WireLayoutProbe")
     $tryProbe = $probeType.GetMethod("TryProbe")
-    $bodyFmt = $tryProbe.Invoke($null, @([byte[]]$pkt, 4))
+    $bodyFmt = $tryProbe.Invoke($null, @((New-FakePacket 4 $pp ([uint64]950) ([uint16]2026)), 4))
     Assert "v1.1.46: probe picks bodyWireFormat 2025" ([int]$bodyFmt -eq 2025)
 
     # End-to-end: lobby + two participant packets -> fullMyTeamGrid + export names.
@@ -2631,7 +2630,7 @@ function Test-F126MyTeamBodyLayoutProbe() {
     Set-LobbyEntry2025 $lob 2 ([byte]222) ([byte]23) "TSL MARTINS"
     $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 9 $lob ([uint64]951) $fmt)))))
 
-    $pp1 = (New-ParticipantsMyTeam2026Body 3)[0]
+    $pp1 = New-ParticipantsMyTeam2026Body 3
     $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 4 $pp1 ([uint64]951) $fmt)))))
     $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 4 $pp1 ([uint64]952) $fmt)))))
 
