@@ -100,7 +100,7 @@ namespace Overtake.SimHub.Plugin.Packets
             if (numActive == 0) return int.MinValue / 4;
 
             int baseOff = p + 1;
-            int active = Math.Min(numActive, GameInfo.MaxSupportedCars);
+            int active = Math.Min((int)numActive, GameInfo.MaxSupportedCars);
             int score = 0;
             int myTeamCount = 0;
             int driverXCount = 0;
