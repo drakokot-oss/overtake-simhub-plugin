@@ -92,7 +92,10 @@
     <Compile Include="Store\SessionRun.cs" />
     <Compile Include="Store\SessionStore.cs" />
     <Compile Include="Finalizer\Lookups.cs" />
+    <Compile Include="Finalizer\ExportNumbers.cs" />
+    <Compile Include="Finalizer\SprintFormatHelper.cs" />
     <Compile Include="Finalizer\LeagueFinalizer.cs" />
+    <Compile Include="Packets\PacketStrings.cs" />
     <Compile Include="Security\KeyStore.cs" />
     <Compile Include="Security\OtkWriter.cs" />
     <Compile Include="UI\SettingsControl.xaml.cs">

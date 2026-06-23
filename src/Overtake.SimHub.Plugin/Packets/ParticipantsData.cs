@@ -125,7 +125,7 @@ namespace Overtake.SimHub.Plugin.Packets
             }
             if (string.IsNullOrWhiteSpace(raw))
                 raw = string.Format("Driver_{0}", fallbackIndex);
-            return raw;
+            return PacketStrings.SanitizePlayerName(raw);
         }
 
         /// <summary>Backwards-compatible entry point — assumes the 2025 wire format.</summary>

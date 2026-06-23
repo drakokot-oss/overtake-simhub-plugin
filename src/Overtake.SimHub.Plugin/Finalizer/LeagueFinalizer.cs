@@ -889,20 +889,25 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Participants will be rebuilt from session outputs so they match actual drivers shown
             var allParticipants = new List<string>();
 
-            // Session dedup: keep only the last session of each sessionType
+            // Session dedup: keep only the last session of each export session type.
+            // v1.1.45: use SprintFormatHelper.GetExportSessionTypeId so two wire-id=15
+            // sessions (Sprint Race + Main Race in F1 26) are not collapsed.
             var sessionList = new List<KeyValuePair<string, SessionRun>>(
                 store.Sessions.Select(kvp => new KeyValuePair<string, SessionRun>(kvp.Key, kvp.Value)));
-            var lastByType = new Dictionary<int, int>();
+            var allSessionRuns = sessionList.Select(kvp => kvp.Value).ToList();
+            var lastByExportType = new Dictionary<int, int>();
             for (int i = 0; i < sessionList.Count; i++)
             {
-                int? st = sessionList[i].Value.SessionType;
-                if (st.HasValue) lastByType[st.Value] = i;
+                int exportSt = SprintFormatHelper.GetExportSessionTypeId(
+                    sessionList[i].Value, allSessionRuns);
+                if (exportSt != 0) lastByExportType[exportSt] = i;
             }
             var deduped = new List<KeyValuePair<string, SessionRun>>();
             for (int i = 0; i < sessionList.Count; i++)
             {
-                int? st = sessionList[i].Value.SessionType;
-                if (!st.HasValue || lastByType[st.Value] == i)
+                int exportSt = SprintFormatHelper.GetExportSessionTypeId(
+                    sessionList[i].Value, allSessionRuns);
+                if (exportSt == 0 || lastByExportType[exportSt] == i)
                     deduped.Add(sessionList[i]);
             }
 
@@ -962,10 +967,15 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     continue;
                 }
 
-                if (sess.SessionType.HasValue && seenSt.Add(sess.SessionType.Value))
-                    sessionTypeNames.Add(((Dictionary<string, object>)Lookups.Label(Lookups.SessionType, sess.SessionType, "SessionType"))["name"].ToString());
+                if (sess.SessionType.HasValue)
+                {
+                    int exportSt = SprintFormatHelper.GetExportSessionTypeId(sess, allSessionRuns);
+                    if (exportSt != 0 && seenSt.Add(exportSt))
+                        sessionTypeNames.Add(((Dictionary<string, object>)Lookups.Label(
+                            Lookups.SessionType, exportSt, "SessionType"))["name"].ToString());
+                }
 
-                sessionsOut.Add(FinalizeSession(sid, sess, store, sessionsOut, globalTeamByTag));
+                sessionsOut.Add(FinalizeSession(sid, sess, store, sessionsOut, globalTeamByTag, allSessionRuns));
             }
 
             // Rebuild participants from session outputs (drivers + results) so count matches actual data
@@ -1219,7 +1229,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
         private static Dictionary<string, object> FinalizeSession(
             string sid, SessionRun sess, SessionStore store, List<object> previousSessions,
-            Dictionary<string, ParticipantEntry> globalTeamByTag = null)
+            Dictionary<string, ParticipantEntry> globalTeamByTag = null,
+            List<SessionRun> allSessionRuns = null)
         {
             // Deduplicate drivers by physical car identity before building any results
             int dedupMerged = DeduplicateDrivers(sess);
@@ -1290,7 +1301,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (row == null || row.Position <= 0) continue;
                     fcRowsClassified++;
                     string tag;
-                    if (!sess.TagsByCarIdx.TryGetValue(row.CarIdx, out tag))
+                    if (!sess.TagsByCarIdx.TryGetValue(row.CarIdx, out tag) || string.IsNullOrEmpty(tag))
                     {
                         // Online: default to Driver_{idx} so FC rows join the same bucket as lap ingestion
                         // (Car{N} only when duplicate disambiguation explicitly creates it).
@@ -1361,7 +1372,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
                     // A classified driver who completed laps is NEVER filtered.
                     if (row.NumLaps > 0)
+                    {
+                        if (string.IsNullOrEmpty(tag))
+                            tag = string.Format("Driver_{0}", row.CarIdx);
                         goto fc_accept;
+                    }
 
                     // Ghost filter: offline — unregistered Car{N} + 0 laps = empty grid slot.
                     // Online — FC row is authoritative; keep stub even with no telemetry.
@@ -1385,6 +1400,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                             continue;
                         }
                     }
+
+                    if (string.IsNullOrEmpty(tag))
+                        tag = string.Format("Driver_{0}", row.CarIdx);
+
                     fc_accept:
                     emittedFromFc++;
 
@@ -1739,10 +1758,15 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "resultSource", fcMissing ? "fallback_telemetry" : (emittedFromFc > 0 ? "final_classification" : "none") },
             };
 
+            int exportSessionTypeId = sess.SessionType.HasValue && allSessionRuns != null
+                ? SprintFormatHelper.GetExportSessionTypeId(sess, allSessionRuns)
+                : (sess.SessionType.HasValue ? sess.SessionType.Value : 0);
+
             return new Dictionary<string, object>
             {
                 { "sessionUID", sid },
-                { "sessionType", Lookups.Label(Lookups.SessionType, sess.SessionType, "SessionType") },
+                { "sessionType", Lookups.Label(Lookups.SessionType,
+                    exportSessionTypeId != 0 ? (int?)exportSessionTypeId : sess.SessionType, "SessionType") },
                 { "track", Lookups.Label(Lookups.Tracks, sess.TrackId.HasValue ? (int?)(int)sess.TrackId.Value : null, "Track") },
                 { "weather", Lookups.Label(Lookups.Weather, sess.Weather.HasValue ? (int?)(int)sess.Weather.Value : null, "Weather") },
                 { "trackTempC", sess.LatestTrackTempC },
@@ -2022,11 +2046,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 fuelTelemetryOut = new Dictionary<string, object>
                 {
                     { "fuelMix", Lookups.LookupOrDefault(Lookups.FuelMixMap, dr.FuelMixLast, "FuelMix") },
-                    { "fuelCapacityKg", Math.Round(dr.FuelCapacityKg, 3) },
-                    { "fuelInTankKgFirst", Math.Round(dr.FuelInTankFirst, 3) },
-                    { "fuelInTankKgLast", Math.Round(dr.FuelInTankLast, 3) },
-                    { "fuelRemainingLapsFirst", Math.Round(dr.FuelRemainingLapsFirst, 3) },
-                    { "fuelRemainingLapsLast", Math.Round(dr.FuelRemainingLapsLast, 3) },
+                    { "fuelCapacityKg", ExportNumbers.RoundOrNull(dr.FuelCapacityKg, 3) },
+                    { "fuelInTankKgFirst", ExportNumbers.RoundOrNull(dr.FuelInTankFirst, 3) },
+                    { "fuelInTankKgLast", ExportNumbers.RoundOrNull(dr.FuelInTankLast, 3) },
+                    { "fuelRemainingLapsFirst", ExportNumbers.RoundOrNull(dr.FuelRemainingLapsFirst, 3) },
+                    { "fuelRemainingLapsLast", ExportNumbers.RoundOrNull(dr.FuelRemainingLapsLast, 3) },
                 };
             }
 
@@ -2070,8 +2094,16 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 if (deployedPerLap.Count > 0)
                 {
                     double sum = 0d;
-                    for (int j = 0; j < deployedPerLap.Count; j++) sum += deployedPerLap[j];
-                    deployedAvg = sum / deployedPerLap.Count;
+                    int count = 0;
+                    for (int j = 0; j < deployedPerLap.Count; j++)
+                    {
+                        double v = deployedPerLap[j];
+                        if (!ExportNumbers.IsFinite(v)) continue;
+                        sum += v;
+                        count++;
+                    }
+                    if (count > 0) deployedAvg = sum / count;
+                    else deployedAvg = double.NaN;
                 }
 
                 // v1.1.35 — split harvested averages by source (MGU-K and MGU-H).
@@ -2085,15 +2117,31 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 if (harvestedMgukPerLap.Count > 0)
                 {
                     double sum = 0d;
-                    for (int j = 0; j < harvestedMgukPerLap.Count; j++) sum += harvestedMgukPerLap[j];
-                    harvestedMgukAvg = sum / harvestedMgukPerLap.Count;
+                    int count = 0;
+                    for (int j = 0; j < harvestedMgukPerLap.Count; j++)
+                    {
+                        double v = harvestedMgukPerLap[j];
+                        if (!ExportNumbers.IsFinite(v)) continue;
+                        sum += v;
+                        count++;
+                    }
+                    if (count > 0) harvestedMgukAvg = sum / count;
+                    else harvestedMgukAvg = double.NaN;
                 }
                 double harvestedMguhAvg = 0d;
                 if (harvestedMguhPerLap.Count > 0)
                 {
                     double sum = 0d;
-                    for (int j = 0; j < harvestedMguhPerLap.Count; j++) sum += harvestedMguhPerLap[j];
-                    harvestedMguhAvg = sum / harvestedMguhPerLap.Count;
+                    int count = 0;
+                    for (int j = 0; j < harvestedMguhPerLap.Count; j++)
+                    {
+                        double v = harvestedMguhPerLap[j];
+                        if (!ExportNumbers.IsFinite(v)) continue;
+                        sum += v;
+                        count++;
+                    }
+                    if (count > 0) harvestedMguhAvg = sum / count;
+                    else harvestedMguhAvg = double.NaN;
                 }
 
                 // v1.1.42 — ERS recalibration for the 2026 energy model.
@@ -2130,38 +2178,33 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
                 // Per-lap % arrays (existing field names kept; values recalibrated
                 // to %-of-ceiling for deploy/MGU-K. MGU-H stays %-of-store).
-                var deployedRounded = new List<double>(deployedPerLap.Count);
-                for (int j = 0; j < deployedPerLap.Count; j++)
-                    deployedRounded.Add(Math.Round((double)deployedPerLap[j] * deployPctScale, 2));
-                var hMgukRounded = new List<double>(harvestedMgukPerLap.Count);
-                for (int j = 0; j < harvestedMgukPerLap.Count; j++)
-                    hMgukRounded.Add(Math.Round((double)harvestedMgukPerLap[j] * harvestMgukPctScale, 2));
-                var hMguhRounded = new List<double>(harvestedMguhPerLap.Count);
-                for (int j = 0; j < harvestedMguhPerLap.Count; j++)
-                    hMguhRounded.Add(Math.Round((double)harvestedMguhPerLap[j], 2));
+                // v1.1.45: non-finite values -> null (invalid JSON otherwise).
+                List<object> deployedRounded = ExportNumbers.RoundListOrNull(deployedPerLap, deployPctScale, 2);
+                List<object> hMgukRounded = ExportNumbers.RoundListOrNull(harvestedMgukPerLap, harvestMgukPctScale, 2);
+                List<object> hMguhRounded = ExportNumbers.RoundListOrNull(harvestedMguhPerLap, 1.0, 2);
 
                 ersTelemetryOut = new Dictionary<string, object>
                 {
-                    { "storePctFirst", Math.Round((double)dr.ErsStorePctFirst, 2) },
-                    { "storePctLast", Math.Round((double)dr.ErsStorePctLast, 2) },
-                    { "storePctMin", Math.Round((double)dr.ErsStorePctMin, 2) },
-                    { "storePctMax", Math.Round((double)dr.ErsStorePctMax, 2) },
-                    { "storePctAvg", Math.Round(storeAvg, 2) },
+                    { "storePctFirst", ExportNumbers.RoundOrNull(dr.ErsStorePctFirst, 2) },
+                    { "storePctLast", ExportNumbers.RoundOrNull(dr.ErsStorePctLast, 2) },
+                    { "storePctMin", ExportNumbers.RoundOrNull(dr.ErsStorePctMin, 2) },
+                    { "storePctMax", ExportNumbers.RoundOrNull(dr.ErsStorePctMax, 2) },
+                    { "storePctAvg", dr.ErsSamplesCount > 0 ? ExportNumbers.RoundOrNull(storeAvg, 2) : null },
                     // Absolute MJ per lap (RECOMMENDED; regulation-agnostic, same
                     // meaning across 2025 and 2026).
-                    { "deployedMjAvgPerLap", Math.Round(deployedMjAvg, 3) },
-                    { "harvestedMgukMjAvgPerLap", Math.Round(harvestedMgukMjAvg, 3) },
-                    { "harvestedMguhMjAvgPerLap", Math.Round(harvestedMguhMjAvg, 3) },
+                    { "deployedMjAvgPerLap", deployedPerLap.Count > 0 ? ExportNumbers.RoundOrNull(deployedMjAvg, 3) : null },
+                    { "harvestedMgukMjAvgPerLap", harvestedMgukPerLap.Count > 0 ? ExportNumbers.RoundOrNull(harvestedMgukMjAvg, 3) : null },
+                    { "harvestedMguhMjAvgPerLap", harvestedMguhPerLap.Count > 0 ? ExportNumbers.RoundOrNull(harvestedMguhMjAvg, 3) : null },
                     // Percentage of the FIA per-lap ceiling for this wire format
                     // (bounded ~0..100% in both eras). Field names unchanged;
                     // values now relative to the regulation ceiling, not the store.
                     { "deployedPctPerLap", deployedRounded },
-                    { "deployedPctAvgPerLap", Math.Round(deployedPctOfLimit, 2) },
+                    { "deployedPctAvgPerLap", deployedPerLap.Count > 0 ? ExportNumbers.RoundOrNull(deployedPctOfLimit, 2) : null },
                     { "harvestedMgukPctPerLap", hMgukRounded },
-                    { "harvestedMgukPctAvgPerLap", Math.Round(harvestedMgukPctOfLimit, 2) },
+                    { "harvestedMgukPctAvgPerLap", harvestedMgukPerLap.Count > 0 ? ExportNumbers.RoundOrNull(harvestedMgukPctOfLimit, 2) : null },
                     // MGU-H: no per-lap regulation ceiling -> legacy %-of-store kept.
                     { "harvestedMguhPctPerLap", hMguhRounded },
-                    { "harvestedMguhPctAvgPerLap", Math.Round(harvestedMguhAvg, 2) },
+                    { "harvestedMguhPctAvgPerLap", harvestedMguhPerLap.Count > 0 ? ExportNumbers.RoundOrNull(harvestedMguhAvg, 2) : null },
                     // Regulation ceilings used (transparency / front can recompute).
                     { "deployLimitMjPerLap", deployLimitMj },
                     { "harvestMgukLimitMjPerLap", harvestMgukLimitMj },

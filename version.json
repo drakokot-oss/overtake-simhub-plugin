@@ -1,8 +1,8 @@
 {
-    "version":  "1.1.44",
+    "version":  "1.1.45",
     "minSupportedVersion":  "1.1.41",
-    "released":  "2026-06-16",
+    "released":  "2026-06-22",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.44/Overtake.SimHub.Plugin-v1.1.44-Setup.exe",
-    "releaseNotes":  "## Aviso claro quando o plugin esta desatualizado\r\n\r\nAgora o plugin avisa de forma destacada quando voce esta rodando uma versao antiga que pode gerar arquivos com problemas (por exemplo, capturas no formato F1 26 saindo com nomes e equipes embaralhados).\r\n\r\n- Aviso vermelho bem visivel quando sua versao esta muito atrasada ou quando o jogo envia um formato que essa versao nao entende.\r\n- Botao \"Baixar e atualizar\" no proprio painel: baixa e abre o instalador da versao mais recente em um clique.\r\n- Novo indicador de status de atualizacao que voce pode colocar no seu dashboard do SimHub, pra perceber sem precisar abrir as configuracoes.\r\n\r\n### Sem mudar nada na sua rotina\r\n\r\nA forma como o plugin le os dados do jogo (F1 25 e F1 26) continua exatamente igual. Esta versao so melhora os avisos de atualizacao."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.45/Overtake.SimHub.Plugin-v1.1.45-Setup.exe",
+    "releaseNotes":  "## Import de arquivos .otk corrigido + fim de semana Sprint no F1 26\r\n\r\n- Telemetria de bateria e combustivel sem valores invalidos: arquivos que antes quebravam o import no Race Hub agora abrem normalmente.\r\n- Fim de semana Sprint no F1 26: a Corrida Sprint nao encerra mais a captura antes da Qualificacao e da Corrida principal; tudo vai para o mesmo arquivo.\r\n- Nomes de piloto mais limpos quando o jogo manda caracteres estranhos no inicio do gamertag.\r\n\r\n### E pro F1 25 atual?\r\n\r\nNada muda na sua rotina fora desses dois cenarios (import com telemetria vazia e Sprint Format no F1 26)."
 }
