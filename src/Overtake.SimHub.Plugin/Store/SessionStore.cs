@@ -128,6 +128,30 @@ namespace Overtake.SimHub.Plugin.Store
         private int _fullMyTeamStreak;
         public bool CaptureFullMyTeam { get { return _captureFullMyTeam; } }
 
+        /// <summary>
+        /// When the UDP header says 2026 but the payload body uses the legacy 2025
+        /// stride (My Team online), this is pinned to 2025 after the first probeable
+        /// packet. Null until resolved; 2026 for true Season Pack grids.
+        /// </summary>
+        public ushort? ResolvedBodyWireFormat { get; private set; }
+
+        /// <summary>
+        /// Parses a raw UDP packet using the sticky body layout for this capture.
+        /// </summary>
+        public ParsedPacket ParsePacket(byte[] raw)
+        {
+            var parsed = Parsers.PacketParser.Dispatch(raw, ResolvedBodyWireFormat);
+            if (parsed?.Header != null
+                && parsed.Header.PacketFormat >= 2026
+                && !ResolvedBodyWireFormat.HasValue)
+            {
+                ushort? probed = Packets.WireLayoutProbe.TryProbe(raw, parsed.Header.PacketId);
+                if (probed.HasValue)
+                    ResolvedBodyWireFormat = probed;
+            }
+            return parsed;
+        }
+
         /// <summary>Populated at export: lobby vs bestKnown disagreements before full-My-Team merge.</summary>
         public List<Dictionary<string, object>> LastExportedNameKeyConflicts { get; set; }
 
@@ -178,6 +202,7 @@ namespace Overtake.SimHub.Plugin.Store
             _lastTrackId = null;
             _captureFullMyTeam = false;
             _fullMyTeamStreak = 0;
+            ResolvedBodyWireFormat = null;
             SessionUid = null;
             StartedAtMs = NowMs();
             LastPacketMs = 0;
@@ -262,6 +287,7 @@ namespace Overtake.SimHub.Plugin.Store
                 DiagLobbyFailed = 0;
                 _captureFullMyTeam = false;
                 _fullMyTeamStreak = 0;
+                ResolvedBodyWireFormat = null;
             }
             _lastTrackId = newTrackId;
         }

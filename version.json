@@ -1,8 +1,8 @@
 {
-    "version":  "1.1.45",
+    "version":  "1.1.46",
     "minSupportedVersion":  "1.1.41",
     "released":  "2026-06-22",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.45/Overtake.SimHub.Plugin-v1.1.45-Setup.exe",
-    "releaseNotes":  "## Import de arquivos .otk corrigido + fim de semana Sprint no F1 26\r\n\r\n- Telemetria de bateria e combustivel sem valores invalidos: arquivos que antes quebravam o import no Race Hub agora abrem normalmente.\r\n- Fim de semana Sprint no F1 26: a Corrida Sprint nao encerra mais a captura antes da Qualificacao e da Corrida principal; tudo vai para o mesmo arquivo.\r\n- Nomes de piloto mais limpos quando o jogo manda caracteres estranhos no inicio do gamertag.\r\n\r\n### E pro F1 25 atual?\r\n\r\nNada muda na sua rotina fora desses dois cenarios (import com telemetria vazia e Sprint Format no F1 26)."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.46/Overtake.SimHub.Plugin-v1.1.46-Setup.exe",
+    "releaseNotes":  "## Nomes corretos em lobby My Team F1 26 + fixes da v1.1.45\r\n\r\n- Lobby My Team online no F1 26: gamertags e equipes voltam a aparecer certos no arquivo e no Race Hub (antes vinham como Driver_X ou lixo).\r\n- Import de .otk sem NaN: telemetria de bateria/combustivel invalida vira null em vez de quebrar o JSON.\r\n- Fim de semana Sprint no F1 26: Corrida Sprint nao encerra a captura antes da Quali e da Corrida principal.\r\n\r\n### E pro F1 25 atual?\r\n\r\nNada muda na sua rotina fora de lobby My Team F1 26 online e dos dois cenarios ja corrigidos na 1.1.45."
 }

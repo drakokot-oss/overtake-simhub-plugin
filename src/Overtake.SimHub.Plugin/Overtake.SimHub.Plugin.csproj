@@ -95,6 +95,7 @@
     <Compile Include="Finalizer\ExportNumbers.cs" />
     <Compile Include="Finalizer\SprintFormatHelper.cs" />
     <Compile Include="Finalizer\LeagueFinalizer.cs" />
+    <Compile Include="Packets\WireLayoutProbe.cs" />
     <Compile Include="Packets\PacketStrings.cs" />
     <Compile Include="Security\KeyStore.cs" />
     <Compile Include="Security\OtkWriter.cs" />

@@ -2557,6 +2557,110 @@ function Test-PlayerNameControlCharStrip() {
 Write-Host "=== Test 46: Player name control-char sanitization (v1.1.45) ===" -ForegroundColor Cyan
 [void](Test-PlayerNameControlCharStrip)
 
+function Test-F126MyTeamBodyLayoutProbe() {
+    # v1.1.46 -- F1 26 My Team online lobbies can ship packetFormat=2026 in the
+    # header while the payload still uses the 2025 entry stride (57/42/55). Wrong
+    # layout yields Driver_X / garbage teamIds; probe must pick 2025 body.
+    $fmt = [uint16]2026
+    $parsePkt = $storeType.GetMethod("ParsePacket")
+
+    function Set-LobbyEntry2025([byte[]]$buf, [int]$idx, [byte]$teamId, [byte]$carNum, [string]$name) {
+        $start = 1 + $idx * 42
+        $buf[$start + 0] = 0
+        $buf[$start + 1] = $teamId
+        $buf[$start + 3] = 1
+        $nm = [System.Text.Encoding]::UTF8.GetBytes($name)
+        [System.Array]::Copy($nm, 0, $buf, ($start + 4), $nm.Length)
+        $buf[$start + 36] = $carNum
+        $buf[$start + 38] = 1
+    }
+
+    function Set-Participant2025([byte[]]$buf, [int]$idx, [byte]$teamId, [byte]$rn, [byte]$netId, [string]$name) {
+        $start = 1 + $idx * 57
+        $buf[$start + 0] = 0
+        $buf[$start + 2] = $netId
+        $buf[$start + 3] = $teamId
+        $buf[$start + 4] = 1
+        $buf[$start + 5] = $rn
+        $nm = [System.Text.Encoding]::UTF8.GetBytes($name)
+        [System.Array]::Copy($nm, 0, $buf, ($start + 7), $nm.Length)
+        $buf[$start + 40] = 1
+        $buf[$start + 43] = 1
+    }
+
+    function New-ParticipantsMyTeam2026Body([int]$count) {
+        $pp = New-Object byte[] (1 + 24 * 57)
+        for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+        $pp[0] = [byte]$count
+        Set-Participant2025 $pp 0 ([byte]220) ([byte]44) ([byte]10) "PRT_martbryt"
+        Set-Participant2025 $pp 1 ([byte]221) ([byte]57) ([byte]20) "IMT_ELCoentro"
+        Set-Participant2025 $pp 2 ([byte]222) ([byte]23) ([byte]30) "TSL MARTINS"
+        return ,$pp
+    }
+
+    $partType = $asm.GetType("Overtake.SimHub.Plugin.Packets.ParticipantsData")
+    $parse3 = $partType.GetMethods() | Where-Object {
+        $_.Name -eq "Parse" -and $_.GetParameters().Count -eq 3
+    } | Select-Object -First 1
+    $pp = (New-ParticipantsMyTeam2026Body 3)[0]
+    $pkt = (New-FakePacket 4 $pp ([uint64]950) $fmt)[0]
+    $pd = $parse3.Invoke($null, @([byte[]]$pkt, $fmt, $null))
+    Assert "v1.1.46: My Team participants parsed" ($pd -ne $null)
+    if ($pd -eq $null) { return }
+    $e0 = (Get-Field $pd "Entries")[0]
+    $e1 = (Get-Field $pd "Entries")[1]
+    Assert "v1.1.46: entry0 name = PRT_martbryt" ((Get-Field $e0 "Name") -eq "PRT_martbryt")
+    Assert "v1.1.46: entry0 myTeam = true" ([bool](Get-Field $e0 "MyTeam"))
+    Assert "v1.1.46: entry1 name = IMT_ELCoentro" ((Get-Field $e1 "Name") -eq "IMT_ELCoentro")
+    Assert "v1.1.46: entry1 teamId = 221" ([int](Get-Field $e1 "TeamId") -eq 221)
+
+    $probeType = $asm.GetType("Overtake.SimHub.Plugin.Packets.WireLayoutProbe")
+    $tryProbe = $probeType.GetMethod("TryProbe")
+    $bodyFmt = $tryProbe.Invoke($null, @([byte[]]$pkt, 4))
+    Assert "v1.1.46: probe picks bodyWireFormat 2025" ([int]$bodyFmt -eq 2025)
+
+    # End-to-end: lobby + two participant packets -> fullMyTeamGrid + export names.
+    $st = [System.Activator]::CreateInstance($storeType)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 5; $sp[125] = 1
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 1 $sp ([uint64]951) $fmt)))))
+
+    $lob = New-Object byte[] (1 + 24 * 42)
+    for ($zi = 0; $zi -lt $lob.Length; $zi++) { $lob[$zi] = 0 }
+    $lob[0] = 3
+    Set-LobbyEntry2025 $lob 0 ([byte]220) ([byte]44) "PRT_martbryt"
+    Set-LobbyEntry2025 $lob 1 ([byte]221) ([byte]57) "IMT_ELCoentro"
+    Set-LobbyEntry2025 $lob 2 ([byte]222) ([byte]23) "TSL MARTINS"
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 9 $lob ([uint64]951) $fmt)))))
+
+    $pp1 = (New-ParticipantsMyTeam2026Body 3)[0]
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 4 $pp1 ([uint64]951) $fmt)))))
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 4 $pp1 ([uint64]952) $fmt)))))
+
+    $resolved = Get-Field $st "ResolvedBodyWireFormat"
+    Assert "v1.1.46: store pins bodyWireFormat 2025" ($resolved -ne $null -and [int]$resolved -eq 2025)
+    Assert "v1.1.46: fullMyTeamGrid detected" ([bool](Get-Field $st "CaptureFullMyTeam"))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 3; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]85000).CopyTo($fc, 1 + 7)
+    [System.BitConverter]::GetBytes([uint32]86000).CopyTo($fc, 1 + 46 + 7)
+    [System.BitConverter]::GetBytes([uint32]87000).CopyTo($fc, 1 + 92 + 7)
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @((New-FakePacket 8 $fc ([uint64]953) $fmt)))))
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $dbgGame = Get-DictValue (Get-DictValue $res "_debug") "game"
+    Assert "v1.1.46: export _debug.game.bodyWireFormat = 2025" ([int](Get-DictValue $dbgGame "bodyWireFormat") -eq 2025)
+    $drivers = Get-DictValue (Get-DictValue $res "sessions")[0] "drivers"
+    Assert "v1.1.46: export has PRT_martbryt driver key" ($drivers.ContainsKey("PRT_martbryt"))
+    Assert "v1.1.46: export has IMT_ELCoentro driver key" ($drivers.ContainsKey("IMT_ELCoentro"))
+    $lobbyDbg = Get-DictValue (Get-DictValue (Get-DictValue $res "_debug") "diagnostics") "lobbyInfo"
+    Assert "v1.1.46: lobby fullMyTeamGrid in debug" ([bool](Get-DictValue $lobbyDbg "fullMyTeamGrid"))
+}
+
+Write-Host "=== Test 47: F1 26 My Team body layout probe (v1.1.46) ===" -ForegroundColor Cyan
+[void](Test-F126MyTeamBodyLayoutProbe)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow

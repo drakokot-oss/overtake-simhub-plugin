@@ -140,7 +140,7 @@ namespace Overtake.SimHub.Plugin
             {
                 _displayedPackets++;
 
-                var parsed = PacketParser.Dispatch(raw);
+                var parsed = _store.ParsePacket(raw);
                 if (parsed == null) continue;
 
                 if (parsed.Session != null)
