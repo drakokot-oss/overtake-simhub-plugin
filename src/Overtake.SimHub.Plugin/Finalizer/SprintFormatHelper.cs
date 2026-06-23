@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Overtake.SimHub.Plugin.Store;
 
 namespace Overtake.SimHub.Plugin.Finalizer
@@ -15,7 +16,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
     /// Strategy: when the capture already contains a Sprint Shootout (ids 10..14),
     /// treat a closing "Race" as terminal ONLY if a Qualifying session (ids 5..9)
     /// is already present in the store (Main Quali always precedes Main Race).
-    /// The first "Race" before any Qualifying is inferred as Race2 (Sprint Race)
+    /// The first wire-id=15 session in the capture is inferred as Race2 (Sprint Race)
     /// at export time even when the wire id was 15.
     /// </summary>
     public static class SprintFormatHelper
@@ -48,17 +49,43 @@ namespace Overtake.SimHub.Plugin.Finalizer
             return false;
         }
 
-        public static bool HasQualifyingBeforeMs(IEnumerable<SessionRun> sessions, long beforeMs)
+        public static bool HasAnyQualifying(IEnumerable<SessionRun> sessions)
         {
             if (sessions == null) return false;
             foreach (var s in sessions)
             {
                 if (s != null && s.SessionType.HasValue
-                    && IsQualifyingType(s.SessionType.Value)
-                    && s.LastPacketMs < beforeMs)
+                    && IsQualifyingType(s.SessionType.Value))
                     return true;
             }
             return false;
+        }
+
+        private static IList<SessionRun> AsList(IEnumerable<SessionRun> sessions)
+        {
+            var list = sessions as IList<SessionRun>;
+            return list ?? sessions.ToList();
+        }
+
+        /// <summary>
+        /// True when <paramref name="sess"/> is the first wire-id=15 session in the
+        /// capture. Tie-break: lower LastPacketMs wins; equal ms uses list order.
+        /// </summary>
+        public static bool IsFirstWireRaceSession(SessionRun sess, IList<SessionRun> allSessions)
+        {
+            if (sess == null || !sess.SessionType.HasValue || sess.SessionType.Value != 15)
+                return false;
+            long thisMs = sess.LastPacketMs;
+            int thisIdx = allSessions.IndexOf(sess);
+            for (int i = 0; i < allSessions.Count; i++)
+            {
+                SessionRun s = allSessions[i];
+                if (s == null || s == sess || !s.SessionType.HasValue) continue;
+                if (s.SessionType.Value != 15) continue;
+                if (s.LastPacketMs < thisMs) return false;
+                if (s.LastPacketMs == thisMs && i < thisIdx) return false;
+            }
+            return true;
         }
 
         /// <summary>
@@ -71,13 +98,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             if (store == null || !HasSprintShootout(store.Sessions.Values)) return true;
 
             // Sprint-format weekend: defer until Main Quali has been seen.
-            foreach (var s in store.Sessions.Values)
-            {
-                if (s != null && s.SessionType.HasValue
-                    && IsQualifyingType(s.SessionType.Value))
-                    return true;
-            }
-            return false;
+            return HasAnyQualifying(store.Sessions.Values);
         }
 
         /// <summary>
@@ -89,12 +110,13 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 return false;
             if (!IsRaceWireType(sess.SessionType.Value)) return false;
             if (!HasSprintShootout(allSessions)) return true;
-            return HasQualifyingBeforeMs(allSessions, sess.LastPacketMs);
+            if (!HasAnyQualifying(allSessions)) return false;
+            return !IsFirstWireRaceSession(sess, AsList(allSessions));
         }
 
         /// <summary>
         /// Export label id: remap wire id=15 to 16 (Race2) for the Sprint Race when
-        /// it arrived before any Qualifying session in this capture.
+        /// it is the first wire-id=15 session in this capture.
         /// </summary>
         public static int GetExportSessionTypeId(SessionRun sess, IEnumerable<SessionRun> allSessions)
         {
@@ -103,8 +125,8 @@ namespace Overtake.SimHub.Plugin.Finalizer
             int wireId = sess.SessionType.Value;
             if (wireId != 15) return wireId;
             if (!HasSprintShootout(allSessions)) return wireId;
-            if (HasQualifyingBeforeMs(allSessions, sess.LastPacketMs)) return 15;
-            return 16;
+            if (IsFirstWireRaceSession(sess, AsList(allSessions))) return 16;
+            return 15;
         }
     }
 
