@@ -59,7 +59,7 @@ function New-FakePacket([int]$packetId, [byte[]]$payload, [uint64]$sessionUid = 
 }
 
 function Dispatch([byte[]]$pkt) {
-    $method = $parserType.GetMethod("Dispatch")
+    $method = $parserType.GetMethod("Dispatch", [Type[]]@([byte[]]))
     return $method.Invoke($null, [object[]]@(,[byte[]]$pkt))
 }
 
