@@ -2589,20 +2589,20 @@ function Test-F126MyTeamBodyLayoutProbe() {
     }
 
     function New-ParticipantsMyTeam2026Body([int]$count) {
-        $pp = New-Object byte[] (1 + 24 * 57)
+        $pp = New-Object byte[] 1500
         for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
         $pp[0] = [byte]$count
         Set-Participant2025 $pp 0 ([byte]220) ([byte]44) ([byte]10) "PRT_martbryt"
         Set-Participant2025 $pp 1 ([byte]221) ([byte]57) ([byte]20) "IMT_ELCoentro"
         Set-Participant2025 $pp 2 ([byte]222) ([byte]23) ([byte]30) "TSL MARTINS"
-        return ,$pp
+        return $pp
     }
 
-    $partType = $asm.GetType("Overtake.SimHub.Plugin.Packets.ParticipantsData")
-    $parse2 = $partType.GetMethod("Parse", [Type[]]@([byte[]], [uint16]))
-    $pp = (New-ParticipantsMyTeam2026Body 3)[0]
-    $pkt = (New-FakePacket 4 $pp ([uint64]950) $fmt)[0]
-    $pd = $parse2.Invoke($null, @([byte[]]$pkt, $fmt))
+    $pp = New-ParticipantsMyTeam2026Body 3
+    $pkt = (New-FakePacket 4 $pp ([uint64]950) ([uint16]2026))[0]
+    $parsed = Dispatch $pkt
+    Assert "v1.1.46: Dispatch returned packet" ($parsed -ne $null)
+    $pd = Get-Field $parsed "Participants"
     Assert "v1.1.46: My Team participants parsed" ($pd -ne $null)
     if ($pd -eq $null) { return }
     $e0 = (Get-Field $pd "Entries")[0]
