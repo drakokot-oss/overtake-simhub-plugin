@@ -2,6 +2,24 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.46] - 2026-06-22
+
+### Fixed (F1 26 My Team online — header 2026, body layout 2025)
+- **Sintoma:** `Catalunya_20260622_231048_05C0F3.otk` — posicoes/tempos OK, mas nomes `Driver_X`/mojibake, equipes erradas (`MyTeam`, `Mercedes`), `lobbyResolved: 0`, ERS lixo. Header `packetFormat: 2026` com payload ainda no stride 2025 (Participants 57, LobbyInfo 42, CarStatus 55).
+- **Causa:** v1.1.40 mapeou o layout 2026 a partir de captura career/AI (stride 60). Lobbies My Team online F1 26 nao migraram o corpo do pacote — parser 2026 lia `myTeam`/`teamId`/`name` 3 bytes adiantado (prefixo `\x01\t\x04` antes do gamertag).
+- **`WireLayoutProbe.cs`:** quando `packetFormat >= 2026`, pontua layout 2025 vs 2026 por pacote (Participants: full-MyTeam-grid + qualidade de nome; LobbyInfo: carNumber/teamId; CarStatus: fuelCapacity ~110, ERS store 0..4 MJ). Vencedor vira layout sticky da captura.
+- **`ParticipantsData` / `LobbyInfoData` / `CarStatusEntry`:** overload `Parse(..., ushort? bodyWireFormatOverride)`; `ProbeBodyWireFormat` interno.
+- **`PacketParser.Dispatch(data, bodyWireFormatOverride)`:** repassa sticky.
+- **`SessionStore.ParsePacket`:** resolve e fixa `ResolvedBodyWireFormat` no primeiro pacote probeable; `OvertakePlugin` usa isso em vez de `Dispatch` direto.
+- **`LeagueFinalizer`:** `_debug.game.bodyWireFormat` (2025 ou 2026) para diagnostico.
+
+### Tests
+- **Test 47 (`Test-F126MyTeamBodyLayoutProbe`):** payload sintetico header 2026 + corpo 2025 (3 pilotos My Team, nomes Catalunya-like); probe=2025, `fullMyTeamGrid`, export com `PRT_martbryt` / `IMT_ELCoentro`.
+
+### Note
+- Grids career/AI F1 26 (stride 60 real) continuam escolhendo layout 2026 — Test 36/37/38 inalterados.
+- Inclui todos os fixes da v1.1.45 (NaN, Sprint Format, sanitize nomes) para um unico instalador de teste.
+
 ## [1.1.45] - 2026-06-22
 
 ### Fixed (NaN no JSON quebrava import do Race Hub)
@@ -24,7 +42,7 @@ All notable changes to the Overtake SimHub Plugin are documented here.
 - **Test 46 (`Test-PlayerNameControlCharStrip`):** TAB no inicio do nome vira tag limpa em `participants`/`bestKnownTags`.
 
 ### Note
-- **Nomes/equipes em lobby My Team F1 26 online NAO corrigidos nesta release** (`Catalunya_20260622_231048_05C0F3.otk`): posicoes/tempos/FC intactos, mas `Participants`/`LobbyInfo` offsets para grid custom 18-car ainda desalinhados vs captura career/AI usada na v1.1.40. Follow-up v1.1.46 com remapeamento a partir de raw samples desse lobby.
+- **Nomes/equipes em lobby My Team F1 26 online corrigidos na v1.1.46** — ver entrada acima. Esta release (1.1.45) entregou NaN + Sprint Format apenas.
 
 ## [1.1.44] - 2026-06-16
 

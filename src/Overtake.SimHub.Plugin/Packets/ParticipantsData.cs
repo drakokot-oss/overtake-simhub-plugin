@@ -75,9 +75,82 @@ namespace Overtake.SimHub.Plugin.Packets
             OffName = 10, OffYourTelemetry = 42, OffShowOnlineNames = 43, OffPlatform = 46,
         };
 
-        private static Layout LayoutFor(ushort packetFormat)
+        private static Layout LayoutForBodyWireFormat(ushort bodyWireFormat)
         {
-            return packetFormat >= 2026 ? L2026 : L2025;
+            return bodyWireFormat >= 2026 ? L2026 : L2025;
+        }
+
+        /// <summary>
+        /// Scores both 2025 and 2026 body layouts; used when the header says 2026.
+        /// </summary>
+        internal static ushort ProbeBodyWireFormat(byte[] data)
+        {
+            int score2025 = ScoreLayout(data, L2025);
+            int score2026 = ScoreLayout(data, L2026);
+            return score2025 > score2026 ? (ushort)2025 : (ushort)2026;
+        }
+
+        private static int ScoreLayout(byte[] data, Layout lay)
+        {
+            if (data == null || data.Length < PacketHeader.Size + 1)
+                return int.MinValue / 4;
+
+            int p = PacketHeader.Size;
+            byte numActive = data[p];
+            if (numActive == 0) return int.MinValue / 4;
+
+            int baseOff = p + 1;
+            int active = Math.Min((int)numActive, GameInfo.MaxSupportedCars);
+            int score = 0;
+            int myTeamCount = 0;
+            int driverXCount = 0;
+
+            for (int i = 0; i < active; i++)
+            {
+                int start = baseOff + i * lay.Stride;
+                if (start + lay.Stride > data.Length)
+                {
+                    score -= 60;
+                    break;
+                }
+
+                if (start + lay.OffMyTeam < data.Length && data[start + lay.OffMyTeam] != 0)
+                    myTeamCount++;
+
+                byte teamId = (start + lay.OffTeamId < data.Length) ? data[start + lay.OffTeamId] : (byte)255;
+                if (teamId >= 220 && teamId <= 235) score += 4;
+                else if (teamId == 255) score -= 10;
+
+                string name = ParseName(data, start, i, lay);
+                if (name.StartsWith("Driver_"))
+                    driverXCount++;
+                else
+                    score += ScoreNameQuality(name);
+            }
+
+            score -= driverXCount * 45;
+            // Full My Team grid with header 2026 => legacy 2025 body layout (Catalunya case).
+            if (active >= 2 && myTeamCount == active) score += 120;
+            // Official career grid: no MyTeam flags on active humans.
+            else if (active >= 2 && myTeamCount == 0) score += 30;
+
+            return score;
+        }
+
+        private static int ScoreNameQuality(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return -25;
+            int score = name.Length >= 4 ? 12 : 4;
+            foreach (char c in name)
+            {
+                if (char.IsLetterOrDigit(c) || c == '_' || c == ' ' || c == '[' || c == ']')
+                    score += 2;
+                else if (char.IsControl(c))
+                    score -= 30;
+                else
+                    score -= 6;
+            }
+            return score;
         }
 
         public byte NumActiveCars;
@@ -138,13 +211,26 @@ namespace Overtake.SimHub.Plugin.Packets
         /// Parses a Participants packet using the byte layout for the given UDP
         /// wire format (<paramref name="packetFormat"/> from the packet header).
         /// v1.1.40 — added 2026 layout support.
+        /// v1.1.46 — when header is 2026, probe 2025 vs 2026 body layout (My Team online).
         /// </summary>
         public static ParticipantsData Parse(byte[] data, ushort packetFormat)
+        {
+            return Parse(data, packetFormat, null);
+        }
+
+        /// <param name="bodyWireFormatOverride">
+        /// Sticky body layout for the capture (2025 or 2026). When null and the header
+        /// is 2026, both layouts are scored and the winner is used.
+        /// </param>
+        public static ParticipantsData Parse(byte[] data, ushort packetFormat, ushort? bodyWireFormatOverride)
         {
             if (data == null || data.Length < PacketHeader.Size + 1)
                 return null;
 
-            Layout lay = LayoutFor(packetFormat);
+            ushort bodyFmt = packetFormat >= 2026
+                ? (bodyWireFormatOverride ?? ProbeBodyWireFormat(data))
+                : (ushort)2025;
+            Layout lay = LayoutForBodyWireFormat(bodyFmt);
 
             int p = PacketHeader.Size;
             byte numActive = data[p];

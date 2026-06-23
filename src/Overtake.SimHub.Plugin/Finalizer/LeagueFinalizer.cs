@@ -1114,6 +1114,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             var gameDebug = new Dictionary<string, object>
             {
                 { "packetFormat", newestPacketFormat != 0 ? (object)(int)newestPacketFormat : null },
+                { "bodyWireFormat", store.ResolvedBodyWireFormat.HasValue ? (object)(int)store.ResolvedBodyWireFormat.Value : null },
                 { "gameYear", newestPacketFormat != 0 ? (object)(int)newestGameYear : null },
                 { "gameMajorVersion", newestPacketFormat != 0 ? (object)(int)newestGameMajor : null },
                 { "gameMinorVersion", newestPacketFormat != 0 ? (object)(int)newestGameMinor : null },

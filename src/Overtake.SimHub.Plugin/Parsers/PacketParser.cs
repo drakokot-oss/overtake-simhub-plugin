@@ -35,6 +35,15 @@ namespace Overtake.SimHub.Plugin.Parsers
     {
         public static ParsedPacket Dispatch(byte[] data)
         {
+            return Dispatch(data, null);
+        }
+
+        /// <param name="bodyWireFormatOverride">
+        /// Sticky 2025/2026 body layout for captures whose header says 2026 but the
+        /// payload still uses the legacy stride (My Team online). Null = probe per packet.
+        /// </param>
+        public static ParsedPacket Dispatch(byte[] data, ushort? bodyWireFormatOverride)
+        {
             var header = PacketHeader.Parse(data);
             if (header == null)
                 return null;
@@ -53,22 +62,16 @@ namespace Overtake.SimHub.Plugin.Parsers
                     result.Event = EventData.Parse(data);
                     break;
                 case 4:
-                    // v1.1.40 — format-aware: 2026 Season Pack shifts the
-                    // Participants entry layout (stride 57->60, teamId/name moved).
-                    result.Participants = ParticipantsData.Parse(data, header.PacketFormat);
+                    result.Participants = ParticipantsData.Parse(data, header.PacketFormat, bodyWireFormatOverride);
                     break;
                 case 7:
-                    // v1.1.40 — format-aware: 2026 grows the CarStatus stride
-                    // 55->59 (ERS offsets unchanged).
-                    result.CarStatus = CarStatusEntry.Parse(data, header.PacketFormat);
+                    result.CarStatus = CarStatusEntry.Parse(data, header.PacketFormat, bodyWireFormatOverride);
                     break;
                 case 8:
                     result.FinalClassification = FinalClassificationData.Parse(data);
                     break;
                 case 9:
-                    // v1.1.41 — format-aware: 2026 shifts the LobbyInfo entry
-                    // layout (stride 42->43, name 4->5).
-                    result.LobbyInfo = LobbyInfoData.Parse(data, header.PacketFormat);
+                    result.LobbyInfo = LobbyInfoData.Parse(data, header.PacketFormat, bodyWireFormatOverride);
                     break;
                 case 10:
                     result.CarDamage = CarDamageEntry.Parse(data);

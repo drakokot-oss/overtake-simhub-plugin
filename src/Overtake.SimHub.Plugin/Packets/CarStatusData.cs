@@ -34,9 +34,47 @@ namespace Overtake.SimHub.Plugin.Packets
         private const int FuelOnlyMinSize = 17;
         private const int FullEntryMinSize = 55;
 
-        private static int EntrySizeFor(ushort packetFormat)
+        private static int EntrySizeForBodyWireFormat(ushort bodyWireFormat)
         {
-            return packetFormat >= 2026 ? EntrySize2026 : EntrySize2025;
+            return bodyWireFormat >= 2026 ? EntrySize2026 : EntrySize2025;
+        }
+
+        internal static ushort ProbeBodyWireFormat(byte[] data)
+        {
+            int score2025 = ScoreStride(data, EntrySize2025);
+            int score2026 = ScoreStride(data, EntrySize2026);
+            return score2025 > score2026 ? (ushort)2025 : (ushort)2026;
+        }
+
+        private static int ScoreStride(byte[] data, int entrySize)
+        {
+            if (data == null || data.Length < PacketHeader.Size + FuelOnlyMinSize)
+                return int.MinValue / 4;
+
+            int p = PacketHeader.Size;
+            int maxCars = Math.Min(4, (data.Length - p) / entrySize);
+            if (maxCars < 1) return int.MinValue / 4;
+
+            int score = 0;
+            for (int i = 0; i < maxCars; i++)
+            {
+                int off = p + i * entrySize;
+                if (off + FullEntryMinSize > data.Length) break;
+
+                float fuelCap = BitConverter.ToSingle(data, off + 9);
+                float ersStore = BitConverter.ToSingle(data, off + 37);
+                byte deployMode = data[off + 41];
+
+                if (fuelCap >= 80f && fuelCap <= 130f) score += 25;
+                else if (float.IsNaN(fuelCap) || fuelCap > 500f || fuelCap < 1f) score -= 35;
+
+                if (ersStore >= 0f && ersStore <= 5000000f) score += 20;
+                else if (ersStore > 1e10f || float.IsNaN(ersStore)) score -= 45;
+
+                if (deployMode <= 3) score += 5;
+                else score -= 10;
+            }
+            return score;
         }
 
         /// <summary>Backwards-compatible entry point — assumes the 2025 wire format.</summary>
@@ -48,14 +86,23 @@ namespace Overtake.SimHub.Plugin.Packets
         /// <summary>
         /// Parses a CarStatus packet using the entry stride for the given UDP wire
         /// format. v1.1.40 — added 2026 stride (59) support; ERS offsets unchanged.
+        /// v1.1.46 — probe 2025 vs 2026 stride when header is 2026 (My Team online).
         /// </summary>
         public static CarStatusEntry[] Parse(byte[] data, ushort packetFormat)
+        {
+            return Parse(data, packetFormat, null);
+        }
+
+        public static CarStatusEntry[] Parse(byte[] data, ushort packetFormat, ushort? bodyWireFormatOverride)
         {
             if (data == null || data.Length < PacketHeader.Size + FuelOnlyMinSize)
                 return null;
 
             int p = PacketHeader.Size;
-            int entrySize = EntrySizeFor(packetFormat);
+            ushort bodyFmt = packetFormat >= 2026
+                ? (bodyWireFormatOverride ?? ProbeBodyWireFormat(data))
+                : (ushort)2025;
+            int entrySize = EntrySizeForBodyWireFormat(bodyFmt);
             // F1 25 sends 22 entries; F1 26 (mod) sends up to 24.
             // Cap at GameInfo.MaxSupportedCars so a hypothetical larger grid in
             // future patches is not silently truncated.
