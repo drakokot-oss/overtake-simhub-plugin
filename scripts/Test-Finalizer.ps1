@@ -2397,11 +2397,23 @@ function Test-F126SprintRaceId15NotTerminal() {
         [System.BitConverter]::GetBytes([uint32]88000).CopyTo($fc, 1 + 7)
         $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid))))
     }
+    $feedParticipants = {
+        param([uint64]$uid)
+        $pp = New-Object byte[] 1256
+        for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+        $pp[0] = 1; $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+        $n0 = [System.Text.Encoding]::UTF8.GetBytes("Hamilton")
+        [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+        $pp[41] = 1; $pp[44] = 1
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp $uid))))
+    }
 
     # Sprint Shootout + Sprint Race (wire id=15) before any Qualifying.
     & $feed ([uint64]200) ([byte]10)
+    & $feedParticipants ([uint64]200)
     & $feedFc ([uint64]200)
     & $feed ([uint64]201) ([byte]15)
+    & $feedParticipants ([uint64]201)
     & $feedFc ([uint64]201)
 
     $closing = $isClosing.Invoke($null, [object[]]@([byte]15, $st))
@@ -2410,11 +2422,13 @@ function Test-F126SprintRaceId15NotTerminal() {
 
     # Main Qualifying arrives -- still not terminal (Quali itself is not Race).
     & $feed ([uint64]202) ([byte]5)
+    & $feedParticipants ([uint64]202)
     & $feedFc ([uint64]202)
     Assert "v1.1.45: HasClosedTerminalSession still false after Quali only" (-not $st.HasClosedTerminalSession())
 
     # Main Race (second wire id=15) after Quali -- now terminal.
     & $feed ([uint64]203) ([byte]15)
+    & $feedParticipants ([uint64]203)
     & $feedFc ([uint64]203)
     Assert "v1.1.45: HasClosedTerminalSession true after Main Race post-Quali" $st.HasClosedTerminalSession()
 

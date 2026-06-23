@@ -1301,7 +1301,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     if (row == null || row.Position <= 0) continue;
                     fcRowsClassified++;
                     string tag;
-                    if (!sess.TagsByCarIdx.TryGetValue(row.CarIdx, out tag))
+                    if (!sess.TagsByCarIdx.TryGetValue(row.CarIdx, out tag) || string.IsNullOrEmpty(tag))
                     {
                         // Online: default to Driver_{idx} so FC rows join the same bucket as lap ingestion
                         // (Car{N} only when duplicate disambiguation explicitly creates it).
@@ -1372,7 +1372,11 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
                     // A classified driver who completed laps is NEVER filtered.
                     if (row.NumLaps > 0)
+                    {
+                        if (string.IsNullOrEmpty(tag))
+                            tag = string.Format("Driver_{0}", row.CarIdx);
                         goto fc_accept;
+                    }
 
                     // Ghost filter: offline — unregistered Car{N} + 0 laps = empty grid slot.
                     // Online — FC row is authoritative; keep stub even with no telemetry.
@@ -1396,6 +1400,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
                             continue;
                         }
                     }
+
+                    if (string.IsNullOrEmpty(tag))
+                        tag = string.Format("Driver_{0}", row.CarIdx);
+
                     fc_accept:
                     emittedFromFc++;
 
