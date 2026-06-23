@@ -2616,7 +2616,7 @@ function Test-F126MyTeamBodyLayoutProbe() {
     $sp = New-Object byte[] 700
     $sp[0] = 1; $sp[6] = 15; $sp[7] = 5; $sp[125] = 1
     $raw = New-FakePacket 1 $sp ([uint64]951) $fmt
-    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @($raw))))
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, (,$raw))))
 
     $lob = New-Object byte[] (1 + 24 * 42)
     for ($zi = 0; $zi -lt $lob.Length; $zi++) { $lob[$zi] = 0 }
@@ -2625,13 +2625,13 @@ function Test-F126MyTeamBodyLayoutProbe() {
     Set-LobbyEntry2025 $lob 1 ([byte]221) ([byte]57) "IMT_ELCoentro"
     Set-LobbyEntry2025 $lob 2 ([byte]222) ([byte]23) "TSL MARTINS"
     $raw = New-FakePacket 9 $lob ([uint64]951) $fmt
-    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @($raw))))
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, (,$raw))))
 
     $pp1 = New-ParticipantsMyTeam2026Body 3
     $raw = New-FakePacket 4 $pp1 ([uint64]951) $fmt
-    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @($raw))))
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, (,$raw))))
     $raw = New-FakePacket 4 $pp1 ([uint64]952) $fmt
-    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @($raw))))
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, (,$raw))))
 
     $resolved = Get-Field $st "ResolvedBodyWireFormat"
     Assert "v1.1.46: store pins bodyWireFormat 2025" ($resolved -ne $null -and [int]$resolved -eq 2025)
@@ -2643,7 +2643,7 @@ function Test-F126MyTeamBodyLayoutProbe() {
     [System.BitConverter]::GetBytes([uint32]86000).CopyTo($fc, 1 + 46 + 7)
     [System.BitConverter]::GetBytes([uint32]87000).CopyTo($fc, 1 + 92 + 7)
     $raw = New-FakePacket 8 $fc ([uint64]953) $fmt
-    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, @($raw))))
+    $ingestMethod.Invoke($st, @($parsePkt.Invoke($st, (,$raw))))
 
     $res = $finalizeMethod.Invoke($null, @($st))
     $dbgGame = Get-DictValue (Get-DictValue $res "_debug") "game"
