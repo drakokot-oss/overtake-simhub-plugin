@@ -140,64 +140,142 @@ namespace Overtake.SimHub.Plugin.Finalizer
         }
 
         /// <summary>
+        /// Any race session: "Race" (15 + the online ids 19/25/26/29/30/36), "Race2"
+        /// (16) or "Race3" (17). v1.1.47: the discriminator for terminal/export logic is
+        /// now "race-like" instead of strictly "Race", because F1 26 Sprint Format
+        /// weekends do NOT keep the F1 25 id convention. Observed (Austria/Abu Dhabi,
+        /// offline F1 26): Sprint Race = wire id 15 ("Race"), Main Race = wire id 16
+        /// ("Race2") -- the INVERSE of F1 25 (Sprint=16, Main=15). Online F1 26 sends
+        /// BOTH as id=15. The official EA 2026 spec confirms 15=Race, 16=Race2, 17=Race3,
+        /// but does not pin which the game assigns to Sprint vs Main in a weekend, so we
+        /// rely on chronology instead of the raw id.
+        /// </summary>
+        public static bool IsRaceLikeType(int sessionTypeId)
+        {
+            string name;
+            if (!Lookups.SessionType.TryGetValue(sessionTypeId, out name) || name == null)
+                return false;
+            return name.StartsWith("Race");
+        }
+
+        public static int CountRaceLikeSessions(IEnumerable<SessionRun> sessions)
+        {
+            int n = 0;
+            if (sessions == null) return 0;
+            foreach (var s in sessions)
+                if (s != null && s.SessionType.HasValue && IsRaceLikeType(s.SessionType.Value))
+                    n++;
+            return n;
+        }
+
+        /// <summary>
+        /// True when <paramref name="sess"/> is the chronologically last race-like session
+        /// in the capture (highest LastPacketMs; tie-break: later list index wins). The
+        /// Main Race of a Sprint Format weekend is always the last race.
+        /// </summary>
+        public static bool IsLastRaceSession(SessionRun sess, IList<SessionRun> allSessions)
+        {
+            if (sess == null || !sess.SessionType.HasValue || !IsRaceLikeType(sess.SessionType.Value))
+                return false;
+            long thisMs = sess.LastPacketMs;
+            int thisIdx = allSessions.IndexOf(sess);
+            for (int i = 0; i < allSessions.Count; i++)
+            {
+                SessionRun s = allSessions[i];
+                if (s == null || s == sess || !s.SessionType.HasValue) continue;
+                if (!IsRaceLikeType(s.SessionType.Value)) continue;
+                if (s.LastPacketMs > thisMs) return false;
+                if (s.LastPacketMs == thisMs && i > thisIdx) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Main-qualifying session type for terminal detection: Q1/Q2/Q3 (5..7) or
+        /// One-Shot Qualifying (9). Short Qualifying (id 8) is intentionally EXCLUDED:
+        /// per field reports it is sometimes emitted as the Sprint-side qualifying before
+        /// the Sprint Race, so treating it as "main quali" would mark the Sprint terminal.
+        /// The Sprint qualifying proper is always a Sprint Shootout (ids 10..14).
+        /// </summary>
+        private static bool IsMainQualifyingType(int id)
+        {
+            return (id >= 5 && id <= 7) || id == 9;
+        }
+
+        private static bool HasMainQualifyingInStore(IEnumerable<SessionRun> all)
+        {
+            if (all == null) return false;
+            foreach (var s in all)
+                if (s != null && s.SessionType.HasValue && IsMainQualifyingType(s.SessionType.Value))
+                    return true;
+            return false;
+        }
+
+        /// <summary>A main qualifying ended chronologically at or before this race.</summary>
+        private static bool OccursAfterMainQualifying(SessionRun sess, IEnumerable<SessionRun> all)
+        {
+            if (sess == null || all == null) return false;
+            long raceMs = sess.LastPacketMs;
+            foreach (var s in all)
+            {
+                if (s == null || s == sess || !s.SessionType.HasValue) continue;
+                if (IsMainQualifyingType(s.SessionType.Value) && s.LastPacketMs <= raceMs)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Should auto-export fire when a session with this wire id just ended?
-        /// Called at SEND time with the current store state.
+        /// Called at SEND time with the current store state -- the closing session is the
+        /// latest one, so a closing race is the Main Race once the Sprint already ran
+        /// (>= 2 races) or a main Qualifying is present.
         /// </summary>
         public static bool IsTerminalRaceClosing(byte closingSessionTypeId, SessionStore store)
         {
-            if (!IsRaceWireType(closingSessionTypeId)) return false;
-            if (store == null || !HasSprintShootout(store.Sessions.Values)) return true;
-
+            if (!IsRaceLikeType(closingSessionTypeId)) return false;
+            if (store == null) return IsRaceWireType(closingSessionTypeId);
             var all = store.Sessions.Values;
-            // F1 26: defer while Main Quali is still pending (mislabeled Sprint on id=15).
-            if (CountWireRaceSessions(all) < 2 && HasMainQualifying(all)
-                && !HasSprintRaceSessionId16(all))
-                return false;
-            return HasAnyQualifying(all);
+            if (!HasSprintShootout(all)) return IsRaceWireType(closingSessionTypeId);
+            // Sprint Format weekend: the closing race is the Main (terminal) race once a
+            // second race-like session exists (the Sprint already ran) or a main
+            // Qualifying has appeared (lone-race Baku-style weekends).
+            return CountRaceLikeSessions(all) >= 2 || HasMainQualifyingInStore(all);
         }
 
         /// <summary>
         /// Was this stored session a terminal Main Race (for auto-rotate / HasClosed)?
+        /// The Main Race is the chronologically last race, and only after the Sprint
+        /// (>= 2 races) or after the main Qualifying (lone-race Baku-style).
         /// </summary>
         public static bool IsTerminalRaceSession(SessionRun sess, IEnumerable<SessionRun> allSessions)
         {
             if (sess == null || sess.FinalClassification == null || !sess.SessionType.HasValue)
                 return false;
-            if (!IsRaceWireType(sess.SessionType.Value)) return false;
-            if (!HasSprintShootout(allSessions)) return true;
-
-            int wireRaceCount = CountWireRaceSessions(allSessions);
-            if (wireRaceCount >= 2)
-            {
-                if (!HasMainQualifying(allSessions)) return false;
-                return !IsFirstWireRaceSession(sess, AsList(allSessions));
-            }
-
-            // Single wire-id=15 in a Sprint-format weekend.
-            if (HasMainQualifying(allSessions) && !HasSprintRaceSessionId16(allSessions))
-                return false; // F1 26 mislabel: Main Quali done, Main Race (2nd id=15) pending.
-            if (!HasMainQualifying(allSessions) && HasAnyQualifying(allSessions))
-                return true; // Baku-style: Short/OS Quali done, lone Race is Main.
-            if (!HasMainQualifying(allSessions) && !HasAnyQualifying(allSessions))
-                return false; // F1 26 mislabel: Sprint Race ended before Main Quali.
-            if (HasSprintRaceSessionId16(allSessions))
-                return true; // F1 25: Sprint on id=16, lone id=15 is Main Race.
-            return false;
+            if (!IsRaceLikeType(sess.SessionType.Value)) return false;
+            if (!HasSprintShootout(allSessions)) return IsRaceWireType(sess.SessionType.Value);
+            if (!IsLastRaceSession(sess, AsList(allSessions))) return false;
+            return CountRaceLikeSessions(allSessions) >= 2
+                || OccursAfterMainQualifying(sess, allSessions);
         }
 
         /// <summary>
-        /// Export label id: remap wire id=15 to 16 (Race2) only when F1 26 sent TWO
-        /// Race (id=15) sessions and this is the first one (Sprint Race).
+        /// Export label id. v1.1.47: in a Sprint Format weekend with two races, the
+        /// chronologically LAST race is the Main Race -> "Race" (15) and the earlier one
+        /// is the Sprint Race -> "Race2" (16), regardless of the raw wire ids. This
+        /// normalizes F1 25 (Sprint=16/Main=15), F1 26 offline (Sprint=15/Main=16) and
+        /// F1 26 online (both=15) to one consistent labeling the Race Hub can rely on.
+        /// A lone race (no Sprint, e.g. Baku) keeps its wire id.
         /// </summary>
         public static int GetExportSessionTypeId(SessionRun sess, IEnumerable<SessionRun> allSessions)
         {
             if (sess == null || !sess.SessionType.HasValue)
                 return 0;
             int wireId = sess.SessionType.Value;
-            if (wireId != 15) return wireId;
+            if (!IsRaceLikeType(wireId)) return wireId;
             if (!HasSprintShootout(allSessions)) return wireId;
-            if (IsSprintRaceMislabeledAsWire15(sess, AsList(allSessions))) return 16;
-            return 15;
+            if (CountRaceLikeSessions(allSessions) < 2) return wireId;
+            return IsLastRaceSession(sess, AsList(allSessions)) ? 15 : 16;
         }
     }
 

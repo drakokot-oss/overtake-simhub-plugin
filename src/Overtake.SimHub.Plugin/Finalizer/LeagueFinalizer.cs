@@ -2898,7 +2898,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
         private static string ResolveTeamName(ParticipantEntry team)
         {
             if (team == null) return null;
-            if (team.MyTeam) return "MyTeam";
+            // v1.1.47: the m_myTeam flag is unreliable on F1 26 captures (reads 0 even for
+            // the player's own My Team car), so fall back to the known My Team team ids
+            // (41 in F1 25 content, 232 in F1 26 content, 104 = official F1 Custom Team).
+            if (team.MyTeam || Lookups.IsMyTeamTeamId(team.TeamId)) return "MyTeam";
             return Lookups.LookupOrDefault(Lookups.Teams, team.TeamId, "Team");
         }
 

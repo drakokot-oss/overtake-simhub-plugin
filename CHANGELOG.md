@@ -2,6 +2,38 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [1.1.47] - 2026-06-25
+
+### Fixed (F1 26 Sprint Format offline — auto-export nao disparava + rotulos trocados)
+- **Sintoma:** dois `.otk` de fim de semana sprint offline F1 26 (`Austria_20260623_022902`, `Austria_20260623_090434`) so sairam por export MANUAL — o auto-export nao disparou nem no fim da Sprint nem no fim da Corrida principal. Alem disso a Corrida principal saia rotulada como `Race2` e a Sprint como `Race` (invertido para o Race Hub).
+- **Causa:** no F1 26 OFFLINE o jogo INVERTE a convencao do F1 25 — a Sprint vem com wire id=15 (`"Race"`) e a Corrida principal com wire id=16 (`"Race2"`); o oposto do F1 25 (Sprint=16, Main=15). O `IsTerminalRaceClosing`/`IsTerminalRaceSession` so tratavam `IsRaceWireType` (name=="Race"=id 15) como terminal, entao a Corrida principal (id=16) nunca era terminal → auto-export jamais armava. Confirmado pela spec oficial EA 2026 (15=Race, 16=Race2, 17=Race3) cruzada com os dados reais e com o comportamento observado.
+- **`SprintFormatHelper.cs`:** logica de terminal/rotulo reescrita em torno de `IsRaceLikeType` (qualquer corrida) + cronologia em vez do id cru. Corrida terminal = race-like E (nao-sprint → so id 15-familia) OU (sprint weekend → 2a corrida OU quali principal 5/6/7/9 ja ocorreu). `GetExportSessionTypeId`: num weekend sprint com 2 corridas, a ULTIMA cronologicamente vira `Race`(15) e a anterior `Race2`(16), normalizando F1 25 (Sprint=16/Main=15), F1 26 offline (Sprint=15/Main=16) e F1 26 online (ambas=15). Short Qualifying (id=8) e tratado de forma conservadora (nao conta como quali-principal-terminal) por aparecer as vezes como quali da sprint.
+
+### Fixed (My Team F1 26 — flag m_myTeam morta, equipe saia como Team(232))
+- **Sintoma:** carros My Team saindo como `Team(232)` (conteudo F1 26) / `Team(41)` (F1 25), e lobby full-My-Team de liga nao era detectado (`fullMyTeamGrid: false`).
+- **Causa:** a flag por-piloto `m_myTeam` e UNRELIAVEL no F1 26 — le 0 inclusive no proprio carro do jogador. Prova: `Austria_20260625_184709` e `AbuDhabi_20260625_185628` (online), grid inteiro com teamId=232 e TODOS os carros `myTeam=false`. `ResolveTeamName` so retornava "MyTeam" pela flag → caia em `Team(232)`; `DetectFullMyTeamGrid` dependia da flag → nunca disparava.
+- **`Lookups.cs`:** novo `MyTeamTeamIds = {41, 104, 232}` + `IsMyTeamTeamId`. **`LeagueFinalizer.ResolveTeamName`:** retorna "MyTeam" pela flag OU pelo teamId conhecido. **`SessionStore.DetectFullMyTeamGrid`:** um slot conta como My Team pela flag OU pelo teamId — detecta lobby full-My-Team mesmo com a flag morta.
+
+### Fixed (decode de wire 2026 — ERS deslocado + LobbyInfo nationality)
+- **Achado por ultrareview cruzando o codigo com o spec oficial UDP 2026.** O spec 2026 NAO so cresce o stride — INSERE campos novos no meio das structs. A premissa "so o stride muda" (comentarios v1.1.40) estava errada.
+- **CarStatus ERS (`CarStatusData.cs`):** o 2026 insere `m_ersHarvestedLimitPerLap` (float) em **@50**, empurrando `m_ersDeployedThisLap` para **@54** e `m_networkPaused` para **@58** (stride 55→59). O parser lia @50/@54 nos dois formatos → no F1 26 `deployedThisLap` vinha com o **limite de harvest** (o ">100% deploy" que a v1.1.42 racionalizou como "novo modelo de energia" era ISSO) e `networkPaused` lia um byte do float deployed (descartando amostras ERS validas como "pausa"). Agora os offsets do ERS sao **format-aware**; novo campo `ErsHarvestedLimitPerLap`. Os tetos de regulamento da v1.1.42 (9/8,5 MJ) seguem validos; so o campo lido estava errado.
+- **LobbyInfo nationality (`LobbyInfoData.cs`):** `m_teamId` cresceu uint8→uint16 no 2026, empurrando `m_nationality` de @2 para **@3** (o @2 antigo lia o byte alto do teamId). `OffNationality` agora no Layout (2025=2/2026=3). Blast radius atual ~nulo (ninguem consome `LobbyInfoEntry.Nationality`), mas era decode objetivamente errado.
+
+### Added (lobbySettings 2026 destravado)
+- **`GameInfo.AreDeepSessionFieldsMapped` agora inclui 2026** (`fmt <= 2026`). O bloco deep do Session (assists, ruleSet, carDamage, collisions, parcFerme, formationLap, safetyCar/redFlag settings, VSC/red-flag counts, equalCar) era OMITIDO no 2026 por falta de spec. Agora **TODOS os 31 offsets que o plugin le foram verificados byte-a-byte contra o spec oficial 2026** (`PacketSessionData` = 926 bytes; 2025 e 2026 compartilham o mesmo layout nesse bloco). O `lobbySettings` passa a sair no `.otk` do F1 26 — insumo direto pro anti-cheat da liga (assists corretos). O guard `hasData`/`LobbySettingsCaptured` (pacotes Session iniciais vem zerados) continua valendo. O `sessionDeepProbe` (diagnostico de RE) auto-desativa no 2026 e segue ativo so para formatos futuros nao mapeados.
+
+### Tests
+- **Test 39 (`Test-LobbySettingsMappedFor2026`):** invertido — `lobbySettings` agora IS populado no 2026 (era OMITIDO).
+- **Test 42 (`Test-SessionDeepProbe2026`):** invertido — 2026 NAO produz mais `sessionDeepProbe` (deep mapeado); mecanismo segue para formatos futuros.
+- **Test 50 (`Test-CarStatus2026ErsOffsetShift`):** entrada 2026 com valores distintos em @50 (limit 8,5 MJ)/@54 (deployed 7 MJ)/@58 (paused) → parser le deployed=7 MJ (não o limite), harvestLimit=8,5 MJ, paused=1; caminho 2025 segue lendo deployed@50. Test 41 atualizado (builder escrevia deployed no @50 errado).
+- **Test 48 (`Test-F126OfflineSprintMainIsId16`):** Sprint Shootout(14) + Sprint(wire 15) + Quali(9) + Main(wire 16); Sprint nao e terminal antes da Quali; Main(16) e terminal closing (auto-export dispara); Main exporta `Race`, Sprint exporta `Race2`; 4 sessoes consolidadas.
+- **Test 49 (`Test-MyTeamTeamIdFallback`):** `IsMyTeamTeamId` (232/41/104 true; 220/0 false); grid online full-232 com `myTeam=false` → full My Team detectado e `teamName` resolve para `MyTeam`.
+
+### Note
+- Validacao previa (Sprint Format) feita por simulacao da nova logica contra as sequencias reais dos `.otk` E contra os Tests 27/28/29/44 existentes (todos seguem passando, sem modificacao). Compilar e rodar `scripts/Test-Finalizer.ps1` no ambiente Windows antes do release.
+- A spec oficial UDP 2026 da EA EXISTE (forums.ea.com, "F1 25 2026 Season Pack UDP specification") — corrige a premissa antiga do PROJECT-CONTEXT. packetId 16 = `CarTelemetry2` (active aero/overtake). teamIds 2026 nativos = 476-486 (uint16); o plugin le o byte baixo, batendo nos 220-230.
+- **Backlog v1.1.48+ (achados latentes do ultrareview, exigem captura ONLINE F1 26 nativa p/ validar):** (1) `networkId`/`driverId` sao uint16 no 2026 mas lidos como byte em offset fixo (@2) — **CONFIRMADO pelos dados:** `bestKnownTagsByNet` sai VAZIO nas capturas 2026-nativas (Austria/AbuDhabi MyTeam) vs populado no wire 2025 (Miami). Em lobby full-MyTeam nativo com 2 humanos de mesmo rn, a desambiguacao por networkId (fix issue #1) fica desligada/colide. Mitigacao atual: rodar **UDP Format 2025** no jogo. (2) Migrar `teamId` para uint16 (hoje le byte baixo, funciona por range). (3) `m_weekendStructure[12]` p/ identificar Sprint vs Main de forma autoritativa (hoje cronologia). (4) Probe de wire-format por comprimento de pacote (o sinal "+120 full-MyTeam" do probe esta morto no F1 26).
+
 ## [1.1.46] - 2026-06-22
 
 ### Fixed (F1 26 My Team online — header 2026, body layout 2025)

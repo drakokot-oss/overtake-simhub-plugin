@@ -2187,12 +2187,12 @@ function Test-LobbyInfo2026FromRealCapture() {
 Write-Host "=== Test 38: 2026 LobbyInfo parser vs real capture (v1.1.41) ===" -ForegroundColor Cyan
 [void](Test-LobbyInfo2026FromRealCapture)
 
-function Test-LobbySettingsOmittedFor2026() {
-    # v1.1.41 -- the deep Session lobby-settings block is NOT reliably mapped for
-    # the 2026 wire format, so it must be OMITTED (null) rather than emit garbage.
-    # Build a 2026 race whose Session packet carries non-zero deep-field bytes;
-    # the finalizer must still omit lobbySettings. For 2025 the same data yields a
-    # populated lobbySettings (control).
+function Test-LobbySettingsMappedFor2026() {
+    # v1.1.47 -- the deep Session lobby-settings block IS now mapped for the 2026
+    # wire format (every offset verified byte-for-byte vs the official EA 2026 spec;
+    # 2025 and 2026 share the same layout through this block). Build a race whose
+    # Session packet carries non-zero deep-field bytes; the finalizer must emit a
+    # populated lobbySettings for BOTH 2025 and 2026.
     function Build-RaceWithLobbySettings([uint16]$fmt, [uint64]$uid) {
         $st = [System.Activator]::CreateInstance($storeType)
         $sp = New-Object byte[] 753
@@ -2221,11 +2221,13 @@ function Test-LobbySettingsOmittedFor2026() {
 
     $res26 = Build-RaceWithLobbySettings ([uint16]2026) ([uint64]811)
     $ls26 = Get-DictValue (Get-DictValue $res26 "sessions")[0] "lobbySettings"
-    Assert "v1.1.41: 2026 lobbySettings is OMITTED (null, not garbage)" ($ls26 -eq $null)
+    # v1.1.47: 2026 deep fields are now mapped (offsets verified vs official spec),
+    # so lobbySettings IS populated — same offsets as 2025 through this block.
+    Assert "v1.1.47: 2026 lobbySettings IS populated (deep fields mapped)" ($ls26 -ne $null)
 }
 
-Write-Host "=== Test 39: lobbySettings omitted for 2026 (deep fields unmapped) (v1.1.41) ===" -ForegroundColor Cyan
-[void](Test-LobbySettingsOmittedFor2026)
+Write-Host "=== Test 39: lobbySettings mapped for 2026 (deep fields verified vs spec) (v1.1.47) ===" -ForegroundColor Cyan
+[void](Test-LobbySettingsMappedFor2026)
 
 function Test-ErsRegulationLimits() {
     # v1.1.42 -- GameInfo ERS regulation ceilings (FIA 2026 PU regs).
@@ -2266,7 +2268,9 @@ function Test-ErsRecalibration2026() {
     $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]900) $fmt)))) | Out-Null
 
     # CarStatus 2026 builder: stride 59, 1 entry. store@37, deployMode@41,
-    # harvMguk@42, deployed@50 (all floats in Joules).
+    # harvMguk@42, harvLimit@50 (NEW in 2026), deployed@54, networkPaused@58
+    # (all floats in Joules). v1.1.47: deployed moved 50->54 (the @50 slot is now
+    # the m_ersHarvestedLimitPerLap field inserted by the 2026 spec).
     function New-CarStatus2026([uint32]$storeJ, [uint32]$harvMgukJ, [uint32]$deployedJ) {
         $body = New-Object byte[] 59
         $body[0] = 0; $body[1] = 1; $body[2] = 3                       # TC/ABS/fuelMix
@@ -2276,7 +2280,8 @@ function Test-ErsRecalibration2026() {
         [System.BitConverter]::GetBytes([float]$storeJ).CopyTo($body, 37)
         $body[41] = 2                                                  # deployMode
         [System.BitConverter]::GetBytes([float]$harvMgukJ).CopyTo($body, 42)
-        [System.BitConverter]::GetBytes([float]$deployedJ).CopyTo($body, 50)
+        [System.BitConverter]::GetBytes([float]8500000.0).CopyTo($body, 50)  # harvLimit (NEW 2026)
+        [System.BitConverter]::GetBytes([float]$deployedJ).CopyTo($body, 54) # deployed@54 (2026)
         return ,$body
     }
     # Lap 1: deployed 7 MJ, harvested MGU-K 5 MJ, store full.
@@ -2312,29 +2317,25 @@ Write-Host "=== Test 41: ERS recalibration end-to-end (2026 deploy 7MJ -> 77.8%)
 [void](Test-ErsRecalibration2026)
 
 function Test-SessionDeepProbe2026() {
-    # v1.1.43 -- a 2026 Session packet must produce _debug.sessionDeepProbe (the
-    # diagnostic that captures the LATEST Session packet so the deep lobby-settings
-    # offsets can be reverse-engineered). A 2025 capture must NOT (deep fields are
-    # already mapped). The probe must NOT re-flag the file as unsupported.
+    # v1.1.43 / v1.1.47 -- the _debug.sessionDeepProbe diagnostic captures the latest
+    # Session packet for wire formats whose deep fields are NOT yet mapped, so they can
+    # be reverse-engineered. v1.1.47 mapped the 2026 deep fields (verified vs the
+    # official spec), so 2026 NO LONGER needs the probe; neither does 2025. The probe
+    # mechanism stays in code (gated by AreDeepSessionFieldsMapped) for any future
+    # unmapped format. Exports must never be re-flagged as unsupported.
     $res26 = Build-F126Race ([uint16]2026) ([byte]221) ([byte]42) ([uint64]920)
     $dbg26 = Get-DictValue $res26 "_debug"
     $probe = Get-DictValue $dbg26 "sessionDeepProbe"
-    Assert "v1.1.43: 2026 produces _debug.sessionDeepProbe" ($probe -ne $null)
-    if ($probe -ne $null) {
-        Assert "v1.1.43: probe carries packetFormat 2026" ([int](Get-DictValue $probe "packetFormat") -eq 2026)
-        $hx = Get-DictValue $probe "hexPrefix"
-        Assert "v1.1.43: probe hex non-empty + starts ea07 (2026)" (($hx -ne $null) -and $hx.StartsWith("ea07"))
-    }
-    # Must NOT re-flag the file (2026 stays supported).
+    Assert "v1.1.47: 2026 no longer produces sessionDeepProbe (deep fields now mapped)" ($probe -eq $null)
     $g26 = Get-DictValue $dbg26 "game"
-    Assert "v1.1.43: probe does not set unsupportedUdpFormat" ((Get-DictValue $g26 "unsupportedUdpFormat") -eq $null)
+    Assert "v1.1.47: 2026 export not flagged unsupportedUdpFormat" ((Get-DictValue $g26 "unsupportedUdpFormat") -eq $null)
 
     $res25 = Build-F126Race ([uint16]2025) ([byte]5) ([byte]5) ([uint64]921)
     $probe25 = Get-DictValue (Get-DictValue $res25 "_debug") "sessionDeepProbe"
-    Assert "v1.1.43: 2025 does NOT produce sessionDeepProbe (deep fields mapped)" ($probe25 -eq $null)
+    Assert "v1.1.47: 2025 does NOT produce sessionDeepProbe (deep fields mapped)" ($probe25 -eq $null)
 }
 
-Write-Host "=== Test 42: Session deep-field probe for 2026 (v1.1.43 diagnostic) ===" -ForegroundColor Cyan
+Write-Host "=== Test 42: Session deep-field probe gating (2026 now mapped) (v1.1.47) ===" -ForegroundColor Cyan
 [void](Test-SessionDeepProbe2026)
 
 function Test-UpdateAdvisorSeverity() {
@@ -2657,6 +2658,204 @@ function Test-F126MyTeamBodyLayoutProbe() {
 
 Write-Host "=== Test 47: F1 26 My Team body layout probe (v1.1.46) ===" -ForegroundColor Cyan
 [void](Test-F126MyTeamBodyLayoutProbe)
+
+function Test-F126OfflineSprintMainIsId16() {
+    # v1.1.47 -- F1 26 OFFLINE Sprint Format weekends INVERT the F1 25 id convention:
+    # Sprint Race arrives as wire id=15 ("Race") and Main Race as wire id=16 ("Race2"),
+    # the opposite of F1 25 (Sprint=16, Main=15). Two real captures
+    # (Austria_20260623_022902 / Austria_20260623_090434, both manual export) proved
+    # auto-export NEVER fired: the old IsTerminalRaceClosing gated on IsRaceWireType
+    # (name=="Race"=id 15 only), so the Main Race (id=16) was never terminal.
+    # Fix: terminal = race-like AND (2nd race OR main-quali present); export = last race
+    # -> "Race"(15), earlier race -> "Race2"(16).
+    $st = [System.Activator]::CreateInstance($storeType)
+    $sprintHelper = $asm.GetType("Overtake.SimHub.Plugin.Finalizer.SprintFormatHelper")
+    $isClosing = $sprintHelper.GetMethod("IsTerminalRaceClosing")
+
+    $feed = {
+        param([uint64]$uid, [byte]$stype)
+        $sp = New-Object byte[] 700
+        $sp[0] = 1; $sp[6] = $stype; $sp[7] = 17   # trackId 17 (Austria)
+        $sp[124] = 0; $sp[125] = 0                  # offline
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp $uid))))
+    }
+    $feedParticipants = {
+        param([uint64]$uid)
+        $pp = New-Object byte[] 1256
+        for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+        $pp[0] = 1; $pp[1] = 0; $pp[4] = 0; $pp[6] = 44
+        $n0 = [System.Text.Encoding]::UTF8.GetBytes("ERT Drako%")
+        [System.Array]::Copy($n0, 0, $pp, 8, $n0.Length)
+        $pp[41] = 1; $pp[44] = 1
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp $uid))))
+    }
+    $feedFc = {
+        param([uint64]$uid)
+        $fc = New-Object byte[] (1 + 22 * 46)
+        $fc[0] = 1; $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+        [System.BitConverter]::GetBytes([uint32]88000).CopyTo($fc, 1 + 7)
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc $uid))))
+    }
+
+    # Sprint Shootout (id=14) -> Sprint Race (wire id=15) before any Qualifying.
+    & $feed ([uint64]500) ([byte]14); & $feedParticipants ([uint64]500); & $feedFc ([uint64]500)
+    & $feed ([uint64]501) ([byte]15); & $feedParticipants ([uint64]501); & $feedFc ([uint64]501)
+    $closing15 = $isClosing.Invoke($null, [object[]]@([byte]15, $st))
+    Assert "v1.1.47: F1 26 offline Sprint (wire id=15) before Quali NOT terminal" (-not $closing15)
+    Assert "v1.1.47: HasClosedTerminalSession false before Main Quali" (-not $st.HasClosedTerminalSession())
+
+    # Main Qualifying (id=9 One-Shot) -> still not terminal (Quali is not a Race).
+    & $feed ([uint64]502) ([byte]9); & $feedParticipants ([uint64]502); & $feedFc ([uint64]502)
+    Assert "v1.1.47: HasClosedTerminalSession false after Quali only" (-not $st.HasClosedTerminalSession())
+
+    # Main Race (wire id=16) after Quali -- NOW terminal (this is the bug fix).
+    & $feed ([uint64]503) ([byte]16); & $feedParticipants ([uint64]503); & $feedFc ([uint64]503)
+    $closing16 = $isClosing.Invoke($null, [object[]]@([byte]16, $st))
+    Assert "v1.1.47: F1 26 offline Main Race (wire id=16) IS terminal closing -> auto-export fires" $closing16
+    Assert "v1.1.47: HasClosedTerminalSession true after Main Race (id=16)" $st.HasClosedTerminalSession()
+
+    # Labels: Main (id=16, last) exports as Race; Sprint (id=15, earlier) exports as Race2.
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.47: sprint weekend emits 4 sessions" ($sessions.Count -eq 4)
+    $mainSess = $null; $sprintSess = $null
+    foreach ($s in $sessions) {
+        $u = (Get-DictValue $s "sessionUID").ToString()
+        if ($u -eq "503") { $mainSess = $s }
+        if ($u -eq "501") { $sprintSess = $s }
+    }
+    Assert "v1.1.47: Main Race (uid 503, wire 16) found" ($mainSess -ne $null)
+    Assert "v1.1.47: Sprint Race (uid 501, wire 15) found" ($sprintSess -ne $null)
+    if ($mainSess -ne $null) {
+        $mn = (Get-DictValue (Get-DictValue $mainSess "sessionType") "name").ToString()
+        Assert "v1.1.47: Main Race (wire id=16) exports as 'Race' (not Race2)" ($mn -eq "Race")
+    }
+    if ($sprintSess -ne $null) {
+        $sn = (Get-DictValue (Get-DictValue $sprintSess "sessionType") "name").ToString()
+        Assert "v1.1.47: Sprint Race (wire id=15) exports as 'Race2'" ($sn -eq "Race2")
+    }
+}
+
+Write-Host "=== Test 48: F1 26 offline sprint Main Race as id=16 terminal + labels (v1.1.47) ===" -ForegroundColor Cyan
+[void](Test-F126OfflineSprintMainIsId16)
+
+function Test-MyTeamTeamIdFallback() {
+    # v1.1.47 -- the m_myTeam flag is unreliable on F1 26 captures (reads 0 even for the
+    # player's own My Team car). Real proof: Austria_20260625_184709 / AbuDhabi_20260625_185628,
+    # full grid of teamId=232, EVERY car myTeam=false (incl. the player). Fix: recognize My
+    # Team by team id (41 F1 25 content, 232 F1 26 content, 104 official Custom Team) so the
+    # team name resolves to "MyTeam" and full-My-Team grids are detected.
+    $isMyTeam = $lookupsType.GetMethod("IsMyTeamTeamId")
+    Assert "v1.1.47: IsMyTeamTeamId(232) true (F1 26 content My Team)" ([bool]$isMyTeam.Invoke($null, @([int]232)))
+    Assert "v1.1.47: IsMyTeamTeamId(41) true (F1 25 content My Team)" ([bool]$isMyTeam.Invoke($null, @([int]41)))
+    Assert "v1.1.47: IsMyTeamTeamId(104) true (official F1 Custom Team)" ([bool]$isMyTeam.Invoke($null, @([int]104)))
+    Assert "v1.1.47: IsMyTeamTeamId(220) false (real F1 26 team)" (-not [bool]$isMyTeam.Invoke($null, @([int]220)))
+    Assert "v1.1.47: IsMyTeamTeamId(0) false (Mercedes)" (-not [bool]$isMyTeam.Invoke($null, @([int]0)))
+
+    # End-to-end: online full grid of teamId=232 with myTeam flag OFF on every car.
+    $st = [System.Activator]::CreateInstance($storeType)
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 24   # Race, Abu Dhabi
+    $sp[124] = 0; $sp[125] = 1             # NetworkGame=1 (online)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]600)))))
+
+    # 2025 body layout (teamId@3, myTeam@4): teamId=232 on both, myTeam byte left 0.
+    $feedParts = {
+        $pp = New-Object byte[] 1256
+        for ($zi = 0; $zi -lt $pp.Length; $zi++) { $pp[$zi] = 0 }
+        $pp[0] = 2
+        # entry 0
+        $pp[1 + 0] = 0; $pp[1 + 2] = 10; $pp[1 + 3] = 232; $pp[1 + 4] = 0; $pp[1 + 5] = 73
+        $n0 = [System.Text.Encoding]::UTF8.GetBytes("ERT Drako%")
+        [System.Array]::Copy($n0, 0, $pp, (1 + 7), $n0.Length)
+        $pp[1 + 40] = 1; $pp[1 + 43] = 1
+        # entry 1
+        $s1 = 1 + 57
+        $pp[$s1 + 0] = 0; $pp[$s1 + 2] = 20; $pp[$s1 + 3] = 232; $pp[$s1 + 4] = 0; $pp[$s1 + 5] = 24
+        $n1 = [System.Text.Encoding]::UTF8.GetBytes("CDR Amorim")
+        [System.Array]::Copy($n1, 0, $pp, ($s1 + 7), $n1.Length)
+        $pp[$s1 + 40] = 1; $pp[$s1 + 43] = 1
+        $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]600)))))
+    }
+    & $feedParts; & $feedParts   # streak >= 2 to latch full My Team
+
+    Assert "v1.1.47: full My Team grid detected by teamId (flag off)" ([bool](Get-Field $st "CaptureFullMyTeam"))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]88000).CopyTo($fc, 1 + 7)
+    $offX = 1 + 46
+    $fc[$offX + 0] = 2; $fc[$offX + 1] = 5; $fc[$offX + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]88500).CopyTo($fc, $offX + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc ([uint64]600)))))
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v1.1.47: My Team race emitted" ($sessions.Count -ge 1)
+    if ($sessions.Count -ge 1) {
+        $results = Get-DictValue $sessions[0] "results"
+        $allMyTeam = $true
+        foreach ($r in $results) {
+            $tn = (Get-DictValue $r "teamName")
+            if ($tn -ne "MyTeam") { $allMyTeam = $false }
+        }
+        Assert "v1.1.47: teamId=232 + myTeam flag OFF resolves teamName to 'MyTeam' (not Team(232))" $allMyTeam
+    }
+}
+
+Write-Host "=== Test 49: My Team recognized by teamId when flag is unreliable (v1.1.47) ===" -ForegroundColor Cyan
+[void](Test-MyTeamTeamIdFallback)
+
+function Test-CarStatus2026ErsOffsetShift() {
+    # v1.1.47 -- the official 2026 spec inserts m_ersHarvestedLimitPerLap (float) at
+    # offset 50 of CarStatusData, shifting m_ersDeployedThisLap to 54 and
+    # m_networkPaused to 58. Pre-v1.1.47 read deployed@50 (= the new harvest LIMIT,
+    # the bogus ">100% deploy" v1.1.42 rationalized) and networkPaused@54 (= a byte of
+    # the deployed float, which dropped valid ERS samples). 2025 path is unchanged.
+    $csType = $asm.GetType("Overtake.SimHub.Plugin.Packets.CarStatusEntry")
+    $parse3 = $csType.GetMethod("Parse", [Type[]]@([byte[]], [uint16], [Nullable[uint16]]))
+    Assert "v1.1.47: CarStatusEntry.Parse(data,fmt,override) exists" ($parse3 -ne $null)
+    if ($parse3 -eq $null) { return }
+
+    # 2026 entry (59B): distinct values at @50 (limit 8.5MJ), @54 (deployed 7MJ), @58 (paused).
+    $body = New-Object byte[] 59
+    $body[0] = 0; $body[1] = 1; $body[2] = 3
+    [System.BitConverter]::GetBytes([float]110.0).CopyTo($body, 9)        # fuelCap
+    [System.BitConverter]::GetBytes([float]4000000.0).CopyTo($body, 37)   # store 4 MJ
+    $body[41] = 2                                                         # deployMode
+    [System.BitConverter]::GetBytes([float]5000000.0).CopyTo($body, 42)   # harvMguk 5 MJ
+    [System.BitConverter]::GetBytes([float]8500000.0).CopyTo($body, 50)   # harvLimit 8.5 MJ (NEW)
+    [System.BitConverter]::GetBytes([float]7000000.0).CopyTo($body, 54)   # deployed 7 MJ
+    $body[58] = 1                                                         # networkPaused
+    $pkt = New-FakePacket 7 $body ([uint64]12345) ([uint16]2026)
+    $cs = $parse3.Invoke($null, [object[]]@([byte[]]$pkt, [uint16]2026, [uint16]2026))
+    Assert "v1.1.47: 2026 CarStatus parsed" ($cs -ne $null -and $cs.Length -ge 1)
+    if ($cs -eq $null -or $cs.Length -lt 1) { return }
+    $e = $cs[0]
+    Assert "v1.1.47: deployed read @54 = 7 MJ (NOT the 8.5 MJ limit @50)" `
+        ([Math]::Abs([float](Get-Field $e "ErsDeployedThisLap") - 7000000.0) -lt 1)
+    Assert "v1.1.47: harvestLimit read @50 = 8.5 MJ" `
+        ([Math]::Abs([float](Get-Field $e "ErsHarvestedLimitPerLap") - 8500000.0) -lt 1)
+    Assert "v1.1.47: networkPaused read @58 = 1" ([int](Get-Field $e "NetworkPaused") -eq 1)
+    Assert "v1.1.47: harvMguk still @42 = 5 MJ" `
+        ([Math]::Abs([float](Get-Field $e "ErsHarvestedThisLapMguk") - 5000000.0) -lt 1)
+
+    # 2025 path unchanged: deployed@50, networkPaused@54.
+    $body25 = New-Object byte[] 55
+    $body25[0] = 0; $body25[1] = 1; $body25[2] = 3
+    [System.BitConverter]::GetBytes([float]110.0).CopyTo($body25, 9)
+    [System.BitConverter]::GetBytes([float]4000000.0).CopyTo($body25, 37)
+    $body25[41] = 2
+    [System.BitConverter]::GetBytes([float]6000000.0).CopyTo($body25, 50)  # deployed@50 (2025)
+    $pkt25 = New-FakePacket 7 $body25 ([uint64]12345) ([uint16]2025)
+    $cs25 = $parse3.Invoke($null, [object[]]@([byte[]]$pkt25, [uint16]2025, [Nullable[uint16]]$null))
+    Assert "v1.1.47: 2025 path still reads deployed @50 = 6 MJ" `
+        ([Math]::Abs([float](Get-Field $cs25[0] "ErsDeployedThisLap") - 6000000.0) -lt 1)
+}
+
+Write-Host "=== Test 50: 2026 CarStatus ERS offset shift (deployed@54/paused@58) (v1.1.47) ===" -ForegroundColor Cyan
+[void](Test-CarStatus2026ErsOffsetShift)
 
 # ---- Summary ----
 Write-Host ""

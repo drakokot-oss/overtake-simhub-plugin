@@ -294,6 +294,10 @@ namespace Overtake.SimHub.Plugin.Store
 
         /// <summary>
         /// All active slots are My Team cars (online). Official grids have MyTeam=false.
+        /// v1.1.47: the m_myTeam flag is unreliable on F1 26 captures (reads 0 for every
+        /// car, including the player's), so a slot also counts as My Team when its teamId
+        /// is a known My Team id (41/104/232). Without this, real F1 26 full-My-Team
+        /// league lobbies (full grid of teamId 232, all myTeam=false) were never detected.
         /// </summary>
         private static bool DetectFullMyTeamGrid(SessionRun sess, ParticipantEntry[] entries, int numActive)
         {
@@ -303,8 +307,8 @@ namespace Overtake.SimHub.Plugin.Store
             {
                 var e = entries[i];
                 if (e == null) return false;
-                if (!e.MyTeam) return false;
                 if (e.TeamId == 255) return false;
+                if (!e.MyTeam && !Finalizer.Lookups.IsMyTeamTeamId(e.TeamId)) return false;
             }
             return true;
         }
@@ -619,11 +623,12 @@ namespace Overtake.SimHub.Plugin.Store
 
         private void IngestSession(SessionRun sess, SessionData s, long nowMs)
         {
-            // v1.1.41: are the DEEP Session fields (VSC/red-flag counts, lobby
-            // settings/assists at payload offset ~639+) reliably mapped for this
-            // wire format? Only 2025. For 2026 these shifted by an amount we could
-            // not pin down, so we skip them (the finalizer omits lobbySettings;
-            // safetyCar.fullDeploys still comes from SCAR events, which are fine).
+            // v1.1.41/v1.1.47: are the DEEP Session fields (VSC/red-flag counts, lobby
+            // settings/assists at payload offset ~639+) reliably mapped for this wire
+            // format? Now 2025 AND 2026 — the 2026 offsets were verified byte-for-byte
+            // against the official EA 2026 UDP spec (see GameInfo.AreDeepSessionFieldsMapped).
+            // Early Session packets arrive zeroed, so the hasData/LobbySettingsCaptured
+            // latch below only commits once non-zero settings appear.
             bool deepMapped = Packets.GameInfo.AreDeepSessionFieldsMapped(sess.LastPacketFormat);
 
             sess.SessionType = s.SessionType;
@@ -684,9 +689,10 @@ namespace Overtake.SimHub.Plugin.Store
             // Early Session packets may arrive before the game populates lobby fields.
             //
             // Deep lobby settings/assists: only when this wire format has them
-            // reliably mapped (see deepMapped at the top). For 2026 we SKIP them
-            // entirely so LobbySettingsCaptured stays false and the finalizer omits
-            // the lobbySettings block instead of emitting coincidental garbage.
+            // reliably mapped (see deepMapped at the top). Now true for 2025 AND 2026
+            // (2026 offsets verified vs the official spec). For any future unmapped
+            // format, LobbySettingsCaptured stays false and the finalizer omits the
+            // lobbySettings block instead of emitting coincidental garbage.
             bool hasData = deepMapped && (s.CarDamage != 0 || s.Collisions != 0 || s.RuleSet != 0
                 || s.SafetyCarSetting != 0 || s.RedFlagsSetting != 0
                 || s.SteeringAssist != 0 || s.GearboxAssist != 0

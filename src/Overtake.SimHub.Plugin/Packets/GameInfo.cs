@@ -99,27 +99,31 @@ namespace Overtake.SimHub.Plugin.Packets
         /// capture AND a full 22-car AI grid (every team mapped 1:1, ERS sane,
         /// LobbyInfo names recovered). Participants (4), CarStatus (7), LobbyInfo
         /// (9) have 2026 layouts; LapData/FinalClassification/CarDamage/Event and
-        /// the Session core fields parse identically. The ONE field we cannot map
-        /// reliably yet — the deep Session lobby settings/assists block — is
-        /// OMITTED for 2026 (see AreDeepSessionFieldsMapped) instead of emitting
-        /// coincidental garbage. Because 2026 is supported, the raw-sample
-        /// collector and the unsupportedUdpFormat flag no longer fire for it.
+        /// the Session core fields parse identically. v1.1.47: the deep Session lobby
+        /// settings/assists block is now also mapped for 2026 (offsets verified vs the
+        /// official EA 2026 spec — see AreDeepSessionFieldsMapped). Because 2026 is
+        /// supported, the raw-sample collector and the unsupportedUdpFormat flag do
+        /// not fire for it.
         /// </summary>
         public static readonly int[] SupportedParseFormats = { 2025, 2026 };
 
         /// <summary>
-        /// Whether the DEEP Session-packet fields (lobby settings / driver
-        /// assists block at payload offset ~639+) are reliably mapped for the
-        /// given wire format. The 2026 format shifts these by an amount we could
-        /// not pin down from a first-occurrence sample (the early Session packet
-        /// has them zeroed), so they are OMITTED for 2026 rather than guessed.
-        /// Everything else in the Session packet (track, type, weather, temps,
-        /// networkGame, safetyCarStatus, spectating, weather-forecast count) is in
-        /// the unchanged early region and stays reliable.
+        /// Whether the DEEP Session-packet fields (lobby settings / driver assists
+        /// block at payload offset ~639+, plus VSC / red-flag counts) are reliably
+        /// mapped for the given wire format. v1.1.47: 2026 is now MAPPED — every deep
+        /// offset the plugin reads (forecastAccuracy, the 7 assists, dynamic line,
+        /// ruleSet, SC/VSC/red-flag counts, equalCar, recovery, flashback, surface,
+        /// fuel, tyre temp, pit-lane sim, car damage, collisions, corner cutting,
+        /// parc fermé, safety car, formation lap, red flags) was verified byte-for-byte
+        /// against the official EA 2026 UDP spec (PacketSessionData = 926 bytes). The
+        /// 2025 and 2026 Session layouts are identical through this block, so the same
+        /// offsets serve both. Early-packet zeroing is handled by the
+        /// hasData/LobbySettingsCaptured latch in SessionStore. Future unknown formats
+        /// stay unmapped (omit rather than guess).
         /// </summary>
         public static bool AreDeepSessionFieldsMapped(ushort fmt)
         {
-            return fmt < 2026;
+            return fmt <= 2026;
         }
 
         /// <summary>
