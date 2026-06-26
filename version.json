@@ -1,8 +1,8 @@
 {
-    "version":  "1.1.46",
+    "version":  "1.1.47",
     "minSupportedVersion":  "1.1.41",
-    "released":  "2026-06-22",
+    "released":  "2026-06-25",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.46/Overtake.SimHub.Plugin-v1.1.46-Setup.exe",
-    "releaseNotes":  "## Nomes corretos em lobby My Team F1 26 + fixes da v1.1.45\r\n\r\n- Lobby My Team online no F1 26: gamertags e equipes voltam a aparecer certos no arquivo e no Race Hub (antes vinham como Driver_X ou lixo).\r\n- Import de .otk sem NaN: telemetria de bateria/combustivel invalida vira null em vez de quebrar o JSON.\r\n- Fim de semana Sprint no F1 26: Corrida Sprint nao encerra a captura antes da Quali e da Corrida principal.\r\n\r\n### E pro F1 25 atual?\r\n\r\nNada muda na sua rotina fora de lobby My Team F1 26 online e dos dois cenarios ja corrigidos na 1.1.45."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v1.1.47/Overtake.SimHub.Plugin-v1.1.47-Setup.exe",
+    "releaseNotes":  "## Sprint, My Team e bateria (ERS) corrigidos no F1 26\r\n\r\n- Fim de semana Sprint no F1 26: o arquivo agora e gerado automaticamente no fim da Corrida principal (antes so saia manualmente), e Sprint x Corrida principal saem identificadas corretamente.\r\n- Carros My Team no F1 26: a equipe aparece como \"MyTeam\" e salas 100% My Team sao reconhecidas (antes vinham como Team(232)).\r\n- Uso de bateria (ERS) no F1 26: energia gasta por volta corrigida (estava lendo o campo errado do jogo).\r\n- Configuracoes da sala (assists, regras, safety car) voltam a sair no arquivo do F1 26.\r\n\r\n### Recomendacao para ligas\r\n\r\nUse \"UDP Format = 2025\" nas configuracoes do jogo: e o modo mais testado e evita um caso raro de troca de nomes em salas My Team no formato 2026."
 }
