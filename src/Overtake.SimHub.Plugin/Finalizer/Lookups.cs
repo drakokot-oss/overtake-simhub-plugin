@@ -140,6 +140,24 @@ namespace Overtake.SimHub.Plugin.Finalizer
         };
 
         /// <summary>
+        /// Team ids that represent a custom "My Team" / created team rather than a real
+        /// constructor. Confirmed empirically from labeled captures (v1.1.47): the
+        /// player's My Team car comes through as teamId 41 in F1 25 content and teamId
+        /// 232 in F1 26 content (the low byte of the uint16 team id on the wire the
+        /// users run; the official EA enum lists 104 = "F1 Custom Team"). Critically,
+        /// the per-entry m_myTeam flag is UNRELIABLE on these captures -- it reads 0 even
+        /// for the local player's own My Team car (Austria/Abu Dhabi, full grid of 232,
+        /// every car myTeam=false), so team-name resolution and full-My-Team-grid
+        /// detection must fall back to the team id instead of trusting the flag.
+        /// </summary>
+        public static readonly HashSet<int> MyTeamTeamIds = new HashSet<int> { 41, 104, 232 };
+
+        public static bool IsMyTeamTeamId(int teamId)
+        {
+            return MyTeamTeamIds.Contains(teamId);
+        }
+
+        /// <summary>
         /// Lowest team id belonging to the F1 26 "2026 Season Pack" grid (220-230).
         /// Used as a content-pack signal: when a teamId in this range appears, the
         /// capture is 2026 content even if the UDP packet format is still 2025

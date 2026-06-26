@@ -45,11 +45,14 @@ namespace Overtake.SimHub.Plugin.Packets
         private struct Layout
         {
             public int Stride;
-            public int OffPlatform, OffName;
+            public int OffNationality, OffPlatform, OffName;
         }
 
-        private static readonly Layout L2025 = new Layout { Stride = 42, OffPlatform = 3, OffName = 4 };
-        private static readonly Layout L2026 = new Layout { Stride = 43, OffPlatform = 4, OffName = 5 };
+        // v1.1.47: teamId grew uint8->uint16 in 2026, pushing nationality from @2 to @3
+        // (the old hardcoded @2 read the high byte of the uint16 teamId). teamId itself
+        // stays read as the low byte @1 (covers the 220-235 range), as intended.
+        private static readonly Layout L2025 = new Layout { Stride = 42, OffNationality = 2, OffPlatform = 3, OffName = 4 };
+        private static readonly Layout L2026 = new Layout { Stride = 43, OffNationality = 3, OffPlatform = 4, OffName = 5 };
 
         private static Layout LayoutForBodyWireFormat(ushort bodyWireFormat)
         {
@@ -188,7 +191,7 @@ namespace Overtake.SimHub.Plugin.Packets
                 {
                     AiControlled = data[start + 0] != 0,
                     TeamId = data[start + 1],
-                    Nationality = data[start + 2],
+                    Nationality = (start + lay.OffNationality < data.Length) ? data[start + lay.OffNationality] : (byte)0,
                     Platform = (start + lay.OffPlatform < data.Length) ? data[start + lay.OffPlatform] : (byte)255,
                 };
 

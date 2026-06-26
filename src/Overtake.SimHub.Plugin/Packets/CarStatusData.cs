@@ -20,16 +20,20 @@ namespace Overtake.SimHub.Plugin.Packets
         public byte ErsDeployMode;            // 0=None,1=Medium,2=HotLap,3=Overtake (off 41)
         public float ErsHarvestedThisLapMguk; // Joules, reset at lap rollover (off 42)
         public float ErsHarvestedThisLapMguh; // Joules, reset at lap rollover (off 46)
-        public float ErsDeployedThisLap;      // Joules, reset at lap rollover (off 50)
-        public byte NetworkPaused;            // 1 when this car is paused on the network (off 54)
-        public bool ErsCaptured;              // true when bytes 29..54 were actually parsed
+        public float ErsHarvestedLimitPerLap; // Joules; 2026 only, new field at off 50
+        public float ErsDeployedThisLap;      // Joules, reset at lap rollover (2025 off 50 / 2026 off 54)
+        public byte NetworkPaused;            // 1 when this car is paused on the network (2025 off 54 / 2026 off 58)
+        public bool ErsCaptured;              // true when the ERS block was actually parsed
 
         private const int EntrySize2025 = 55;
-        // v1.1.40 — F1 26 / 2026 Season Pack grows each CarStatus entry from 55 to
-        // 59 bytes (+4 trailing, likely Active Aero / Overtake / Boost state). The
-        // ERS / fuel field offsets WITHIN the entry are unchanged, so only the
-        // stride differs. Confirmed via labeled 2026 capture — see
-        // docs/F1-26-UDP-OFFSET-MAP.md.
+        // v1.1.40 / v1.1.47 — F1 26 / 2026 Season Pack grows each CarStatus entry from
+        // 55 to 59 bytes. The +4 is NOT trailing: the official 2026 spec inserts a new
+        // float m_ersHarvestedLimitPerLap at offset 50, which shifts m_ersDeployedThisLap
+        // from 50->54 and m_networkPaused from 54->58. The ERS tail is therefore read
+        // format-aware in Parse(). (Pre-v1.1.47 used the 2025 offsets for both formats,
+        // so on F1 26 "deployed" was actually the harvest LIMIT — the spurious ">100%
+        // deploy" that v1.1.42 wrongly rationalized as a new energy model — and a byte of
+        // the deployed float was misread as networkPaused, dropping valid ERS samples.)
         private const int EntrySize2026 = 59;
         private const int FuelOnlyMinSize = 17;
         private const int FullEntryMinSize = 55;
@@ -133,9 +137,24 @@ namespace Overtake.SimHub.Plugin.Packets
                     entry.ErsDeployMode = data[off + 41];
                     entry.ErsHarvestedThisLapMguk = BitConverter.ToSingle(data, off + 42);
                     entry.ErsHarvestedThisLapMguh = BitConverter.ToSingle(data, off + 46);
-                    entry.ErsDeployedThisLap = BitConverter.ToSingle(data, off + 50);
-                    entry.NetworkPaused = data[off + 54];
-                    entry.ErsCaptured = true;
+                    if (bodyFmt >= 2026)
+                    {
+                        // 2026 inserts m_ersHarvestedLimitPerLap (float) at off 50,
+                        // shifting deployed -> 54 and networkPaused -> 58.
+                        if (off + EntrySize2026 <= data.Length)
+                        {
+                            entry.ErsHarvestedLimitPerLap = BitConverter.ToSingle(data, off + 50);
+                            entry.ErsDeployedThisLap = BitConverter.ToSingle(data, off + 54);
+                            entry.NetworkPaused = data[off + 58];
+                            entry.ErsCaptured = true;
+                        }
+                    }
+                    else
+                    {
+                        entry.ErsDeployedThisLap = BitConverter.ToSingle(data, off + 50);
+                        entry.NetworkPaused = data[off + 54];
+                        entry.ErsCaptured = true;
+                    }
                 }
 
                 entries[i] = entry;

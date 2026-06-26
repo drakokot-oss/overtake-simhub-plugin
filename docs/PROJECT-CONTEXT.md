@@ -348,6 +348,15 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 
 ## Problemas conhecidos resolvidos
 
+### v1.1.47
+
+| Demanda | Como foi feito |
+|----------|---------------|
+| **Auto-export não disparava em fim de semana Sprint OFFLINE do F1 26 + rótulos de corrida invertidos.** Dois `.otk` (`Austria_20260623_022902`, `Austria_20260623_090434`) só saíram por export manual. | **Descoberta:** o F1 26 OFFLINE INVERTE a convenção do F1 25 — Sprint Race = wire **id 15** (`"Race"`), Corrida principal = wire **id 16** (`"Race2"`); oposto do F1 25 (Sprint=16, Main=15). Online o F1 26 manda ambas como id=15. Como `IsTerminalRaceClosing`/`IsTerminalRaceSession` só tratavam `IsRaceWireType` (id 15-família) como terminal, a Corrida principal (id=16) nunca era terminal. `SprintFormatHelper` reescrito em torno de `IsRaceLikeType` + **cronologia**: terminal = race-like E (não-sprint → id 15-família) OU (sprint → 2ª corrida OU quali principal 5/6/7/9 já ocorreu); `GetExportSessionTypeId` mapeia a ÚLTIMA corrida do weekend → `Race`(15) e a anterior → `Race2`(16). Validado por simulação contra os dados reais + Tests 27/28/29/44 (intactos). Test 48. |
+| **My Team saía como `Team(232)`/`Team(41)` e lobby full-My-Team não era detectado.** | **Descoberta:** a flag `m_myTeam` é **morta no F1 26** — lê 0 até no carro do próprio jogador (`Austria_20260625_184709`/`AbuDhabi_20260625_185628`: grid full-232, todos `myTeam=false`). O My Team vem por **teamId**: 41 (conteúdo F1 25), 232 (conteúdo F1 26), 104 (oficial "F1 Custom Team"). `Lookups.MyTeamTeamIds`+`IsMyTeamTeamId`; `ResolveTeamName` e `DetectFullMyTeamGrid` agora reconhecem por flag OU teamId. Test 49. |
+
+**Correção de premissa (importante):** as notas v1.1.36/v1.1.39 dizem que "a EA não publicou apêndice oficial do F1 26" — **isso é FALSO**. A EA publicou o spec completo: blog `forums.ea.com/...12187347` ("F1 25 2026 Season Pack UDP specification") com `Data Output from F1 25 2026 Season Pack.pdf` + `2026 Season Pack Telemetry Output Structures.txt`. Fatos canônicos: **packetId 16 = `CarTelemetry2`** (active aero/overtake, NÃO LobbyInfo); MaxCars=24; **`m_teamId`/`m_driverId`/`m_networkId` agora uint16**; teamIds 2026 nativos = **476–486** (Mercedes'26=476…Audi=485,Cadillac=486), **104 = F1 Custom Team**; ParticipantData stride 60 com teamId@5, myTeam@7, name@10 (bate com o L2026 do plugin). O plugin lê `teamId` como **byte baixo** do uint16 → 476–486 viram 220–230. Parser OSS de cross-check: `github.com/volodymyr-fed/F1Game.UDP`.
+
 ### v1.1.43
 
 | Demanda | Como foi feito |
