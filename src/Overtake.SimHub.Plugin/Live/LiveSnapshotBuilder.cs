@@ -112,8 +112,10 @@ namespace Overtake.SimHub.Plugin.Live
                     { "penaltiesSec", (int)d.LivePenaltiesSec },
                     { "penaltiesCount", DedupPenaltyCount(d) },
                     { "warnings", d.LastTotalWarnings },
+                    { "cornerCutWarnings", d.LastCornerCuttingWarnings },
                     { "pitStatus", (int)d.LivePitStatus },
                     { "status", StatusStr(d) },
+                    { "laps", LapList(d) },
                 });
             }
             grid.Sort((a, b) =>
@@ -170,6 +172,27 @@ namespace Overtake.SimHub.Plugin.Live
                 if (t > 0 && (best == 0 || t < best)) best = t;
             }
             return best;
+        }
+
+        private static List<Dictionary<string, object>> LapList(DriverRun d)
+        {
+            var list = new List<Dictionary<string, object>>();
+            // Sorted by lap number ascending for a clean per-driver history.
+            var laps = new List<LapRecord>(d.Laps);
+            laps.Sort((a, b) => a.LapNumber.CompareTo(b.LapNumber));
+            foreach (var lr in laps)
+            {
+                if (lr.LapTimeMs <= 0) continue;
+                list.Add(new Dictionary<string, object>
+                {
+                    { "n", lr.LapNumber },
+                    { "ms", lr.LapTimeMs },
+                    { "s1", lr.Sector1Ms },
+                    { "s2", lr.Sector2Ms },
+                    { "s3", lr.Sector3Ms },
+                });
+            }
+            return list;
         }
 
         private static void BestSectors(DriverRun d, out int s1, out int s2, out int s3)

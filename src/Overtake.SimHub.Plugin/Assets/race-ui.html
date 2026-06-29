@@ -24,6 +24,7 @@
   .brand { display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:.5px; }
   .brand .logo { width:30px; height:30px; border-radius:8px; background:conic-gradient(from 200deg,var(--accent),var(--accent-2));
     display:grid; place-items:center; color:#1a1003; font-weight:900; font-size:16px; box-shadow:0 0 18px rgba(255,77,46,.35); }
+  .brand .logo-img { width:34px; height:34px; border-radius:8px; object-fit:contain; }
   .brand small { display:block; color:var(--txt-faint); font-weight:600; font-size:10px; letter-spacing:2px; }
   .tabs { display:flex; gap:6px; margin-left:6px; }
   .tab { border:1px solid transparent; background:transparent; color:var(--txt-dim); padding:8px 14px; border-radius:10px; cursor:pointer; font-weight:600; font-size:13px; }
@@ -74,7 +75,13 @@
   .badge { font-size:10px; font-weight:800; padding:2px 6px; border-radius:6px; background:var(--panel-2); color:var(--txt-dim); border:1px solid var(--line); }
   .badge.pit { color:var(--accent-2); border-color:rgba(255,176,32,.4); }
   .badge.out { color:var(--bad); border-color:rgba(255,84,112,.4); }
-  .feed { max-height:560px; overflow:auto; padding:6px 8px; }
+  .spot { padding:12px 14px; display:grid; gap:10px; }
+  .spotcard { background:var(--panel-2); border:1px solid var(--line); border-radius:11px; padding:10px 12px; display:flex; align-items:center; gap:10px; }
+  .spotcard .ic { width:30px; height:30px; border-radius:8px; display:grid; place-items:center; font-size:14px; flex:0 0 auto; }
+  .spotcard .k { font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:var(--txt-faint); }
+  .spotcard .v { font-weight:800; font-size:14px; margin-top:1px; }
+  .spotcard .sub { color:var(--txt-dim); font-size:12px; }
+  .feed { max-height:360px; overflow:auto; padding:6px 8px; }
   .ev { display:flex; gap:10px; padding:9px 8px; border-bottom:1px solid rgba(35,44,59,.5); }
   .ev .t { color:var(--txt-faint); font-size:11px; min-width:42px; }
   .ev .ico { width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-size:12px; flex:0 0 auto; }
@@ -101,6 +108,13 @@
   .corner { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
   .corner .lab { font-size:10px; color:var(--txt-faint); }
   .corner .pct { font-weight:800; font-size:16px; }
+  .laps { max-height:280px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
+  table.laptable { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  table.laptable th { position:sticky; top:0; background:var(--bg-2); color:var(--txt-faint); font-size:9.5px; letter-spacing:1px; text-transform:uppercase; text-align:right; padding:7px 10px; border-bottom:1px solid var(--line); }
+  table.laptable th:first-child { text-align:center; }
+  table.laptable td { padding:6px 10px; border-bottom:1px solid rgba(35,44,59,.5); font-size:12.5px; text-align:right; }
+  table.laptable td:first-child { text-align:center; color:var(--txt-faint); font-weight:700; }
+  .delta-up { color:var(--good); } .delta-down { color:var(--bad); }
   .overlaywrap { display:grid; place-items:start center; padding:20px 0; }
   .overlay { width:440px; background:rgba(10,13,18,.86); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.5); }
   .ovhead { display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,77,46,.12); border-bottom:1px solid var(--line); font-size:12px; font-weight:800; }
@@ -122,7 +136,8 @@
 <div class="wrap">
   <div class="appbar">
     <div class="brand">
-      <div class="logo">O</div>
+      <img class="logo-img" src="logo.png" alt="Overtake" onerror="this.style.display='none';document.getElementById('logoFallback').style.display='grid';" />
+      <div class="logo" id="logoFallback" style="display:none">O</div>
       <div>OVERTAKE<small>RACE CONTROL</small></div>
     </div>
     <div class="tabs" id="tabs">
@@ -150,15 +165,21 @@
         <table class="lb">
           <thead><tr>
             <th>P</th><th>Piloto</th><th>Pneu</th><th>Int</th><th>Gap</th>
-            <th>Ultima</th><th>Melhor</th><th>ERS</th><th>Comb.</th><th>Danos</th><th>Pen</th><th>Status</th>
+            <th>Ultima</th><th>Melhor</th><th>ERS</th><th>Comb.</th><th>Danos</th><th>Avisos</th><th>Pen (s)</th><th>Status</th>
           </tr></thead>
           <tbody id="raceBody"></tbody>
         </table>
       </div>
     </div>
-    <div class="panel">
-      <h3>Eventos ao vivo</h3>
-      <div class="feed" id="feed"></div>
+    <div style="display:grid; gap:14px; align-content:start">
+      <div class="panel">
+        <h3>Destaques</h3>
+        <div class="spot" id="highlights"></div>
+      </div>
+      <div class="panel">
+        <h3>Eventos ao vivo</h3>
+        <div class="feed" id="feed"></div>
+      </div>
     </div>
   </div>
 
@@ -214,6 +235,7 @@
   var curView = "broadcast";
   var autoFollow = true;
   var openDrawerCar = null;
+  var stale = false;
 
   var $ = function(id){ return document.getElementById(id); };
 
@@ -253,8 +275,10 @@
 
   function setLive(connected){
     var b=$("liveBadge"), t=$("liveTxt");
-    if(connected){ b.classList.remove("off"); t.textContent = "AO VIVO" + (state&&state.grid?(" - "+state.grid.length+" carros"):""); }
-    else { b.classList.add("off"); t.textContent = "Reconectando..."; }
+    if(!connected){ b.classList.add("off"); t.textContent = "Reconectando..."; return; }
+    if(stale){ b.classList.add("off"); t.textContent = "Sessao encerrada - aguardando proxima"; return; }
+    b.classList.remove("off");
+    t.textContent = "AO VIVO" + (state&&state.grid?(" - "+state.grid.length+" carros"):"");
   }
 
   // ---- WebSocket ----
@@ -267,7 +291,18 @@
     ws.onclose = function(){ setLive(false); scheduleReconnect(); };
     ws.onerror = function(){ try{ws.close();}catch(e){} };
     ws.onmessage = function(ev){
-      try { var s=JSON.parse(ev.data); if(s){ state=s; onState(); } } catch(e){}
+      var s;
+      try { s=JSON.parse(ev.data); } catch(e){ return; }
+      if(!s) return;
+      if(s.ok){ state=s; stale=false; onState(); }
+      else {
+        // Session ended / capture cleared: KEEP showing the last good data
+        // until a new session actually starts. Only show "waiting" if we
+        // never received anything this run.
+        setLive(true);
+        if(!state){ $("raceBody").innerHTML='<tr><td colspan="13" class="empty">Aguardando dados da sessao no jogo...</td></tr>'; }
+        else { stale=true; setLive(true); }
+      }
     };
   }
   function scheduleReconnect(){
@@ -276,7 +311,7 @@
   }
 
   function onState(){
-    if(!state || !state.ok){ setLive(true); $("raceBody").innerHTML='<tr><td colspan="12" class="empty">Aguardando dados da sessao no jogo...</td></tr>'; return; }
+    if(!state || !state.ok){ setLive(true); $("raceBody").innerHTML='<tr><td colspan="13" class="empty">Aguardando dados da sessao no jogo...</td></tr>'; return; }
     setLive(true);
     carMap={};
     (state.grid||[]).forEach(function(d){ carMap[d.carIdx]=d; });
@@ -292,6 +327,7 @@
     renderOverlay();
     renderStrategy();
     renderFeed();
+    renderHighlights();
     if(openDrawerCar!=null && carMap[openDrawerCar]) renderDrawer(carMap[openDrawerCar]);
   }
 
@@ -329,9 +365,15 @@
     var col = w>70?"var(--bad)":(w>40?"var(--accent-2)":"var(--good)");
     return '<span class="wearbar"><i style="width:'+Math.min(100,w)+'%;background:'+col+'"></i></span>';
   }
+  function ersColor(e){
+    // 0-30 vermelho, 30-70 laranja/amarelo, >70 verde/azul.
+    if(e<=30) return "linear-gradient(90deg,#ff2b2b,#ff6a3d)";
+    if(e<=70) return "linear-gradient(90deg,#ff8c1a,#ffd12e)";
+    return "linear-gradient(90deg,#2ed47a,#2f86ff)";
+  }
   function ersCell(d){
     var e=d.ersPct||0;
-    return '<span class="ersbar"><i style="width:'+Math.min(100,e)+'%"></i></span> <span class="age">'+e+'%</span>';
+    return '<span class="ersbar"><i style="width:'+Math.min(100,e)+'%;background:'+ersColor(e)+'"></i></span> <span class="age">'+e+'%</span>';
   }
   function dmgCell(d){
     var worst=(d.damage&&d.damage.worst)||0;
@@ -353,12 +395,13 @@
   function renderRace(){
     var g=state.grid||[];
     var flCar=fastestLapCar();
-    if(!g.length){ $("raceBody").innerHTML='<tr><td colspan="12" class="empty">Sem carros na sessao.</td></tr>'; return; }
+    if(!g.length){ $("raceBody").innerHTML='<tr><td colspan="13" class="empty">Sem carros na sessao.</td></tr>'; return; }
     $("raceBody").innerHTML = g.map(function(d,i){
       var lead = i===0;
       var fl = d.carIdx===flCar;
       var fuel = (d.fuelKg!=null? d.fuelKg+" kg":"")+(d.fuelLaps!=null? '<div class="age">'+d.fuelLaps+' voltas</div>':"");
-      var pen = (d.penaltiesSec>0?('<span class="pen">+'+d.penaltiesSec+'s</span>'):"")+(d.penaltiesCount>0?(' <span class="age">'+d.penaltiesCount+'x</span>'):"");
+      var warn = (d.warnings>0?('<span style="color:var(--accent-2);font-weight:700">'+d.warnings+'</span>'):'<span class="age">0</span>');
+      var pen = (d.penaltiesSec>0?('<span class="pen">+'+d.penaltiesSec+'s</span>'):'<span class="age">-</span>');
       return '<tr data-car="'+d.carIdx+'">'+
         '<td class="pos">'+(d.pos||"-")+'</td>'+
         '<td><div class="drv"><span class="teambar" style="background:'+teamColor(d.team)+'"></span>'+
@@ -371,6 +414,7 @@
         '<td>'+ersCell(d)+'</td>'+
         '<td class="mono">'+fuel+'</td>'+
         '<td>'+dmgCell(d)+'</td>'+
+        '<td>'+warn+'</td>'+
         '<td>'+pen+'</td>'+
         '<td>'+statusBadge(d)+'</td>'+
       '</tr>';
@@ -455,6 +499,42 @@
       }).join("")+'</div>';
   }
 
+  function renderHighlights(){
+    var g=state.grid||[];
+    var el=$("highlights");
+    if(!g.length){ el.innerHTML='<div class="empty">Sem dados ainda.</div>'; return; }
+    var cards=[];
+
+    // Volta mais rapida
+    var fl=null;
+    g.forEach(function(d){ if(d.bestLapMs>0 && (!fl||d.bestLapMs<fl.bestLapMs)) fl=d; });
+    if(fl) cards.push(card("rgba(177,91,255,.16)","var(--purple)","FL","Volta mais rapida", fl.tag, msLap(fl.bestLapMs)));
+
+    // Lider
+    if(g[0]) cards.push(card("rgba(255,176,32,.16)","var(--accent-2)","1","Lider", g[0].tag, (g[0].team||"")));
+
+    // Maior ganho de posicoes (grid -> pos)
+    var mover=null, bestGain=0;
+    g.forEach(function(d){ if(d.grid>0 && d.pos>0){ var gain=d.grid-d.pos; if(gain>bestGain){bestGain=gain; mover=d;} } });
+    if(mover && bestGain>0) cards.push(card("rgba(46,212,122,.15)","var(--good)","+"+bestGain,"Quem mais ganhou", mover.tag, "Largou P"+mover.grid+" -> P"+mover.pos));
+
+    // Mais paradas
+    var pit=null;
+    g.forEach(function(d){ if((d.stops||0)>0 && (!pit || d.stops>pit.stops)) pit=d; });
+    if(pit && pit.stops>0) cards.push(card("rgba(255,176,32,.15)","var(--accent-2)","P","Mais paradas", pit.tag, pit.stops+" pit stop(s)"));
+
+    // Maior penalidade
+    var pen=null;
+    g.forEach(function(d){ if((d.penaltiesSec||0)>0 && (!pen || d.penaltiesSec>pen.penaltiesSec)) pen=d; });
+    if(pen && pen.penaltiesSec>0) cards.push(card("rgba(255,84,112,.15)","var(--bad)","!","Maior punicao", pen.tag, "+"+pen.penaltiesSec+"s de penalidade"));
+
+    el.innerHTML = cards.join("") || '<div class="empty">Sem destaques no momento.</div>';
+  }
+  function card(bg,fg,icon,k,v,sub){
+    return '<div class="spotcard"><div class="ic" style="background:'+bg+';color:'+fg+'">'+esc(icon)+'</div>'+
+      '<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="sub">'+esc(sub)+'</div></div></div>';
+  }
+
   function renderFeed(){
     var evs=state.events||[];
     if(!evs.length){ $("feed").innerHTML='<div class="empty">Sem eventos ainda.</div>'; return; }
@@ -520,14 +600,43 @@
           corner("Asa diant. E",dm.wingFL)+corner("Asa diant. D",dm.wingFR)+
           corner("Asa traseira",dm.wingRear)+corner("Pior",dm.worst)+
         '</div>'+
-        '<div class="section-t">Punicoes</div>'+
+        '<div class="section-t">Punicoes e avisos</div>'+
         '<div class="kv">'+
-          '<div class="cell"><div class="k">Tempo</div><div class="v">+'+(d.penaltiesSec||0)+'s</div></div>'+
-          '<div class="cell"><div class="k">Eventos</div><div class="v">'+(d.penaltiesCount||0)+'</div></div>'+
+          '<div class="cell"><div class="k">Penalidade (s)</div><div class="v">+'+(d.penaltiesSec||0)+'s</div></div>'+
           '<div class="cell"><div class="k">Avisos</div><div class="v">'+(d.warnings||0)+'</div></div>'+
+          '<div class="cell"><div class="k">Eventos pen.</div><div class="v">'+(d.penaltiesCount||0)+'</div></div>'+
         '</div>'+
+        '<div class="section-t">Voltas ('+((d.laps&&d.laps.length)||0)+')</div>'+
+        lapsTable(d.laps)+
       '</div>';
     var cd=$("closeDrawer"); if(cd) cd.addEventListener("click",closeDrawer);
+  }
+  function lapsTable(laps){
+    if(!laps || !laps.length) return '<div class="empty">Nenhuma volta completa ainda.</div>';
+    var best=0;
+    laps.forEach(function(l){ if(l.ms>0 && (best===0||l.ms<best)) best=l.ms; });
+    var rows = laps.map(function(l,i){
+      var prev = i>0 ? laps[i-1].ms : 0;
+      var delta = (prev>0 && l.ms>0) ? (l.ms-prev) : null;
+      var deltaTxt = "-";
+      if(delta!==null){
+        var sign = delta>0 ? "+" : "-";
+        var cls = delta>0 ? "delta-down" : (delta<0 ? "delta-up" : "");
+        deltaTxt = '<span class="'+cls+'">'+sign+(Math.abs(delta)/1000).toFixed(3)+'</span>';
+      }
+      var isBest = l.ms===best && l.ms>0;
+      return '<tr>'+
+        '<td>'+l.n+'</td>'+
+        '<td class="'+(isBest?"fastest":"")+'">'+msLap(l.ms)+'</td>'+
+        '<td>'+deltaTxt+'</td>'+
+        '<td>'+msSector(l.s1)+'</td>'+
+        '<td>'+msSector(l.s2)+'</td>'+
+        '<td>'+msSector(l.s3)+'</td>'+
+      '</tr>';
+    }).reverse().join("");
+    return '<div class="laps"><table class="laptable">'+
+      '<thead><tr><th>V</th><th>Tempo</th><th>Delta</th><th>S1</th><th>S2</th><th>S3</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div>';
   }
   function corner(lab,pct){
     pct = pct||0;

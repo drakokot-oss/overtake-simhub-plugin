@@ -29,12 +29,14 @@ namespace Overtake.SimHub.Plugin.Live
         private readonly object _clientsLock = new object();
         private readonly List<TcpClient> _clients = new List<TcpClient>();
         private byte[] _indexHtml;
+        private byte[] _logoPng;
         private string _lastJson = "{\"ok\":false}";
         private int _port;
         private bool _lan;
 
         private const string WsMagic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
         private const string IndexResource = "Overtake.SimHub.Plugin.Assets.race-ui.html";
+        private const string LogoResource = "Overtake.SimHub.Plugin.Assets.overtake-icon.png";
 
         public int Port { get { return _port; } }
         public bool Running { get { return _running; } }
@@ -51,6 +53,7 @@ namespace Overtake.SimHub.Plugin.Live
             _port = port <= 0 ? 8088 : port;
             _lan = allowLan;
             _indexHtml = LoadIndexHtml();
+            _logoPng = LoadResource(LogoResource);
 
             IPAddress bind = allowLan ? IPAddress.Any : IPAddress.Loopback;
             _listener = new TcpListener(bind, _port);
@@ -165,6 +168,8 @@ namespace Overtake.SimHub.Plugin.Live
 
             if (path == "/" || path.StartsWith("/index") || path.StartsWith("/?"))
                 WriteHttp(stream, "200 OK", "text/html; charset=utf-8", _indexHtml);
+            else if (path.StartsWith("/logo.png") && _logoPng != null)
+                WriteHttp(stream, "200 OK", "image/png", _logoPng);
             else if (path.StartsWith("/snapshot"))
                 WriteHttp(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(_lastJson));
             else
@@ -269,13 +274,18 @@ namespace Overtake.SimHub.Plugin.Live
 
         private static byte[] LoadIndexHtml()
         {
+            byte[] data = LoadResource(IndexResource);
+            return data ?? Encoding.UTF8.GetBytes("<html><body>race-ui.html missing from assembly</body></html>");
+        }
+
+        private static byte[] LoadResource(string resourceName)
+        {
             try
             {
                 var asm = Assembly.GetExecutingAssembly();
-                using (var s = asm.GetManifestResourceStream(IndexResource))
+                using (var s = asm.GetManifestResourceStream(resourceName))
                 {
-                    if (s == null)
-                        return Encoding.UTF8.GetBytes("<html><body>race-ui.html missing from assembly</body></html>");
+                    if (s == null) return null;
                     using (var ms = new MemoryStream())
                     {
                         s.CopyTo(ms);
@@ -285,7 +295,7 @@ namespace Overtake.SimHub.Plugin.Live
             }
             catch
             {
-                return Encoding.UTF8.GetBytes("<html><body>race-ui load error</body></html>");
+                return null;
             }
         }
 
