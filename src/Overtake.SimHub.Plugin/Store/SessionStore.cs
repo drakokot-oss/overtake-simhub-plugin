@@ -633,6 +633,9 @@ namespace Overtake.SimHub.Plugin.Store
 
             sess.SessionType = s.SessionType;
             sess.TrackId = s.TrackId;
+            if (s.TotalLaps > 0) sess.TotalLaps = s.TotalLaps;
+            if (s.TrackLength > 0) sess.TrackLength = s.TrackLength;
+            sess.SessionTimeLeftSec = s.SessionTimeLeft;
 
             // Detect lobby changes (track change = different lobby)
             if (s.TrackId >= 0)
@@ -767,6 +770,11 @@ namespace Overtake.SimHub.Plugin.Store
                     if (newTc < d.TractionControl) d.TractionControl = newTc;
                     if (newAbs < d.AntiLockBrakes) d.AntiLockBrakes = newAbs;
                 }
+
+                // Live race UI: tyre compound + age (latest wins).
+                if (entries[i].VisualTyreCompound != 0) d.VisualTyreCompound = entries[i].VisualTyreCompound;
+                if (entries[i].ActualTyreCompound != 0) d.ActualTyreCompound = entries[i].ActualTyreCompound;
+                d.TyresAgeLaps = entries[i].TyresAgeLaps;
 
                 float cap = entries[i].FuelCapacity;
                 if (cap >= CarStatusFuelCapacityMinKg)
@@ -2204,6 +2212,16 @@ namespace Overtake.SimHub.Plugin.Store
                     d.GridPosition = row.GridPosition;
                 if (row.CarPosition > 0)
                     d.CarPosition = row.CarPosition;
+
+                // Live race UI fields (latest LapData wins; not used by export).
+                d.LiveDeltaToCarFrontMs = row.DeltaToCarFrontMs;
+                d.LiveDeltaToLeaderMs = row.DeltaToLeaderMs;
+                d.LiveCurrentLapTimeMs = (int)row.CurrentLapTimeInMS;
+                d.LiveSector = row.Sector;
+                d.LivePitStatus = row.PitStatus;
+                d.LivePenaltiesSec = row.Penalties;
+                d.LiveResultStatus = row.ResultStatus;
+                d.LiveDriverStatus = row.DriverStatus;
 
                 // Pit stops: track increments
                 int numPit = row.NumPitStops;

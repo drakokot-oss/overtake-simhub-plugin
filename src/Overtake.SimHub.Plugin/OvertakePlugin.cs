@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using GameReaderCommon;
 using SimHub.Plugins;
 using Overtake.SimHub.Plugin.Finalizer;
+using Overtake.SimHub.Plugin.Live;
 using Overtake.SimHub.Plugin.Packets;
 using Overtake.SimHub.Plugin.Parsers;
 using Overtake.SimHub.Plugin.Store;
@@ -47,6 +48,13 @@ namespace Overtake.SimHub.Plugin
         private string _latestReleaseNotes = "";
         private string _minSupportedVersion = "";
         private string _installerUrl = "";
+
+        // Race UI (web) — Rota B. Read-only live broadcast server.
+        private RaceWebServer _raceWeb;
+        private long _lastRaceUiPublishMs;
+        private const long RaceUiPublishIntervalMs = 150; // ~6-7 Hz
+        private readonly JavaScriptSerializer _liveSerializer =
+            new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
 
         public PluginManager PluginManager { get; set; }
 
@@ -108,6 +116,14 @@ namespace Overtake.SimHub.Plugin
                 global::SimHub.Logging.Current.Info(
                     "[Overtake] Migrated settings schema 0 -> 1 (AutoCleanAfterExport=on)");
             }
+            if (_settings.SettingsSchemaVersion < 2)
+            {
+                _settings.RaceUiEnabled = true;
+                _settings.RaceUiPort = _settings.RaceUiPort > 0 ? _settings.RaceUiPort : 8088;
+                _settings.SettingsSchemaVersion = 2;
+                global::SimHub.Logging.Current.Info(
+                    "[Overtake] Migrated settings schema 1 -> 2 (Race UI web server defaults)");
+            }
 
             _store = new SessionStore();
 
@@ -128,9 +144,67 @@ namespace Overtake.SimHub.Plugin
             this.AttachDelegate("Overtake.LatestVersion", () => _latestVersion);
             this.AttachDelegate("Overtake.UpdateStatus", () => UpdateAdvisor.StatusToken(CurrentUpdateSeverity));
 
+            this.AttachDelegate("Overtake.RaceUiUrl", () => _raceWeb != null && _raceWeb.Running ? _raceWeb.Url : "");
+            this.AttachDelegate("Overtake.RaceUiClients", () => _raceWeb != null ? _raceWeb.ClientCount : 0);
+
+            StartRaceWebServer();
+
             global::SimHub.Logging.Current.Info("[Overtake] Plugin initialized");
 
             System.Threading.Tasks.Task.Run(() => CheckForUpdates());
+        }
+
+        /// <summary>Starts (or restarts) the live race UI web server per current settings.</summary>
+        internal void StartRaceWebServer()
+        {
+            try
+            {
+                if (_raceWeb != null) { _raceWeb.Stop(); _raceWeb = null; }
+                if (_settings == null || !_settings.RaceUiEnabled) return;
+                _raceWeb = new RaceWebServer();
+                _raceWeb.Start(_settings.RaceUiPort, _settings.RaceUiAllowLan);
+            }
+            catch (Exception ex)
+            {
+                global::SimHub.Logging.Current.Error(
+                    string.Format("[Overtake] Race UI web server failed to start: {0}", ex.Message));
+            }
+        }
+
+        internal void StopRaceWebServer()
+        {
+            try { if (_raceWeb != null) { _raceWeb.Stop(); _raceWeb = null; } }
+            catch { }
+        }
+
+        internal string RaceWebUrl
+        {
+            get { return _raceWeb != null && _raceWeb.Running ? _raceWeb.Url : ""; }
+        }
+
+        internal bool RaceWebRunning
+        {
+            get { return _raceWeb != null && _raceWeb.Running; }
+        }
+
+        private void PublishRaceUi()
+        {
+            if (_raceWeb == null || !_raceWeb.Running || _raceWeb.ClientCount == 0) return;
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (nowMs - _lastRaceUiPublishMs < RaceUiPublishIntervalMs) return;
+            _lastRaceUiPublishMs = nowMs;
+            try
+            {
+                var snap = LiveSnapshotBuilder.Build(_store);
+                ExportNumbers.SanitizeForJson(snap);
+                string json = _liveSerializer.Serialize(snap);
+                _raceWeb.Publish(json);
+            }
+            catch (Exception ex)
+            {
+                global::SimHub.Logging.Current.Info(
+                    string.Format("[Overtake] Race UI publish skipped: {0}", ex.Message));
+            }
         }
 
         public void DataUpdate(PluginManager pluginManager, ref GameData data)
@@ -248,10 +322,15 @@ namespace Overtake.SimHub.Plugin
                 BeginNewCaptureSession();
                 _store.ClearAutoRotateRequest();
             }
+
+            // Rota B — push the live snapshot to connected broadcast UI clients.
+            // Throttled internally to ~6-7 Hz; no-op when no client is connected.
+            PublishRaceUi();
         }
 
         public void End(PluginManager pluginManager)
         {
+            StopRaceWebServer();
             if (_receiver != null)
             {
                 _receiver.Stop();

@@ -1,0 +1,172 @@
+# Personal TEST build — produces a SimHub installer .exe for private validation.
+#
+# This is NOT a release: it does NOT create a GitHub Release, does NOT touch
+# version.json, and does NOT change anything the website or the in-plugin
+# auto-updater reads. The installer is uploaded ONLY as a workflow artifact,
+# downloadable from the Actions run page by the maintainer.
+#
+# Use it to test the live Race UI (web) broadcast feature on a real race before
+# productizing a public release.
+#
+# Trigger: Actions tab -> "Test Build (private installer)" -> Run workflow
+#   or:    gh workflow run test-build.yml --ref <branch>
+
+name: Test Build (private installer)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SIMHUB_VERSION: "9.11.12"
+  SIMHUB_ZIP_URL: "https://github.com/SHWotever/SimHub/releases/download/9.11.12/SimHub.9.11.12.zip"
+  SIMHUB_INSTALL_DIR: "C:\\SimHubInstall"
+
+jobs:
+  test-build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore SimHub install (cache)
+        id: simhub-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SIMHUB_INSTALL_DIR }}
+          key: simhub-install-${{ env.SIMHUB_VERSION }}-v2
+
+      - name: Download and silent-install SimHub (if cache miss)
+        if: steps.simhub-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'SimHub.zip'
+          Invoke-WebRequest -Uri $env:SIMHUB_ZIP_URL -OutFile $zip -UseBasicParsing
+          $extractDir = Join-Path $env:RUNNER_TEMP 'SimHubExtract'
+          if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $extractDir -Force
+          Remove-Item $zip -Force
+          $setup = Get-ChildItem $extractDir -Recurse -Filter 'SimHubSetup_*.exe' | Select-Object -First 1
+          if (-not $setup) { Write-Host "::error::SimHubSetup_*.exe not found"; exit 1 }
+          New-Item -ItemType Directory -Force -Path $env:SIMHUB_INSTALL_DIR | Out-Null
+          $logPath = Join-Path $env:RUNNER_TEMP 'simhub-install.log'
+          $installArgs = @("/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-","/DIR=$env:SIMHUB_INSTALL_DIR","/LOG=$logPath")
+          $proc = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -NoNewWindow -PassThru
+          if ($proc.ExitCode -ne 0) { Write-Host "::error::SimHub installer exited $($proc.ExitCode)"; exit 1 }
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) { Write-Host "::error::SimHub.Plugins.dll not found after install"; exit 1 }
+          Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Resolve SIMHUB_INSTALL_PATH
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $found = Get-ChildItem $env:SIMHUB_INSTALL_DIR -Recurse -Filter 'SimHub.Plugins.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $found) { Write-Host "::error::SimHub.Plugins.dll missing"; exit 1 }
+          $simHubDir = $found.Directory.FullName
+          if (-not $simHubDir.EndsWith('\')) { $simHubDir = $simHubDir + '\' }
+          "SIMHUB_INSTALL_PATH=$simHubDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build (Release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          msbuild "src\Overtake.SimHub.Plugin\Overtake.SimHub.Plugin.csproj" /p:Configuration=Release /p:SimHubInstallPath="$env:SIMHUB_INSTALL_PATH" /p:PostBuildEvent= /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
+          if (-not (Test-Path $dll)) { Write-Host "::error::DLL not produced"; exit 1 }
+          $version = (Get-Item $dll).VersionInfo.FileVersion
+          Write-Host "Built DLL v$version"
+          "PLUGIN_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run SessionStore tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = & powershell -ExecutionPolicy Bypass -File "scripts\Test-SessionStore.ps1" -DllPath "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          $summary = $output | Select-String -Pattern 'PASS:\s*\d+\s+FAIL:\s*(\d+)' | Select-Object -Last 1
+          if (-not $summary -or [int]$summary.Matches[0].Groups[1].Value -gt 0) { Write-Host "::error::SessionStore tests failed"; exit 1 }
+
+      - name: Run Finalizer tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = & powershell -ExecutionPolicy Bypass -File "scripts\Test-Finalizer.ps1" -DllPath "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          $summary = $output | Select-String -Pattern 'PASS:\s*\d+\s+FAIL:\s*(\d+)' | Select-Object -Last 1
+          if (-not $summary -or [int]$summary.Matches[0].Groups[1].Value -gt 0) { Write-Host "::error::Finalizer tests failed"; exit 1 }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup -y --no-progress
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup 6\ISCC.exe","C:\Program Files\Inno Setup 6\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { Write-Host "::error::ISCC.exe not found"; exit 1 }
+          "ISCC_PATH=$($iscc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Prepare TEST installer.iss
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Use the X.Y.Z form for the installer version label.
+          $raw = Get-Content "src\Overtake.SimHub.Plugin\Properties\AssemblyInfo.cs" -Raw
+          if ($raw -notmatch 'AssemblyVersion\("(\d+\.\d+\.\d+)') { Write-Host "::error::cannot parse AssemblyVersion"; exit 1 }
+          $version = $Matches[1]
+          $label = "$version-test"
+          "INSTALLER_LABEL=$label" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          $latest = Get-ChildItem dist -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^v(\d+)\.(\d+)\.(\d+)$' } |
+            Sort-Object @{Expression={[version]($_.Name -replace '^v','')}} -Descending | Select-Object -First 1
+          if (-not $latest) { Write-Host "::error::No dist\v* template installer.iss found"; exit 1 }
+          $templateIss = Join-Path $latest.FullName "installer.iss"
+
+          $issDir = "dist\_test"
+          if (Test-Path $issDir) { Remove-Item $issDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $issDir | Out-Null
+          $issPath = Join-Path $issDir "installer.iss"
+
+          $issText = Get-Content $templateIss -Raw
+          $issText = $issText -replace '#define MyAppVersion ".*?"', "#define MyAppVersion `"$version`""
+          # Force a distinct output filename so it is clearly a test build.
+          $issText = $issText -replace 'OutputBaseFilename=.*', "OutputBaseFilename=Overtake.SimHub.Plugin-v$label-Setup"
+          Set-Content -Path $issPath -Value $issText -Encoding UTF8 -NoNewline
+
+          $filesDir = Join-Path $issDir "files"
+          New-Item -ItemType Directory -Force -Path $filesDir | Out-Null
+          Copy-Item "src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll" (Join-Path $filesDir "Overtake.SimHub.Plugin.dll") -Force
+          "ISS_PATH=$issPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Compile Inno Setup installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & "$env:ISCC_PATH" "$env:ISS_PATH"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ISCC failed"; exit 1 }
+          $installer = Get-ChildItem "dist\_test" -Filter "*Setup*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { Write-Host "::error::Installer EXE not found"; exit 1 }
+          "INSTALLER_PATH=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "INSTALLER_NAME=$($installer.Name)"     | Out-File -FilePath $env:GITHUB_ENV -Append
+          $sizeMB = [math]::Round($installer.Length/1MB, 2)
+          Write-Host "TEST installer ready: $($installer.Name) ($sizeMB MB)"
+
+      - name: Upload TEST installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Overtake-TEST-Setup-v${{ env.INSTALLER_LABEL }}
+          path: ${{ env.INSTALLER_PATH }}
+          retention-days: 30
+          if-no-files-found: error

@@ -97,6 +97,8 @@
     <Compile Include="Finalizer\LeagueFinalizer.cs" />
     <Compile Include="Packets\WireLayoutProbe.cs" />
     <Compile Include="Packets\PacketStrings.cs" />
+    <Compile Include="Live\LiveSnapshotBuilder.cs" />
+    <Compile Include="Live\RaceWebServer.cs" />
     <Compile Include="Security\KeyStore.cs" />
     <Compile Include="Security\OtkWriter.cs" />
     <Compile Include="UI\SettingsControl.xaml.cs">
@@ -112,6 +114,7 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\overtake-icon.png" />
+    <EmbeddedResource Include="Assets\race-ui.html" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>

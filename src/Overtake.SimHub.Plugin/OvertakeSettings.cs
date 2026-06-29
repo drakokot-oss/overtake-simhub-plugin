@@ -19,8 +19,15 @@ namespace Overtake.SimHub.Plugin
         // Settings schema version. Used by OvertakePlugin.Init to migrate saved settings
         // when new fields are introduced (so missing-from-save fields like AutoCleanAfterExport
         // get the intended default, not C# zero-value).
-        // 0 = pre-v1.1.31, 1 = v1.1.31 (added AutoCleanAfterExport).
+        // 0 = pre-v1.1.31, 1 = v1.1.31 (added AutoCleanAfterExport),
+        // 2 = test build (added Race UI web server settings).
         public int SettingsSchemaVersion;
+
+        // Race UI (web) — Rota B. Local web server + WebSocket serving the live
+        // broadcast page. Read-only over the capture; does not affect .otk export.
+        public bool RaceUiEnabled;
+        public int RaceUiPort;
+        public bool RaceUiAllowLan;
 
         public OvertakeSettings()
         {
@@ -30,7 +37,10 @@ namespace Overtake.SimHub.Plugin
             AutoExportJson = true;
             AutoCleanAfterExport = true;
             LastExportPath = "";
-            SettingsSchemaVersion = 1;
+            SettingsSchemaVersion = 2;
+            RaceUiEnabled = true;
+            RaceUiPort = 8088;
+            RaceUiAllowLan = false;
         }
     }
 }

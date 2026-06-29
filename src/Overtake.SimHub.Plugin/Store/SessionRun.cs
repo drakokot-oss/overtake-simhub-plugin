@@ -38,6 +38,11 @@ namespace Overtake.SimHub.Plugin.Store
         public int? TrackId;
         public int? Weather;
         public int? SafetyCarStatus;
+
+        // Live race UI (v1 broadcast)
+        public int? TotalLaps;
+        public int? TrackLength;
+        public int? SessionTimeLeftSec;
         public int NetworkGame;
         public int NumRedFlagPeriods;
 

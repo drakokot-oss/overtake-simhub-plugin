@@ -11,6 +11,12 @@ namespace Overtake.SimHub.Plugin.Packets
         public float FuelCapacity;
         public float FuelRemainingLaps;
 
+        // Live race UI (v1 broadcast): tyre compound + age. Offsets 25/26/27 are
+        // identical for the 2025 and 2026 strides (the 2026 insert is at off 50).
+        public byte ActualTyreCompound;
+        public byte VisualTyreCompound;
+        public byte TyresAgeLaps;
+
         // v1.1.34 — ERS fields. All energies are in Joules as delivered by F1 25
         // UDP. Conversion to MJ/percent is done in SessionStore at sampling time
         // so the rest of the pipeline never sees raw Joules.
@@ -126,6 +132,14 @@ namespace Overtake.SimHub.Plugin.Packets
                     FuelCapacity = BitConverter.ToSingle(data, off + 9),
                     FuelRemainingLaps = BitConverter.ToSingle(data, off + 13),
                 };
+
+                // Tyre compound + age (off 25/26/27) — same in 2025 and 2026 strides.
+                if (off + 28 <= data.Length)
+                {
+                    entry.ActualTyreCompound = data[off + 25];
+                    entry.VisualTyreCompound = data[off + 26];
+                    entry.TyresAgeLaps = data[off + 27];
+                }
 
                 // ERS section is optional: F1 24 and earlier may send a shorter entry.
                 // We still want fuel/TC/ABS in that case, so we degrade gracefully.

@@ -45,6 +45,11 @@ namespace Overtake.SimHub.Plugin.UI
                 ? DefaultOutputFolder() : _settings.OutputFolder;
             ChkAutoExport.IsChecked = _settings.AutoExportJson;
 
+            ChkRaceUi.IsChecked = _settings.RaceUiEnabled;
+            ChkRaceUiLan.IsChecked = _settings.RaceUiAllowLan;
+            TxtRaceUiPort.Text = (_settings.RaceUiPort > 0 ? _settings.RaceUiPort : 8088).ToString();
+            UpdateRaceUiUrl();
+
             LblVersion.Text = "v" + OvertakePlugin.PluginVersion;
 
             UpdateStatusLabels();
@@ -90,6 +95,53 @@ namespace Overtake.SimHub.Plugin.UI
             if (_settings == null) return;
             _settings.AutoExportJson = ChkAutoExport.IsChecked == true;
             SaveSettings();
+        }
+
+        private void ChkRaceUi_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_settings == null || _plugin == null) return;
+            _settings.RaceUiEnabled = ChkRaceUi.IsChecked == true;
+            _settings.RaceUiAllowLan = ChkRaceUiLan.IsChecked == true;
+            SaveSettings();
+            _plugin.StartRaceWebServer();
+            UpdateRaceUiUrl();
+        }
+
+        private void BtnApplyRaceUi_Click(object sender, RoutedEventArgs e)
+        {
+            int port;
+            if (int.TryParse(TxtRaceUiPort.Text, out port) && port > 0 && port <= 65535)
+            {
+                _settings.RaceUiPort = port;
+                SaveSettings();
+                _plugin.StartRaceWebServer();
+                UpdateRaceUiUrl();
+            }
+            else
+            {
+                MessageBox.Show("Informe uma porta valida (1-65535).",
+                    "Porta invalida", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void BtnOpenRaceUi_Click(object sender, RoutedEventArgs e)
+        {
+            string url = _plugin != null ? _plugin.RaceWebUrl : "";
+            if (string.IsNullOrEmpty(url))
+            {
+                MessageBox.Show("Ative a Race UI primeiro.",
+                    "Race UI", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch { /* browser not available */ }
+        }
+
+        private void UpdateRaceUiUrl()
+        {
+            if (LblRaceUiUrl == null || _plugin == null) return;
+            string url = _plugin.RaceWebUrl;
+            LblRaceUiUrl.Text = string.IsNullOrEmpty(url) ? "desativado" : url;
         }
 
         private void BtnNewSession_Click(object sender, RoutedEventArgs e)
@@ -280,6 +332,8 @@ namespace Overtake.SimHub.Plugin.UI
                 LblExportResult.Text = autoExportMsg;
                 LblExportResult.Foreground = GreenBrush;
             }
+
+            UpdateRaceUiUrl();
 
             // Update notification — severity-driven, re-evaluated every tick so a
             // live UnsupportedFormat signal can escalate the banner mid-session.

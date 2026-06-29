@@ -120,6 +120,20 @@ namespace Overtake.SimHub.Plugin.Store
         // Car position in race (1=leader, 2=2nd...) — for FinalClassification row mapping
         public byte CarPosition;
 
+        // ---- Live race UI fields (v1 broadcast). Latest value wins; read-only for the
+        // web UI snapshot. None of these feed the .otk export pipeline. ----
+        public int LiveDeltaToCarFrontMs;
+        public int LiveDeltaToLeaderMs;
+        public int LiveCurrentLapTimeMs;
+        public byte LiveSector;
+        public byte LivePitStatus;     // 0=none, 1=pitting, 2=in pit area
+        public byte LivePenaltiesSec;  // in-game accumulated time penalty (LapData)
+        public byte LiveResultStatus;
+        public byte LiveDriverStatus;
+        public byte VisualTyreCompound;
+        public byte ActualTyreCompound;
+        public byte TyresAgeLaps;
+
         // Warnings tracking (from LapData packet 2)
         public int LastTotalWarnings;
         public int LastCornerCuttingWarnings;

@@ -214,6 +214,56 @@
                 </StackPanel>
             </styles:SHSection>
 
+            <!-- Race UI (web) - test build -->
+            <styles:SHSection Title="Race UI (web) - BUILD DE TESTE">
+                <StackPanel Margin="10">
+                    <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
+                        <Run FontWeight="Bold" Foreground="#2EC4B6">Acompanhamento da corrida em tempo real.</Run>
+                        <Run>O plugin abre uma pagina local que mostra a corrida ao vivo (classificacao, pneus, ERS, combustivel, danos, punicoes e eventos). Abra no navegador ou adicione como fonte de navegador no OBS.</Run>
+                    </TextBlock>
+
+                    <CheckBox x:Name="ChkRaceUi"
+                              Content="Ativar Race UI (servidor web local)"
+                              Margin="0,0,0,8"
+                              Checked="ChkRaceUi_Changed"
+                              Unchecked="ChkRaceUi_Changed" />
+
+                    <TextBlock Text="Porta" FontWeight="Bold" Margin="0,0,0,3" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBox x:Name="TxtRaceUiPort"
+                                 Width="80"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0,0,10,0" />
+                        <Button x:Name="BtnApplyRaceUi"
+                                Content="APLICAR"
+                                Padding="15,5"
+                                Click="BtnApplyRaceUi_Click" />
+                        <TextBlock Text="Padrao: 8088"
+                                   Foreground="#7B8CA3" FontSize="11"
+                                   VerticalAlignment="Center" Margin="10,0,0,0" />
+                    </StackPanel>
+
+                    <CheckBox x:Name="ChkRaceUiLan"
+                              Content="Permitir acesso na rede local (LAN / segundo PC / celular)"
+                              Margin="0,0,0,10"
+                              Checked="ChkRaceUi_Changed"
+                              Unchecked="ChkRaceUi_Changed" />
+
+                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10">
+                        <StackPanel>
+                            <TextBlock Text="ENDERECO" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                            <TextBlock x:Name="LblRaceUiUrl" Text="desativado"
+                                       FontSize="15" FontWeight="SemiBold" Margin="0,2,0,8" />
+                            <Button x:Name="BtnOpenRaceUi"
+                                    Content="ABRIR NO NAVEGADOR"
+                                    Padding="15,6"
+                                    HorizontalAlignment="Left"
+                                    Click="BtnOpenRaceUi_Click" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </styles:SHSection>
+
             <!-- Settings -->
             <styles:SHSection Title="Settings">
                 <StackPanel Margin="10">
