@@ -214,6 +214,134 @@
                 </StackPanel>
             </styles:SHSection>
 
+            <!-- Race UI (web) - test build -->
+            <styles:SHSection Title="Race UI (web) - BUILD DE TESTE">
+                <StackPanel Margin="10">
+                    <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
+                        <Run FontWeight="Bold" Foreground="#2EC4B6">Acompanhamento da corrida em tempo real.</Run>
+                        <Run>O plugin abre uma pagina local que mostra a corrida ao vivo (classificacao, pneus, ERS, combustivel, danos, punicoes e eventos). Abra no navegador ou adicione como fonte de navegador no OBS.</Run>
+                    </TextBlock>
+
+                    <CheckBox x:Name="ChkRaceUi"
+                              Content="Ativar Race UI (servidor web local)"
+                              Margin="0,0,0,8"
+                              Checked="ChkRaceUi_Changed"
+                              Unchecked="ChkRaceUi_Changed" />
+
+                    <TextBlock Text="Porta" FontWeight="Bold" Margin="0,0,0,3" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBox x:Name="TxtRaceUiPort"
+                                 Width="80"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0,0,10,0" />
+                        <Button x:Name="BtnApplyRaceUi"
+                                Content="APLICAR"
+                                Padding="15,5"
+                                Click="BtnApplyRaceUi_Click" />
+                        <TextBlock Text="Padrao: 8088"
+                                   Foreground="#7B8CA3" FontSize="11"
+                                   VerticalAlignment="Center" Margin="10,0,0,0" />
+                    </StackPanel>
+
+                    <CheckBox x:Name="ChkRaceUiLan"
+                              Content="Permitir acesso na rede local (LAN / segundo PC / celular)"
+                              Margin="0,0,0,10"
+                              Checked="ChkRaceUi_Changed"
+                              Unchecked="ChkRaceUi_Changed" />
+
+                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10">
+                        <StackPanel>
+                            <TextBlock Text="ENDERECO" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                            <TextBlock x:Name="LblRaceUiUrl" Text="desativado"
+                                       FontSize="15" FontWeight="SemiBold" Margin="0,2,0,8" />
+                            <Button x:Name="BtnOpenRaceUi"
+                                    Content="ABRIR NO NAVEGADOR"
+                                    Padding="15,6"
+                                    HorizontalAlignment="Left"
+                                    Click="BtnOpenRaceUi_Click" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </styles:SHSection>
+
+            <!-- Live cloud broadcast (overtakef1) - test build -->
+            <styles:SHSection Title="Transmissao ao vivo (overtakef1) - BUILD DE TESTE">
+                <StackPanel Margin="10">
+                    <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
+                        <Run FontWeight="Bold" Foreground="#2EC4B6">Leve a corrida ao vivo para o portal overtakef1.</Run>
+                        <Run>Gere o token em Perfil &gt; Transmissao / SimHub no site, cole abaixo, conecte, escolha a liga/grid/corrida e clique IR AO AR. Nao afeta o arquivo .otk.</Run>
+                    </TextBlock>
+
+                    <TextBlock Text="Token de transmissao" FontWeight="Bold" Margin="0,0,0,3" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBox x:Name="TxtLiveToken"
+                                 Width="320"
+                                 VerticalContentAlignment="Center"
+                                 Margin="0,0,10,0" />
+                        <Button x:Name="BtnSaveLiveToken"
+                                Content="SALVAR"
+                                Padding="15,5"
+                                Click="BtnSaveLiveToken_Click" />
+                        <Button x:Name="BtnLiveConnect"
+                                Content="CONECTAR"
+                                Padding="15,5"
+                                Margin="10,0,0,0"
+                                Click="BtnLiveConnect_Click" />
+                    </StackPanel>
+
+                    <TextBlock Text="Liga" FontWeight="Bold" Margin="0,0,0,3" />
+                    <ComboBox x:Name="CmbLeague" Margin="0,0,0,8"
+                              SelectionChanged="CmbLeague_SelectionChanged" />
+
+                    <TextBlock Text="Grid / temporada" FontWeight="Bold" Margin="0,0,0,3" />
+                    <ComboBox x:Name="CmbGrid" Margin="0,0,0,8"
+                              SelectionChanged="CmbGrid_SelectionChanged" />
+
+                    <CheckBox x:Name="ChkNewRace"
+                              Content="Criar uma corrida nova agora"
+                              Margin="0,0,0,8"
+                              Checked="ChkNewRace_Changed"
+                              Unchecked="ChkNewRace_Changed" />
+
+                    <StackPanel x:Name="PanelExistingRace">
+                        <TextBlock Text="Corrida" FontWeight="Bold" Margin="0,0,0,3" />
+                        <ComboBox x:Name="CmbRace" Margin="0,0,0,8" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="PanelNewRace" Visibility="Collapsed">
+                        <TextBlock Text="Nome da corrida" FontWeight="Bold" Margin="0,0,0,3" />
+                        <TextBox x:Name="TxtNewRaceName" Margin="0,0,0,8" VerticalContentAlignment="Center" />
+                        <TextBlock Text="Pista (opcional)" FontWeight="Bold" Margin="0,0,0,3" />
+                        <TextBox x:Name="TxtNewRaceTrack" Margin="0,0,0,8" VerticalContentAlignment="Center" />
+                    </StackPanel>
+
+                    <TextBlock Text="Tipo de sessao" FontWeight="Bold" Margin="0,0,0,3" />
+                    <ComboBox x:Name="CmbSessionType" Margin="0,0,0,10" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button x:Name="BtnGoLive"
+                                Content="IR AO AR"
+                                Padding="18,6"
+                                Click="BtnGoLive_Click" />
+                        <Button x:Name="BtnEndLive"
+                                Content="ENCERRAR"
+                                Padding="18,6"
+                                Margin="10,0,0,0"
+                                IsEnabled="False"
+                                Click="BtnEndLive_Click" />
+                    </StackPanel>
+
+                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10">
+                        <StackPanel>
+                            <TextBlock Text="STATUS" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                            <TextBlock x:Name="LblLiveStatus" Text="ocioso"
+                                       FontSize="14" FontWeight="SemiBold" Margin="0,2,0,0"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </styles:SHSection>
+
             <!-- Settings -->
             <styles:SHSection Title="Settings">
                 <StackPanel Margin="10">

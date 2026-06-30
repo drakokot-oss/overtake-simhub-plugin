@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using GameReaderCommon;
 using SimHub.Plugins;
 using Overtake.SimHub.Plugin.Finalizer;
+using Overtake.SimHub.Plugin.Live;
 using Overtake.SimHub.Plugin.Packets;
 using Overtake.SimHub.Plugin.Parsers;
 using Overtake.SimHub.Plugin.Store;
@@ -47,6 +48,19 @@ namespace Overtake.SimHub.Plugin
         private string _latestReleaseNotes = "";
         private string _minSupportedVersion = "";
         private string _installerUrl = "";
+
+        // Race UI (web) — Rota B. Read-only live broadcast server.
+        private RaceWebServer _raceWeb;
+        private long _lastRaceUiPublishMs;
+        private const long RaceUiPublishIntervalMs = 150; // ~6-7 Hz
+        private readonly JavaScriptSerializer _liveSerializer =
+            new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+
+        // Live cloud broadcast (overtakef1) — streams the same snapshot to the portal.
+        private LiveBroadcaster _live;
+        private long _lastLivePushMs;
+        private const long LivePublishIntervalMs = 400; // ~2-3 Hz to the cloud
+        private string _lastLiveJson;
 
         public PluginManager PluginManager { get; set; }
 
@@ -108,6 +122,22 @@ namespace Overtake.SimHub.Plugin
                 global::SimHub.Logging.Current.Info(
                     "[Overtake] Migrated settings schema 0 -> 1 (AutoCleanAfterExport=on)");
             }
+            if (_settings.SettingsSchemaVersion < 2)
+            {
+                _settings.RaceUiEnabled = true;
+                _settings.RaceUiPort = _settings.RaceUiPort > 0 ? _settings.RaceUiPort : 8088;
+                _settings.SettingsSchemaVersion = 2;
+                global::SimHub.Logging.Current.Info(
+                    "[Overtake] Migrated settings schema 1 -> 2 (Race UI web server defaults)");
+            }
+            if (_settings.SettingsSchemaVersion < 3)
+            {
+                if (_settings.LiveBroadcastToken == null) _settings.LiveBroadcastToken = "";
+                if (_settings.LiveBroadcastBaseUrl == null) _settings.LiveBroadcastBaseUrl = "";
+                _settings.SettingsSchemaVersion = 3;
+                global::SimHub.Logging.Current.Info(
+                    "[Overtake] Migrated settings schema 2 -> 3 (live cloud broadcast defaults)");
+            }
 
             _store = new SessionStore();
 
@@ -128,9 +158,116 @@ namespace Overtake.SimHub.Plugin
             this.AttachDelegate("Overtake.LatestVersion", () => _latestVersion);
             this.AttachDelegate("Overtake.UpdateStatus", () => UpdateAdvisor.StatusToken(CurrentUpdateSeverity));
 
+            this.AttachDelegate("Overtake.RaceUiUrl", () => _raceWeb != null && _raceWeb.Running ? _raceWeb.Url : "");
+            this.AttachDelegate("Overtake.RaceUiClients", () => _raceWeb != null ? _raceWeb.ClientCount : 0);
+
+            StartRaceWebServer();
+
+            _live = new LiveBroadcaster();
+            ConfigureLive();
+            this.AttachDelegate("Overtake.LiveBroadcasting", () => _live != null && _live.Active);
+
             global::SimHub.Logging.Current.Info("[Overtake] Plugin initialized");
 
             System.Threading.Tasks.Task.Run(() => CheckForUpdates());
+        }
+
+        /// <summary>Starts (or restarts) the live race UI web server per current settings.</summary>
+        internal void StartRaceWebServer()
+        {
+            try
+            {
+                if (_raceWeb != null) { _raceWeb.Stop(); _raceWeb = null; }
+                if (_settings == null || !_settings.RaceUiEnabled) return;
+                _raceWeb = new RaceWebServer();
+                _raceWeb.Start(_settings.RaceUiPort, _settings.RaceUiAllowLan);
+            }
+            catch (Exception ex)
+            {
+                global::SimHub.Logging.Current.Error(
+                    string.Format("[Overtake] Race UI web server failed to start: {0}", ex.Message));
+            }
+        }
+
+        internal void StopRaceWebServer()
+        {
+            try { if (_raceWeb != null) { _raceWeb.Stop(); _raceWeb = null; } }
+            catch { }
+        }
+
+        internal string RaceWebUrl
+        {
+            get { return _raceWeb != null && _raceWeb.Running ? _raceWeb.Url : ""; }
+        }
+
+        internal bool RaceWebRunning
+        {
+            get { return _raceWeb != null && _raceWeb.Running; }
+        }
+
+        private void PublishRaceUi()
+        {
+            bool wsActive = _raceWeb != null && _raceWeb.Running && _raceWeb.ClientCount > 0;
+            bool cloudActive = _live != null && _live.Active;
+            if (!wsActive && !cloudActive) return;
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (nowMs - _lastRaceUiPublishMs < RaceUiPublishIntervalMs) return;
+            _lastRaceUiPublishMs = nowMs;
+            try
+            {
+                var snap = LiveSnapshotBuilder.Build(_store);
+                ExportNumbers.SanitizeForJson(snap);
+                string json = _liveSerializer.Serialize(snap);
+                _lastLiveJson = json;
+                if (wsActive) _raceWeb.Publish(json);
+                // Cloud push throttled to ~2-3 Hz (lighter than the local WS cadence).
+                if (cloudActive && nowMs - _lastLivePushMs >= LivePublishIntervalMs)
+                {
+                    _lastLivePushMs = nowMs;
+                    _live.PushSnapshot(json);
+                }
+            }
+            catch (Exception ex)
+            {
+                global::SimHub.Logging.Current.Info(
+                    string.Format("[Overtake] Race UI publish skipped: {0}", ex.Message));
+            }
+        }
+
+        // ---- Live cloud broadcast (overtakef1) — driven by the settings panel ----
+
+        /// <summary>Apply token + base URL from settings to the broadcaster.</summary>
+        internal void ConfigureLive()
+        {
+            if (_live == null) _live = new LiveBroadcaster();
+            _live.Token = _settings.LiveBroadcastToken ?? "";
+            if (!string.IsNullOrWhiteSpace(_settings.LiveBroadcastBaseUrl))
+                _live.BaseUrl = _settings.LiveBroadcastBaseUrl.Trim();
+        }
+
+        public bool LiveActive { get { return _live != null && _live.Active; } }
+        public string LiveSessionId { get { return _live != null ? _live.LiveSessionId : null; } }
+        public string LiveLastError { get { return _live != null ? _live.LastError : null; } }
+
+        /// <summary>live-start mode=list — returns eligible leagues/grids/races (null on error).</summary>
+        public System.Collections.Generic.List<EligibleLeague> LiveListEligible()
+        {
+            ConfigureLive();
+            return _live.ListEligible();
+        }
+
+        /// <summary>Open a live session (existing race via raceId, or createRace via name/track).</summary>
+        public bool LiveGoLive(string leagueId, string gridId, string raceId,
+            string newRaceName, string newRaceTrack, string sessionType)
+        {
+            ConfigureLive();
+            return _live.GoLive(leagueId, gridId, raceId, newRaceName, newRaceTrack, sessionType);
+        }
+
+        /// <summary>Close the live session (sends ended=true with the last snapshot).</summary>
+        public void LiveEnd()
+        {
+            if (_live != null) _live.End(_lastLiveJson);
         }
 
         public void DataUpdate(PluginManager pluginManager, ref GameData data)
@@ -248,10 +385,16 @@ namespace Overtake.SimHub.Plugin
                 BeginNewCaptureSession();
                 _store.ClearAutoRotateRequest();
             }
+
+            // Rota B — push the live snapshot to connected broadcast UI clients.
+            // Throttled internally to ~6-7 Hz; no-op when no client is connected.
+            PublishRaceUi();
         }
 
         public void End(PluginManager pluginManager)
         {
+            try { if (_live != null && _live.Active) _live.End(_lastLiveJson); } catch { }
+            StopRaceWebServer();
             if (_receiver != null)
             {
                 _receiver.Stop();

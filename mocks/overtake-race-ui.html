@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Overtake - Race Broadcast UI (Mock)</title>
+<style>
+  :root {
+    --bg: #0a0d12;
+    --bg-2: #11161f;
+    --panel: #151b26;
+    --panel-2: #1b2230;
+    --line: #232c3b;
+    --txt: #e7edf5;
+    --txt-dim: #8a97aa;
+    --txt-faint: #5c6678;
+    --accent: #ff4d2e;
+    --accent-2: #ffb020;
+    --good: #2ed47a;
+    --bad: #ff5470;
+    --purple: #b15bff;
+    --soft: #ff3b3b;
+    --medium: #ffd12e;
+    --hard: #eef0f2;
+    --inter: #43b02a;
+    --wet: #2f86ff;
+    /* team colors */
+    --t-mercedes: #00d7b6;
+    --t-ferrari: #e8002d;
+    --t-williams: #1868db;
+    --t-mclaren: #ff8000;
+    --t-redbull: #3671c6;
+    --t-aston: #229971;
+    --t-haas: #b6babd;
+    --t-alpine: #00a1e8;
+    --t-rb: #6692ff;
+    --t-cadillac: #c9a227;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 70% -10%, #16202e 0%, var(--bg) 55%);
+    color: var(--txt);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1680px; margin: 0 auto; padding: 14px 18px 40px; }
+
+  /* ---------- App bar ---------- */
+  .appbar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 10px 16px; margin-bottom: 14px;
+    background: linear-gradient(90deg, var(--panel) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--line); border-radius: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: .5px; }
+  .brand .logo {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: conic-gradient(from 200deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; color: #1a1003; font-weight: 900; font-size: 16px;
+    box-shadow: 0 0 18px rgba(255,77,46,.35);
+  }
+  .brand small { display:block; color: var(--txt-faint); font-weight: 600; font-size: 10px; letter-spacing: 2px; }
+  .tabs { display: flex; gap: 6px; margin-left: 6px; }
+  .tab {
+    border: 1px solid transparent; background: transparent; color: var(--txt-dim);
+    padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 13px;
+  }
+  .tab:hover { color: var(--txt); background: var(--panel-2); }
+  .tab.active { color: #fff; background: var(--panel-2); border-color: var(--line); }
+  .spacer { flex: 1; }
+  .sim { display: flex; align-items: center; gap: 8px; }
+  .live {
+    display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700;
+    color: var(--accent); padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-2);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 rgba(255,77,46,.6); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,77,46,.55);} 70%{ box-shadow: 0 0 0 9px rgba(255,77,46,0);} 100%{ box-shadow:0 0 0 0 rgba(255,77,46,0);} }
+  .btn {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--txt);
+    padding: 7px 12px; border-radius: 9px; cursor: pointer; font-weight: 600; font-size: 12px;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button { background: var(--panel-2); border: none; color: var(--txt-dim); padding: 7px 11px; cursor: pointer; font-size: 12px; font-weight: 700; }
+  .seg button.active { background: var(--accent); color: #1a1003; }
+
+  /* ---------- Session bar ---------- */
+  .sessionbar {
+    display: flex; align-items: stretch; gap: 0; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-bottom: 14px;
+  }
+  .sb-item { padding: 11px 18px; border-right: 1px solid var(--line); }
+  .sb-item:last-child { border-right: none; }
+  .sb-item .k { font-size: 10px; letter-spacing: 1.5px; color: var(--txt-faint); text-transform: uppercase; }
+  .sb-item .v { font-size: 16px; font-weight: 800; margin-top: 2px; }
+  .sb-item .v.sm { font-size: 14px; }
+  .flag-grn { color: var(--good); }
+  .flag-sc { color: var(--accent-2); }
+
+  /* ---------- Layout ---------- */
+  .grid { display: grid; grid-template-columns: 1fr 360px; gap: 14px; align-items: start; }
+  @media (max-width: 1200px){ .grid { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+  .panel h3 { margin: 0; padding: 12px 16px; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--txt-dim); border-bottom: 1px solid var(--line); }
+
+  /* ---------- Leaderboard ---------- */
+  table.lb { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  table.lb thead th {
+    position: sticky; top: 0; background: var(--bg-2); color: var(--txt-faint);
+    font-size: 10px; letter-spacing: 1px; text-transform: uppercase; text-align: left;
+    padding: 9px 8px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  table.lb tbody td { padding: 8px; border-bottom: 1px solid rgba(35,44,59,.55); font-size: 13px; white-space: nowrap; }
+  table.lb tbody tr { cursor: pointer; transition: background .15s; }
+  table.lb tbody tr:hover { background: var(--panel-2); }
+  .pos { font-weight: 800; width: 26px; text-align: center; }
+  .ch { width: 16px; text-align: center; font-size: 11px; font-weight: 800; }
+  .ch.up { color: var(--good); } .ch.down { color: var(--bad); } .ch.same { color: var(--txt-faint); }
+  .drv { display: flex; align-items: center; gap: 9px; }
+  .teambar { width: 4px; height: 22px; border-radius: 3px; flex: 0 0 auto; }
+  .drv .name { font-weight: 700; }
+  .team { color: var(--txt-dim); font-size: 12px; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .lead { color: var(--accent-2); font-weight: 800; }
+  .fastest { color: var(--purple) !important; font-weight: 800; }
+  .compound { display: inline-flex; align-items: center; gap: 6px; }
+  .tyre {
+    width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 10px; font-weight: 900; border: 2px solid; color: #0a0d12;
+  }
+  .tyre.S { border-color: var(--soft); color: var(--soft); }
+  .tyre.M { border-color: var(--medium); color: var(--medium); }
+  .tyre.H { border-color: var(--hard); color: var(--hard); }
+  .tyre.I { border-color: var(--inter); color: var(--inter); }
+  .tyre.W { border-color: var(--wet); color: var(--wet); }
+  .age { color: var(--txt-faint); font-size: 11px; }
+  .wearbar { width: 58px; height: 7px; border-radius: 4px; background: #2a3342; overflow: hidden; display:inline-block; vertical-align: middle; }
+  .wearbar > i { display: block; height: 100%; border-radius: 4px; }
+  .ersbar { width: 64px; height: 7px; border-radius: 4px; background: #2a3342; overflow: hidden; display:inline-block; vertical-align: middle; }
+  .ersbar > i { display: block; height: 100%; background: linear-gradient(90deg,#2f86ff,#43b02a); border-radius: 4px; }
+  .pen { color: var(--bad); font-weight: 700; font-size: 12px; }
+  .badge { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 6px; background: var(--panel-2); color: var(--txt-dim); border: 1px solid var(--line); }
+  .badge.pit { color: var(--accent-2); border-color: rgba(255,176,32,.4); }
+  .badge.out { color: var(--bad); border-color: rgba(255,84,112,.4); }
+  .badge.drs { color: var(--good); border-color: rgba(46,212,122,.4); }
+
+  /* ---------- Right rail ---------- */
+  .spot { padding: 12px 14px; display: grid; gap: 10px; }
+  .spotcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; }
+  .spotcard .k { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--txt-faint); }
+  .spotcard .v { font-weight: 800; margin-top: 3px; font-size: 15px; }
+  .spotcard .sub { color: var(--txt-dim); font-size: 12px; margin-top: 1px; }
+  .feed { max-height: 520px; overflow: auto; padding: 6px 8px; }
+  .ev { display: flex; gap: 10px; padding: 9px 8px; border-bottom: 1px solid rgba(35,44,59,.5); animation: fade .35s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(-4px);} to {opacity:1; transform:none;} }
+  .ev .t { color: var(--txt-faint); font-size: 11px; min-width: 42px; }
+  .ev .ico { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; flex: 0 0 auto; }
+  .ev .msg { font-size: 12.5px; line-height: 1.35; }
+  .ico.ovt { background: rgba(46,212,122,.15); color: var(--good); }
+  .ico.pen { background: rgba(255,84,112,.15); color: var(--bad); }
+  .ico.pit { background: rgba(255,176,32,.15); color: var(--accent-2); }
+  .ico.fl { background: rgba(177,91,255,.15); color: var(--purple); }
+  .ico.sc { background: rgba(255,176,32,.18); color: var(--accent-2); }
+  .ico.rtmt { background: rgba(140,151,170,.15); color: var(--txt-dim); }
+  .ico.dmg { background: rgba(255,176,32,.16); color: var(--accent-2); }
+
+  /* ---------- Driver drawer ---------- */
+  .drawer-mask { position: fixed; inset: 0; background: rgba(4,7,11,.6); backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 40; }
+  .drawer-mask.open { opacity: 1; pointer-events: auto; }
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100%; width: 440px; max-width: 92vw; z-index: 50;
+    background: var(--bg-2); border-left: 1px solid var(--line); box-shadow: -20px 0 50px rgba(0,0,0,.5);
+    transform: translateX(100%); transition: transform .25s ease; overflow: auto;
+  }
+  .drawer.open { transform: none; }
+  .dh { padding: 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  .dh .big { font-size: 20px; font-weight: 900; }
+  .dh .close { margin-left: auto; }
+  .dbody { padding: 14px 16px; display: grid; gap: 14px; }
+  .kv { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+  .kv .cell { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; }
+  .kv .cell .k { font-size: 9.5px; letter-spacing: 1px; color: var(--txt-faint); text-transform: uppercase; }
+  .kv .cell .v { font-weight: 800; font-size: 15px; margin-top: 2px; }
+  .section-t { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--txt-dim); margin: 2px 0; }
+  .tyres4 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .corner { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .corner .lab { font-size: 10px; color: var(--txt-faint); }
+  .corner .pct { font-weight: 800; font-size: 16px; }
+  .stintrow { display: flex; gap: 4px; align-items: center; }
+  .stintseg { height: 16px; border-radius: 4px; display: grid; place-items: center; font-size: 9px; font-weight: 900; color: #0a0d12; }
+
+  /* ---------- Strategy view ---------- */
+  .strat { padding: 14px 16px; display: grid; gap: 8px; }
+  .stratrow { display: grid; grid-template-columns: 170px 1fr; gap: 10px; align-items: center; }
+  .stratrow .who { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+  .track { position: relative; height: 22px; background: #20283600; border-radius: 6px; display: flex; }
+  .stintbar { height: 22px; display: grid; place-items: center; font-size: 10px; font-weight: 900; color: #0a0d12; position: relative; }
+  .pitmark { position: absolute; top: -3px; width: 2px; height: 28px; background: #fff; }
+
+  /* ---------- Overlay compact ---------- */
+  .overlaywrap { display: grid; place-items: start center; padding: 20px 0; }
+  .overlay {
+    width: 420px; background: rgba(10,13,18,.86); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+    box-shadow: 0 18px 50px rgba(0,0,0,.5);
+  }
+  .ovhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(255,77,46,.12); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 800; }
+  .ovrow { display: grid; grid-template-columns: 24px 4px 1fr 64px 30px; gap: 8px; align-items: center; padding: 7px 12px; border-bottom: 1px solid rgba(35,44,59,.5); }
+  .ovrow:last-child { border-bottom: none; }
+  .ovrow .p { font-weight: 800; text-align: center; }
+  .ovrow .nm { font-weight: 700; font-size: 13px; }
+  .ovrow .it { text-align: right; color: var(--txt-dim); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .hint { color: var(--txt-faint); font-size: 12px; text-align: center; margin-top: 12px; }
+  .footnote { color: var(--txt-faint); font-size: 11px; margin-top: 16px; line-height: 1.5; }
+  .hide { display: none !important; }
+  .pill { font-size: 10px; padding: 2px 7px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--txt-dim); }
+  .pb { color: var(--good); font-weight: 700; }
+  tr.elim td { background: rgba(255,84,112,.07); }
+  tr.cut td { border-top: 2px dashed rgba(255,84,112,.55); }
+  .qlegend { display:flex; gap:14px; align-items:center; color: var(--txt-faint); font-size: 11px; padding: 4px 16px 10px; }
+  .qlegend b { font-weight: 800; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- App bar -->
+  <div class="appbar">
+    <div class="brand">
+      <div class="logo">O</div>
+      <div>OVERTAKE<small>RACE CONTROL - MOCK</small></div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-view="broadcast">Transmissao</button>
+      <button class="tab" data-view="overlay">Overlay compacto</button>
+      <button class="tab" data-view="qualy">Classificacao (setores)</button>
+      <button class="tab" data-view="strategy">Estrategia / Pits</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="sim">
+      <span class="live"><span class="dot"></span> AO VIVO</span>
+      <button class="btn" id="playBtn">Pausar</button>
+      <div class="seg" id="speedSeg">
+        <button data-spd="1" class="active">1x</button>
+        <button data-spd="2">2x</button>
+        <button data-spd="4">4x</button>
+      </div>
+      <span style="color:var(--txt-faint);font-size:11px;margin-left:6px">Sessao lobby:</span>
+      <div class="seg" id="lobbySeg" title="Simula o tipo de sessao do lobby - a tela troca sozinha">
+        <button data-sess="race" class="active">Corrida</button>
+        <button data-sess="quali">Quali</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session bar -->
+  <div class="sessionbar" id="sessionbar">
+    <div class="sb-item"><div class="k">Evento</div><div class="v">GP da Austria</div></div>
+    <div class="sb-item"><div class="k">Sessao</div><div class="v" id="sessName">Corrida</div></div>
+    <div class="sb-item"><div class="k" id="lapK">Volta</div><div class="v" id="lapCt">1 / 38</div></div>
+    <div class="sb-item"><div class="k">Tempo restante</div><div class="v sm" id="timeLeft">--:--</div></div>
+    <div class="sb-item"><div class="k">Clima</div><div class="v sm" id="weather">Ensolarado</div></div>
+    <div class="sb-item"><div class="k">Pista / Ar</div><div class="v sm" id="temps">41C / 27C</div></div>
+    <div class="sb-item"><div class="k">Bandeira</div><div class="v sm flag-grn" id="flag">Verde</div></div>
+    <div class="sb-item"><div class="k">Chuva (15min)</div><div class="v sm" id="rain">0%</div></div>
+  </div>
+
+  <!-- ============ BROADCAST VIEW ============ -->
+  <div id="view-broadcast">
+    <div class="grid">
+      <div class="panel">
+        <h3>Classificacao ao vivo</h3>
+        <div style="overflow:auto;">
+          <table class="lb">
+            <thead>
+              <tr>
+                <th style="text-align:center">P</th>
+                <th></th>
+                <th>Piloto</th>
+                <th>Intervalo</th>
+                <th>Gap lider</th>
+                <th>Ultima</th>
+                <th>Melhor</th>
+                <th>Pneu</th>
+                <th>Desgaste</th>
+                <th style="text-align:center">Pits</th>
+                <th>ERS</th>
+                <th>Comb.</th>
+                <th>Danos</th>
+                <th>Pen.</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="lbBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="display:grid; gap:14px;">
+        <div class="panel">
+          <h3>Destaques</h3>
+          <div class="spot" id="spot"></div>
+        </div>
+        <div class="panel">
+          <h3>Eventos da corrida</h3>
+          <div class="feed" id="feed"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ OVERLAY VIEW ============ -->
+  <div id="view-overlay" class="hide">
+    <div class="overlaywrap">
+      <div class="overlay">
+        <div class="ovhead"><span class="dot"></span> OVERTAKE - GP da Austria - Volta <span id="ovLap">1</span>/38</div>
+        <div id="ovBody"></div>
+      </div>
+      <div class="hint">Overlay compacto para transmissao / segundo monitor. Mostra o Top 6 com intervalos e pneu. Pode ser arrastado e redimensionado dentro do SimHub.</div>
+    </div>
+  </div>
+
+  <!-- ============ QUALY VIEW ============ -->
+  <div id="view-qualy" class="hide">
+    <div class="panel" style="margin-bottom:14px">
+      <h3>Classificacao - melhores setores da sessao</h3>
+      <div class="spot" style="display:grid;grid-template-columns:repeat(4,1fr)">
+        <div class="spotcard" style="border-left:3px solid var(--purple)"><div class="k">Melhor Setor 1</div><div class="v fastest" id="qSb1">-</div></div>
+        <div class="spotcard" style="border-left:3px solid var(--purple)"><div class="k">Melhor Setor 2</div><div class="v fastest" id="qSb2">-</div></div>
+        <div class="spotcard" style="border-left:3px solid var(--purple)"><div class="k">Melhor Setor 3</div><div class="v fastest" id="qSb3">-</div></div>
+        <div class="spotcard" style="border-left:3px solid var(--accent-2)"><div class="k">Volta ideal (teorica)</div><div class="v" id="qIdeal">-</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Tempos por piloto - Q1 (15 avancam, ultimos 5 eliminados)</h3>
+      <div style="overflow:auto">
+        <table class="lb">
+          <thead><tr>
+            <th style="text-align:center">P</th>
+            <th>Piloto</th>
+            <th>Melhor volta</th>
+            <th>Gap pole</th>
+            <th>Intervalo</th>
+            <th>Setor 1</th>
+            <th>Setor 2</th>
+            <th>Setor 3</th>
+            <th>Pneu</th>
+            <th style="text-align:center">Voltas</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody id="qBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ STRATEGY VIEW ============ -->
+  <div id="view-strategy" class="hide">
+    <div class="panel">
+      <h3>Estrategia de pneus e paradas (stints)</h3>
+      <div class="strat" id="strat"></div>
+    </div>
+  </div>
+
+  <div class="footnote">
+    Mock de validacao - dados sinteticos baseados na corrida real GP da Austria (arquivo .otk analisado).
+    Penalidades exibidas ja com o fix de deduplicacao aplicado. Nada aqui e codigo de producao: serve para
+    aprovar layout, fluxo e quais dados aparecem antes de construir o contrato de propriedades e o dashboard .djson.
+  </div>
+</div>
+
+<!-- Driver drawer -->
+<div class="drawer-mask" id="drawerMask"></div>
+<div class="drawer" id="drawer">
+  <div class="dh">
+    <div class="teambar" id="dTeamBar" style="height:34px;width:6px"></div>
+    <div>
+      <div class="big" id="dName">-</div>
+      <div class="team" id="dTeam">-</div>
+    </div>
+    <button class="btn close" id="dClose">Fechar</button>
+  </div>
+  <div class="dbody" id="dBody"></div>
+</div>
+
+<script>
+/* ============================================================
+   Synthetic data model - real Austria grid
+   ============================================================ */
+const TEAMS = {
+  mercedes: { name: "Mercedes-AMG F1 Team", c: "--t-mercedes" },
+  ferrari:  { name: "Scuderia Ferrari HP", c: "--t-ferrari" },
+  williams: { name: "Atlassian Williams F1 Team", c: "--t-williams" },
+  mclaren:  { name: "McLaren Formula 1 Team", c: "--t-mclaren" },
+  redbull:  { name: "Oracle Red Bull Racing", c: "--t-redbull" },
+  aston:    { name: "Aston Martin Aramco", c: "--t-aston" },
+  haas:     { name: "MoneyGram Haas F1 Team", c: "--t-haas" },
+  alpine:   { name: "BWT Alpine F1 Team", c: "--t-alpine" },
+  rb:       { name: "Visa Cash App Racing Bulls", c: "--t-rb" },
+  cadillac: { name: "Cadillac Formula 1 Team", c: "--t-cadillac" },
+};
+function teamColor(t){ return getComputedStyle(document.documentElement).getPropertyValue(TEAMS[t].c).trim(); }
+
+// pos, tag, team, pen {n, s}
+const SEED = [
+  [1,"BDA_Gregui","mercedes",{n:0,s:0}],
+  [2,"BDA FROGz","ferrari",{n:1,s:3}],
+  [3,"BDA_LeoMontenegro","williams",{n:0,s:0}],
+  [4,"BDA_SkilO","mclaren",{n:1,s:3}],
+  [5,"KTS-XvenonzinhoX","mclaren",{n:0,s:0}],
+  [6,"BDA_Moreno","mercedes",{n:1,s:20}],
+  [7,"FDT OttonMoura","redbull",{n:2,s:6}],
+  [8,"KDR-Lucas","aston",{n:0,s:0}],
+  [9,"LucassMuniz","haas",{n:1,s:3}],
+  [10,"MDR-CALIXTO84","alpine",{n:0,s:0}],
+  [11,"KDR-CLEYBERx","rb",{n:2,s:6}],
+  [12,"KDR-JoelJho","cadillac",{n:2,s:6}],
+  [13,"gutierri","rb",{n:2,s:6}],
+  [14,"Sam Ferreira","redbull",{n:0,s:0}],
+  [15,"Vitor Misson","cadillac",{n:2,s:6}],
+  [16,"BMMFbr","cadillac",{n:0,s:0}],
+  [17,"Domathosbraga","aston",{n:0,s:0}],
+  [18,"Fergusrjj","haas",{n:3,s:13}],
+  [19,"Mineiro-BHZ","alpine",{n:3,s:9}],
+  [20,"jeegoomes_","williams",{n:6,s:18}],
+];
+const COMPOUNDS = ["S","M","H"];
+const rand = (a,b)=> a + Math.random()*(b-a);
+const pick = arr => arr[Math.floor(Math.random()*arr.length)];
+
+const TOTAL_LAPS = 38;
+let state = {
+  lap: 6,
+  timeLeftS: 32*60,
+  rain: 0,
+  flag: "Verde",
+  sc: false,
+  drivers: [],
+};
+
+SEED.forEach((d, i) => {
+  const comp = i < 6 ? pick(["M","H"]) : pick(COMPOUNDS);
+  state.drivers.push({
+    pos: d[0], prevPos: d[0], tag: d[1], team: d[2],
+    interval: i === 0 ? 0 : rand(0.3, 3.2),
+    gap: 0,
+    lastLap: 66000 + i*250 + rand(-300,600),
+    bestLap: 66300 + i*230 + rand(-200,300),
+    compound: comp, tyreAge: Math.floor(rand(3, 16)),
+    wear: { fl: rand(8,40), fr: rand(8,42), rl: rand(10,48), rr: rand(10,50) },
+    stops: i % 4 === 0 ? 1 : (i % 7 === 0 ? 0 : 2),
+    ers: rand(20, 95), ersMode: pick(["Medio","Alto","Maximo","Baixo"]),
+    fuelLaps: rand(-0.4, 1.8), fuelKg: rand(5, 38),
+    damage: { fwL: rand(0,10), fwR: rand(0,16), rw: rand(0,7), floor: rand(0,14) },
+    pen: { ...d[3] }, warns: Math.floor(rand(0, 8)),
+    status: "Em pista", out: false, drs: false, inPit: false,
+    fastest: false,
+    stints: buildStints(comp),
+    // qualy fields
+    s1: rand(17000, 18200), s2: rand(24000, 25400), s3: rand(23000, 24200),
+    qStatus: pick(["Em pista", "Out lap", "Box"]), qLaps: Math.floor(rand(3, 9)),
+  });
+});
+state.drivers.forEach(d => { d.qBest = d.s1 + d.s2 + d.s3; });
+state.drivers[5].bestLap = 66476; // Moreno purple-ish (matches print)
+recomputeGaps();
+markFastest();
+recomputeQualy();
+
+function buildStints(currentComp){
+  // up to current lap, simple 1-2 stop history
+  const segs = [];
+  const firstComp = pick(["S","M"]);
+  const pit1 = Math.floor(rand(10, 16));
+  segs.push({ compound: firstComp, from: 1, to: pit1 });
+  if (Math.random() > 0.4){
+    const pit2 = Math.floor(rand(22, 28));
+    segs.push({ compound: pick(["M","H"]), from: pit1, to: pit2 });
+    segs.push({ compound: currentComp, from: pit2, to: TOTAL_LAPS });
+  } else {
+    segs.push({ compound: currentComp, from: pit1, to: TOTAL_LAPS });
+  }
+  return segs;
+}
+
+function recomputeGaps(){
+  const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos);
+  let acc = 0;
+  ds.forEach((d,i)=>{ if(i===0){ d.gap=0; d.interval=0; } else { acc += d.interval; d.gap = acc; } });
+}
+function markFastest(){
+  let best = Infinity, who = null;
+  state.drivers.forEach(d=>{ if(d.bestLap < best){ best = d.bestLap; who = d; }});
+  state.drivers.forEach(d=> d.fastest = (d === who));
+}
+
+/* ============================================================
+   Formatting helpers
+   ============================================================ */
+function fmtLap(ms){
+  if (ms == null || ms <= 0) return "-";
+  const m = Math.floor(ms/60000); const s = ((ms%60000)/1000);
+  return `${m}:${s.toFixed(3).padStart(6,"0")}`;
+}
+function fmtGap(s){ if (s<=0) return "LIDER"; return "+"+s.toFixed(3); }
+function fmtSec(ms){ return (ms/1000).toFixed(3); }
+function fmtInt(s){ if (s<=0) return "-"; return "+"+s.toFixed(3); }
+function wearColor(p){ if(p<35) return "#2ed47a"; if(p<65) return "#ffd12e"; return "#ff5470"; }
+function fuelTxt(l){ const v = l>=0? "+"+l.toFixed(1) : l.toFixed(1); return v+" v"; }
+function dmgWorst(d){ return Math.max(d.damage.fwL, d.damage.fwR, d.damage.rw, d.damage.floor); }
+function dmgColor(p){ if(p<10) return "#2ed47a"; if(p<30) return "#ffd12e"; return "#ff5470"; }
+
+/* ============================================================
+   Render: leaderboard
+   ============================================================ */
+const lbBody = document.getElementById("lbBody");
+function renderLeaderboard(){
+  const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos);
+  lbBody.innerHTML = "";
+  ds.forEach(d=>{
+    const col = teamColor(d.team);
+    const tr = document.createElement("tr");
+    tr.onclick = ()=> openDrawer(d);
+    let chCls = "same", chTxt = "=";
+    if (d.prevPos > d.pos){ chCls="up"; chTxt="\u25B2"; }
+    else if (d.prevPos < d.pos){ chCls="down"; chTxt="\u25BC"; }
+    const wear = (d.wear.fl+d.wear.fr+d.wear.rl+d.wear.rr)/4;
+    const dw = dmgWorst(d);
+    const penTxt = d.pen.n>0 ? `${d.pen.n}x +${d.pen.s}s` : "-";
+    let statusBadge = `<span class="badge">Em pista</span>`;
+    if (d.out) statusBadge = `<span class="badge out">Abandonou</span>`;
+    else if (d.inPit) statusBadge = `<span class="badge pit">PIT</span>`;
+    else if (d.drs) statusBadge = `<span class="badge drs">DRS</span>`;
+    tr.innerHTML = `
+      <td class="pos">${d.pos}</td>
+      <td class="ch ${chCls}">${chTxt}</td>
+      <td>
+        <div class="drv">
+          <span class="teambar" style="background:${col}"></span>
+          <div>
+            <div class="name">${d.tag}</div>
+            <div class="team">${TEAMS[d.team].name}</div>
+          </div>
+        </div>
+      </td>
+      <td class="mono">${fmtInt(d.interval)}</td>
+      <td class="mono ${d.pos===1?'lead':''}">${fmtGap(d.gap)}</td>
+      <td class="mono ${d.fastest?'fastest':''}">${fmtLap(d.lastLap)}</td>
+      <td class="mono">${fmtLap(d.bestLap)}</td>
+      <td>
+        <span class="compound">
+          <span class="tyre ${d.compound}">${d.compound}</span>
+          <span class="age">${d.tyreAge}v</span>
+        </span>
+      </td>
+      <td><span class="wearbar"><i style="width:${Math.min(100,wear)}%;background:${wearColor(wear)}"></i></span></td>
+      <td style="text-align:center">${d.stops}</td>
+      <td><span class="ersbar"><i style="width:${Math.round(d.ers)}%"></i></span></td>
+      <td class="mono">${fuelTxt(d.fuelLaps)}<span class="age"> ${d.fuelKg.toFixed(1)}kg</span></td>
+      <td><span class="wearbar"><i style="width:${Math.min(100,dw)}%;background:${dmgColor(dw)}"></i></span></td>
+      <td class="pen">${penTxt}</td>
+      <td>${statusBadge}</td>
+    `;
+    lbBody.appendChild(tr);
+  });
+}
+
+/* ============================================================
+   Render: spotlight
+   ============================================================ */
+function renderSpot(){
+  const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos);
+  const leader = ds[0];
+  const fast = state.drivers.find(d=>d.fastest);
+  const spot = document.getElementById("spot");
+  spot.innerHTML = `
+    <div class="spotcard" style="border-left:3px solid ${teamColor(leader.team)}">
+      <div class="k">Lider</div>
+      <div class="v">${leader.tag}</div>
+      <div class="sub">${TEAMS[leader.team].name} - ${leader.stops} parada(s) - pneu ${leader.compound}${leader.tyreAge}v</div>
+    </div>
+    <div class="spotcard" style="border-left:3px solid var(--purple)">
+      <div class="k">Volta mais rapida</div>
+      <div class="v fastest">${fast.tag} - ${fmtLap(fast.bestLap)}</div>
+      <div class="sub">${TEAMS[fast.team].name}</div>
+    </div>
+    <div class="spotcard" style="border-left:3px solid var(--accent-2)">
+      <div class="k">Briga mais proxima</div>
+      <div class="v">${closestBattle()}</div>
+      <div class="sub">Diferenca sob 1s - zona de DRS</div>
+    </div>
+  `;
+}
+function closestBattle(){
+  const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos);
+  let best = Infinity, idx = 1;
+  for (let i=1;i<ds.length;i++){ if(ds[i].interval < best){ best = ds[i].interval; idx = i; } }
+  return `${ds[idx-1].tag} vs ${ds[idx].tag} (+${best.toFixed(3)})`;
+}
+
+/* ============================================================
+   Event feed
+   ============================================================ */
+const feed = document.getElementById("feed");
+const EVID = { ovt:"\u21C4", pen:"!", pit:"P", fl:"\u26A1", sc:"SC", rtmt:"X", dmg:"\u26A0" };
+function pushEvent(kind, msg){
+  const el = document.createElement("div");
+  el.className = "ev";
+  const lap = state.lap;
+  el.innerHTML = `<div class="t">V${lap}</div><div class="ico ${kind}">${EVID[kind]}</div><div class="msg">${msg}</div>`;
+  feed.prepend(el);
+  while (feed.children.length > 40) feed.removeChild(feed.lastChild);
+}
+// seed feed
+pushEvent("fl", "<b>BDA_Moreno</b> marca a volta mais rapida (1:06.476)");
+pushEvent("ovt", "<b>FDT OttonMoura</b> ultrapassa <b>KDR-Lucas</b> pela P7");
+pushEvent("pen", "<b>KDR-CLEYBERx</b> recebe +3s (corte de pista)");
+
+/* ============================================================
+   Overlay compact
+   ============================================================ */
+function renderOverlay(){
+  const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos).slice(0,6);
+  const ov = document.getElementById("ovBody");
+  document.getElementById("ovLap").textContent = state.lap;
+  ov.innerHTML = "";
+  ds.forEach(d=>{
+    const row = document.createElement("div");
+    row.className = "ovrow";
+    row.innerHTML = `
+      <div class="p">${d.pos}</div>
+      <div class="teambar" style="background:${teamColor(d.team)};height:18px"></div>
+      <div class="nm">${d.tag}</div>
+      <div class="it">${d.pos===1?'LIDER':fmtInt(d.interval)}</div>
+      <div><span class="tyre ${d.compound}" style="width:18px;height:18px;font-size:9px">${d.compound}</span></div>
+    `;
+    ov.appendChild(row);
+  });
+}
+
+/* ============================================================
+   Strategy view
+   ============================================================ */
+function renderStrategy(){
+  const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos);
+  const wrap = document.getElementById("strat");
+  const compColor = { S:"var(--soft)", M:"var(--medium)", H:"var(--hard)", I:"var(--inter)", W:"var(--wet)" };
+  wrap.innerHTML = "";
+  ds.forEach(d=>{
+    const row = document.createElement("div");
+    row.className = "stratrow";
+    let bars = "";
+    d.stints.forEach((s,i)=>{
+      const w = ((s.to - s.from) / TOTAL_LAPS) * 100;
+      bars += `<div class="stintbar" style="width:${w}%;background:${compColor[s.compound]}">${s.compound}</div>`;
+      if (i < d.stints.length-1){
+        const left = (s.to / TOTAL_LAPS) * 100;
+        bars += `<div class="pitmark" style="left:${left}%"></div>`;
+      }
+    });
+    // progress marker
+    const prog = (state.lap / TOTAL_LAPS) * 100;
+    row.innerHTML = `
+      <div class="who"><span class="teambar" style="background:${teamColor(d.team)};height:18px"></span>P${d.pos} ${d.tag}</div>
+      <div class="track" style="position:relative">${bars}<div class="pitmark" style="left:${prog}%;background:var(--accent)"></div></div>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+/* ============================================================
+   Qualy view (sector focus)
+   ============================================================ */
+function recomputeQualy(){
+  const ds = state.drivers;
+  const sb1 = Math.min(...ds.map(d=>d.s1));
+  const sb2 = Math.min(...ds.map(d=>d.s2));
+  const sb3 = Math.min(...ds.map(d=>d.s3));
+  const sbLap = Math.min(...ds.map(d=>d.qBest));
+  state.qBest = { s1: sb1, s2: sb2, s3: sb3, lap: sbLap };
+  const sorted = [...ds].sort((a,b)=>a.qBest-b.qBest);
+  sorted.forEach((d,i)=>{
+    d.qPos = i+1;
+    d.qGapPole = d.qBest - sbLap;
+    d.qInt = i===0 ? 0 : (d.qBest - sorted[i-1].qBest);
+  });
+}
+function renderQualy(){
+  recomputeQualy();
+  const sb = state.qBest;
+  document.getElementById("qSb1").textContent = fmtSec(sb.s1);
+  document.getElementById("qSb2").textContent = fmtSec(sb.s2);
+  document.getElementById("qSb3").textContent = fmtSec(sb.s3);
+  document.getElementById("qIdeal").textContent = fmtLap(sb.s1+sb.s2+sb.s3);
+  const ds = [...state.drivers].sort((a,b)=>a.qPos-b.qPos);
+  const body = document.getElementById("qBody");
+  body.innerHTML = "";
+  const secCell = (val,best)=> `<td class="mono ${val===best?'fastest':'pb'}">${fmtSec(val)}</td>`;
+  const statusBadge = (s)=> s==="Box" ? `<span class="badge pit">BOX</span>`
+      : s==="Out lap" ? `<span class="badge">OUT LAP</span>` : `<span class="badge drs">EM PISTA</span>`;
+  ds.forEach(d=>{
+    const tr = document.createElement("tr");
+    tr.onclick = ()=> openDrawer(d);
+    if (d.qPos > 15) tr.classList.add("elim");
+    if (d.qPos === 16) tr.classList.add("cut");
+    tr.innerHTML = `
+      <td class="pos">${d.qPos}</td>
+      <td><div class="drv"><span class="teambar" style="background:${teamColor(d.team)}"></span>
+        <div><div class="name">${d.tag}</div><div class="team">${TEAMS[d.team].name}</div></div></div></td>
+      <td class="mono ${d.qBest===sb.lap?'fastest':'pb'}">${fmtLap(d.qBest)}</td>
+      <td class="mono ${d.qPos===1?'lead':''}">${d.qPos===1?'POLE':'+'+(d.qGapPole/1000).toFixed(3)}</td>
+      <td class="mono">${d.qPos===1?'-':'+'+(d.qInt/1000).toFixed(3)}</td>
+      ${secCell(d.s1, sb.s1)}
+      ${secCell(d.s2, sb.s2)}
+      ${secCell(d.s3, sb.s3)}
+      <td><span class="compound"><span class="tyre ${d.compound}">${d.compound}</span></span></td>
+      <td style="text-align:center">${d.qLaps}</td>
+      <td>${statusBadge(d.qStatus)}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+/* ============================================================
+   Driver drawer
+   ============================================================ */
+const drawer = document.getElementById("drawer");
+const drawerMask = document.getElementById("drawerMask");
+let drawerDriver = null;
+function openDrawer(d){
+  drawerDriver = d;
+  document.getElementById("dName").textContent = d.tag;
+  document.getElementById("dTeam").textContent = TEAMS[d.team].name;
+  document.getElementById("dTeamBar").style.background = teamColor(d.team);
+  renderDrawer();
+  drawer.classList.add("open"); drawerMask.classList.add("open");
+}
+function renderDrawer(){
+  const d = drawerDriver; if(!d) return;
+  const compColor = { S:"var(--soft)", M:"var(--medium)", H:"var(--hard)", I:"var(--inter)", W:"var(--wet)" };
+  const stintChips = d.stints.map(s=>`<span class="badge" style="border-color:${compColor[s.compound]};color:${compColor[s.compound]}">${s.compound} V${s.from}-${s.to}</span>`).join(" ");
+  document.getElementById("dBody").innerHTML = `
+    <div class="kv">
+      <div class="cell"><div class="k">Posicao</div><div class="v">P${d.pos}</div></div>
+      <div class="cell"><div class="k">Gap lider</div><div class="v">${fmtGap(d.gap)}</div></div>
+      <div class="cell"><div class="k">Intervalo</div><div class="v">${fmtInt(d.interval)}</div></div>
+      <div class="cell"><div class="k">Ultima volta</div><div class="v">${fmtLap(d.lastLap)}</div></div>
+      <div class="cell"><div class="k">Melhor volta</div><div class="v ${d.fastest?'fastest':''}">${fmtLap(d.bestLap)}</div></div>
+      <div class="cell"><div class="k">Paradas</div><div class="v">${d.stops}</div></div>
+    </div>
+
+    <div class="section-t">Pneus - desgaste por canto</div>
+    <div class="tyres4">
+      ${cornerHtml("Diant. Esq.", d.wear.fl)}
+      ${cornerHtml("Diant. Dir.", d.wear.fr)}
+      ${cornerHtml("Tras. Esq.", d.wear.rl)}
+      ${cornerHtml("Tras. Dir.", d.wear.rr)}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="tyre ${d.compound}">${d.compound}</span>
+      <span class="age">Composto atual - ${d.tyreAge} voltas</span>
+    </div>
+
+    <div class="section-t">Energia (ERS)</div>
+    <div class="kv">
+      <div class="cell"><div class="k">ERS armazenado</div><div class="v">${Math.round(d.ers)}%</div></div>
+      <div class="cell"><div class="k">Modo ERS</div><div class="v" style="font-size:13px">${d.ersMode}</div></div>
+      <div class="cell"><div class="k">Bateria (MJ)</div><div class="v">${(d.ers/100*4).toFixed(1)}</div></div>
+    </div>
+    <div class="ersbar" style="width:100%;height:10px"><i style="width:${Math.round(d.ers)}%"></i></div>
+
+    <div class="section-t">Combustivel</div>
+    <div class="kv">
+      <div class="cell"><div class="k">No tanque</div><div class="v">${d.fuelKg.toFixed(1)} kg</div></div>
+      <div class="cell"><div class="k">Voltas restantes</div><div class="v">${fuelTxt(d.fuelLaps)}</div></div>
+      <div class="cell"><div class="k">Mistura</div><div class="v" style="font-size:13px">${d.fuelLaps<0?'Economia':'Padrao'}</div></div>
+    </div>
+
+    <div class="section-t">Danos no carro</div>
+    <div class="tyres4">
+      ${dmgHtml("Asa diant. esq.", d.damage.fwL)}
+      ${dmgHtml("Asa diant. dir.", d.damage.fwR)}
+      ${dmgHtml("Asa traseira", d.damage.rw)}
+      ${dmgHtml("Assoalho", d.damage.floor)}
+    </div>
+
+    <div class="section-t">Estrategia (stints)</div>
+    <div>${stintChips}</div>
+
+    <div class="section-t">Disciplina</div>
+    <div class="kv">
+      <div class="cell"><div class="k">Penalidades</div><div class="v pen">${d.pen.n>0? d.pen.n+'x +'+d.pen.s+'s':'-'}</div></div>
+      <div class="cell"><div class="k">Avisos</div><div class="v">${d.warns}</div></div>
+      <div class="cell"><div class="k">Status</div><div class="v" style="font-size:13px">${d.out?'Abandonou':(d.inPit?'No pit':'Em pista')}</div></div>
+    </div>
+    <div class="pill">Penalidades ja deduplicadas (sem dobra por reconexao)</div>
+  `;
+}
+function cornerHtml(lab, p){
+  return `<div class="corner"><div class="lab">${lab}</div><div class="pct" style="color:${wearColor(p)}">${Math.round(p)}%</div>
+    <div class="wearbar" style="width:100%;margin-top:5px"><i style="width:${Math.min(100,p)}%;background:${wearColor(p)}"></i></div></div>`;
+}
+function dmgHtml(lab, p){
+  return `<div class="corner"><div class="lab">${lab}</div><div class="pct" style="color:${dmgColor(p)}">${Math.round(p)}%</div>
+    <div class="wearbar" style="width:100%;margin-top:5px"><i style="width:${Math.min(100,p)}%;background:${dmgColor(p)}"></i></div></div>`;
+}
+document.getElementById("dClose").onclick = closeDrawer;
+drawerMask.onclick = closeDrawer;
+function closeDrawer(){ drawer.classList.remove("open"); drawerMask.classList.remove("open"); drawerDriver=null; }
+
+/* ============================================================
+   Simulation loop
+   ============================================================ */
+let running = true, speed = 1, tickAcc = 0;
+function simStep(){
+  // jitter intervals
+  state.drivers.forEach(d=>{
+    if (d.out) return;
+    if (d.pos > 1) d.interval = Math.max(0.15, d.interval + rand(-0.25,0.25));
+    d.ers = Math.max(2, Math.min(100, d.ers + rand(-9, 11)));
+    d.wear.fl = Math.min(100, d.wear.fl + rand(0,0.7));
+    d.wear.fr = Math.min(100, d.wear.fr + rand(0,0.7));
+    d.wear.rl = Math.min(100, d.wear.rl + rand(0,0.9));
+    d.wear.rr = Math.min(100, d.wear.rr + rand(0,0.9));
+    d.fuelLaps += rand(-0.05, 0.02);
+    d.fuelKg = Math.max(0.4, d.fuelKg - rand(0.9, 1.3));
+    if (Math.random() < 0.12) d.damage.floor = Math.min(100, d.damage.floor + rand(0, 3));
+    d.tyreAge += Math.random() < 0.25 ? 1 : 0;
+    d.lastLap = d.bestLap + rand(150, 1600);
+    d.drs = (d.pos>1 && d.interval < 1.0 && Math.random()<0.5);
+    d.inPit = false;
+  });
+
+  // occasional overtake (swap adjacent)
+  if (Math.random() < 0.55){
+    const ds = [...state.drivers].sort((a,b)=>a.pos-b.pos);
+    const i = 1 + Math.floor(Math.random()*(ds.length-2));
+    if (ds[i] && ds[i-1] && !ds[i].out && !ds[i-1].out && ds[i].interval < 1.0){
+      const a = ds[i-1], b = ds[i];
+      [a.pos, b.pos] = [b.pos, a.pos];
+      b.interval = a.interval; a.interval = rand(0.2,0.8);
+      pushEvent("ovt", `<b>${b.tag}</b> ultrapassa <b>${a.tag}</b> pela P${b.pos}`);
+    }
+  }
+
+  // occasional pit stop
+  if (Math.random() < 0.3){
+    const d = pick(state.drivers.filter(x=>!x.out));
+    if (d){
+      d.inPit = true; d.stops += 1; d.tyreAge = 0; d.compound = pick(COMPOUNDS);
+      d.wear = { fl:rand(2,6), fr:rand(2,6), rl:rand(2,7), rr:rand(2,7) };
+      d.damage.fwL = rand(0,2); d.damage.fwR = rand(0,2);
+      pushEvent("pit", `<b>${d.tag}</b> entra nos boxes - troca para ${d.compound}`);
+    }
+  }
+
+  // occasional penalty
+  if (Math.random() < 0.18){
+    const d = pick(state.drivers.filter(x=>!x.out));
+    if (d){ d.pen.n += 1; d.pen.s += 3; pushEvent("pen", `<b>${d.tag}</b> recebe +3s (corte de pista)`); }
+  }
+
+  // occasional contact / damage
+  if (Math.random() < 0.14){
+    const d = pick(state.drivers.filter(x=>!x.out));
+    if (d){ const add = rand(6,22); d.damage.fwR = Math.min(100, d.damage.fwR + add);
+      pushEvent("dmg", `<b>${d.tag}</b> sofre dano na asa dianteira (+${Math.round(add)}%)`); }
+  }
+
+  // new fastest lap
+  if (Math.random() < 0.22){
+    const d = pick(state.drivers.filter(x=>!x.out));
+    const cand = 66100 + rand(-400, 400);
+    const curBest = Math.min(...state.drivers.map(x=>x.bestLap));
+    if (cand < curBest){ d.bestLap = cand; markFastest(); pushEvent("fl", `<b>${d.tag}</b> marca a volta mais rapida (${fmtLap(cand)})`); }
+  }
+
+  // qualy: random sector improvements + status drift
+  for (let k=0;k<2;k++){
+    const d = pick(state.drivers);
+    const which = Math.floor(rand(0,3));
+    const imp = rand(0.02, 0.28) * 1000;
+    if (which===0) d.s1 = Math.max(16600, d.s1 - imp);
+    else if (which===1) d.s2 = Math.max(23600, d.s2 - imp);
+    else d.s3 = Math.max(22600, d.s3 - imp);
+    d.qBest = d.s1 + d.s2 + d.s3;
+    d.qLaps += 1;
+  }
+  if (Math.random() < 0.4){ const d = pick(state.drivers); d.qStatus = pick(["Em pista","Out lap","Box"]); }
+
+  // advance lap
+  state.lap = Math.min(TOTAL_LAPS, state.lap + 1);
+  state.timeLeftS = Math.max(0, state.timeLeftS - 95);
+
+  recomputeGaps();
+  state.drivers.forEach(d=>{ /* set prevPos baseline for next compare done in render */ });
+  renderAll();
+  // update prevPos after render so arrows reflect last change
+  state.drivers.forEach(d=> d.prevPos = d.pos);
+}
+
+function renderSession(){
+  document.getElementById("lapCt").textContent = (curView === "qualy") ? "Q1" : `${state.lap} / ${TOTAL_LAPS}`;
+  const m = Math.floor(state.timeLeftS/60), s = Math.floor(state.timeLeftS%60);
+  document.getElementById("timeLeft").textContent = `${m}:${String(s).padStart(2,"0")}`;
+  document.getElementById("rain").textContent = state.rain+"%";
+  const flagEl = document.getElementById("flag");
+  flagEl.textContent = state.flag;
+  flagEl.className = "v sm " + (state.sc ? "flag-sc" : "flag-grn");
+}
+
+let curView = "broadcast";
+function renderAll(){
+  renderSession();
+  if (curView === "broadcast"){ renderLeaderboard(); renderSpot(); }
+  else if (curView === "overlay"){ renderOverlay(); }
+  else if (curView === "qualy"){ renderQualy(); }
+  else if (curView === "strategy"){ renderStrategy(); }
+  if (drawerDriver) renderDrawer();
+}
+
+function loop(){
+  if (running){
+    tickAcc += speed;
+    if (tickAcc >= 1){ tickAcc = 0; simStep(); }
+  }
+}
+setInterval(loop, 1500);
+
+/* ============================================================
+   View switching + controls
+   ============================================================ */
+function activateView(view){
+  curView = view;
+  document.querySelectorAll(".tab").forEach(x=> x.classList.toggle("active", x.dataset.view===view));
+  document.getElementById("view-broadcast").classList.toggle("hide", view!=="broadcast");
+  document.getElementById("view-overlay").classList.toggle("hide", view!=="overlay");
+  document.getElementById("view-qualy").classList.toggle("hide", view!=="qualy");
+  document.getElementById("view-strategy").classList.toggle("hide", view!=="strategy");
+  const isQ = view === "qualy";
+  document.getElementById("sessName").textContent = isQ ? "Classificacao" : "Corrida";
+  document.getElementById("lapK").textContent = isQ ? "Fase" : "Volta";
+  renderAll();
+}
+document.querySelectorAll(".tab").forEach(t=>{
+  t.onclick = ()=> activateView(t.dataset.view);
+});
+// Auto-switch: muda de tela conforme o tipo de sessao do lobby (no plugin vem do SessionType)
+document.querySelectorAll("#lobbySeg button").forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll("#lobbySeg button").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    activateView(b.dataset.sess === "quali" ? "qualy" : "broadcast");
+  };
+});
+document.getElementById("playBtn").onclick = (e)=>{
+  running = !running; e.target.textContent = running ? "Pausar" : "Retomar";
+};
+document.querySelectorAll("#speedSeg button").forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll("#speedSeg button").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active"); speed = parseInt(b.dataset.spd,10);
+  };
+});
+
+renderAll();
+</script>
+</body>
+</html>

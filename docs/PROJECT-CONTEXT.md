@@ -4,6 +4,19 @@ Referência técnica interna para desenvolvimento e manutenção do plugin.
 
 ---
 
+## Documentacao Live Race UI (Jun/2026)
+
+Feature em desenvolvimento na branch `feat/race-ui-test-build` — dashboard web + overlays OBS servidos pelo plugin.
+
+| Documento | Conteudo |
+|-----------|----------|
+| **`docs/LIVE-RACE-UI-HANDOFF.md`** | Handoff completo: arquitetura, schema JSON, features, backlog, como retomar |
+| **`docs/LIVE-CLOUD-BROADCAST-DESIGN.md`** | Plano futuro: streaming publico via cloud (Supabase), monetizacao, multi-liga |
+
+> O handoff pode existir apenas localmente ate ser commitado — ver secao 11 do proprio arquivo.
+
+---
+
 ## Arquitetura — Pipeline de dados
 
 ```
@@ -343,6 +356,56 @@ Detalhes em [RELEASE-PROCESS.md](RELEASE-PROCESS.md).
 | `Properties/AssemblyInfo.cs` | `AssemblyVersion`, `AssemblyFileVersion` |
 | `CHANGELOG.md` | Entrada `## [X.Y.Z]` com notas |
 | `version.json` | `version`, `released`, `releaseNotes`, `installerUrl` |
+
+---
+
+## Backlog / fixes programados (pendentes)
+
+> Itens confirmados mas ainda NÃO implementados. Vão num pacote maior (alvo:
+> **v1.1.48**) depois de coletar mais casos de estresse do v1.1.47 (My Team,
+> Sprint, corridas 100%, etc.).
+
+### [PROGRAMADO] Penalidades dobradas/multiplicadas por replay de reconexão
+
+- **Sintoma (reportado pelo usuário, 28/jun/2026):** ao importar
+  `Austria_20260628_212502_32779D.otk` no site, as punições apareceram
+  dobradas. Ex.: BDA FROGz era `x1 (+3s)` no jogo e veio `2 pen / +6s`;
+  KDR-JoelJho era `x2 (+6s)` e veio `4 pen / +12s`.
+- **Confirmado: vem do nosso `.otk`, NÃO do front.** `results[].numPenalties`
+  e `results[].penaltiesTimeSec` batem exatamente com a soma BRUTA da
+  `penaltiesTimeline` (com duplicatas). Após de-dup, batem exatamente com o
+  jogo.
+- **Causa raiz:** quedas de lobby + reconexão. Quando o jogador reentra
+  (ou a tela de resultados recarrega), o jogo **re-transmite todo o histórico
+  de eventos** num "burst" comprimido. Neste arquivo: **144 eventos numa
+  janela de 53 ms** (`tsMs 1782692580892–...945`). O plugin anexa tudo em
+  `PenaltySnapshots`. Quem caiu mais vezes ficou com eventos em **4x e 6x**
+  (Joelho, Mineiro-BHZ em 4x; jeegoomes_ em 6x) — prova de múltiplas
+  reconexões. Sem queda, multiplicidade seria no máximo 2x.
+- **Por que dobra no JSON:** `LeagueFinalizer` recalcula penalidades varrendo
+  `penDr.PenaltySnapshots` cru (`LeagueFinalizer.cs` ~L1630) e soma TODOS os
+  eventos (`nTimePen++`, `penTimeTotal += ps.TimeSec`). O de-dup existente no
+  merge de drivers (~L804) só compara por `tsMs + penaltyType`; como o replay
+  tem `tsMs` diferente, não pega.
+- **Fix programado:** deduplicar eventos de penalidade por **identidade
+  lógica** (`penaltyType + infringementType + lapNum + timeSec`, ignorando
+  `tsMs`) em DOIS pontos:
+  1. No recálculo de `numPenalties`/`penaltiesTimeSec`/DT/SG/warnings
+     (loop em `LeagueFinalizer.cs` ~L1628-1681).
+  2. Na `penaltiesTimeline` exportada (~L2239) — manter só a 1ª ocorrência
+     (menor `tsMs`) de cada evento lógico.
+  Colapsa qualquer multiplicidade (2x/4x/6x) para 1x → robusto a qualquer
+  número de reconexões.
+- **Cuidado/edge:** penalidades legítimas e idênticas em voltas diferentes
+  têm `lapNum` distinto → não colidem. Duas penalidades reais na MESMA volta
+  com mesmo tipo/segundos são raríssimas; aceitável colapsar (preferir
+  subnotificar a dobrar). Warnings (pt=5) também entram no de-dup.
+- **Teste programado:** novo teste em `Test-Finalizer.ps1` que injeta o
+  histórico ao vivo + um burst de replay (mesma identidade lógica, `tsMs`
+  diferente) e valida `numPenalties`/`penaltiesTimeSec` == valores únicos.
+- **Patch offline (se necessário antes do release):** dividir os campos
+  dobrados nos `.otk` já gerados, estilo `scripts/Patch-CatalunyaOtk.py`.
+- **Arquivos:** `Finalizer/LeagueFinalizer.cs`, `scripts/Test-Finalizer.ps1`.
 
 ---
 

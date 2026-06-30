@@ -584,8 +584,16 @@ namespace Overtake.SimHub.Plugin.Store
                 sess.LastGameMinorVersion = header.GameMinorVersion;
             }
 
+            // 0) Motion (Track Map — live UI only)
+            if (pid == 0 && parsed.Motion != null)
+                IngestMotion(sid, parsed.Motion);
+
+            // 6) Car Telemetry (tyre/brake/engine temps — live UI only)
+            else if (pid == 6 && parsed.CarTelemetry != null)
+                IngestCarTelemetry(sid, parsed.CarTelemetry);
+
             // 1) Session
-            if (pid == 1 && parsed.Session != null)
+            else if (pid == 1 && parsed.Session != null)
                 IngestSession(sess, parsed.Session, nowMs);
 
             // 4) Participants
@@ -633,6 +641,9 @@ namespace Overtake.SimHub.Plugin.Store
 
             sess.SessionType = s.SessionType;
             sess.TrackId = s.TrackId;
+            if (s.TotalLaps > 0) sess.TotalLaps = s.TotalLaps;
+            if (s.TrackLength > 0) sess.TrackLength = s.TrackLength;
+            sess.SessionTimeLeftSec = s.SessionTimeLeft;
 
             // Detect lobby changes (track change = different lobby)
             if (s.TrackId >= 0)
@@ -767,6 +778,11 @@ namespace Overtake.SimHub.Plugin.Store
                     if (newTc < d.TractionControl) d.TractionControl = newTc;
                     if (newAbs < d.AntiLockBrakes) d.AntiLockBrakes = newAbs;
                 }
+
+                // Live race UI: tyre compound + age (latest wins).
+                if (entries[i].VisualTyreCompound != 0) d.VisualTyreCompound = entries[i].VisualTyreCompound;
+                if (entries[i].ActualTyreCompound != 0) d.ActualTyreCompound = entries[i].ActualTyreCompound;
+                d.TyresAgeLaps = entries[i].TyresAgeLaps;
 
                 float cap = entries[i].FuelCapacity;
                 if (cap >= CarStatusFuelCapacityMinKg)
@@ -2176,6 +2192,64 @@ namespace Overtake.SimHub.Plugin.Store
             }
         }
 
+        // Track Map (live UI only). Updates world position for already-registered
+        // drivers; EnsureDriver returns null for unmapped slots so no phantoms.
+        private void IngestMotion(string sid, MotionEntry[] rows)
+        {
+            if (rows == null) return;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (rows[i] == null) continue;
+                var d = EnsureDriver(sid, rows[i].CarIdx);
+                if (d == null) continue;
+                d.LiveWorldX = rows[i].WorldX;
+                d.LiveWorldZ = rows[i].WorldZ;
+                d.LiveYaw = rows[i].Yaw;
+                d.LivePosValid = true;
+            }
+        }
+
+        private void IngestCarTelemetry(string sid, CarTelemetryEntry[] rows)
+        {
+            if (rows == null) return;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var r = rows[i];
+                if (r == null) continue;
+                var d = EnsureDriver(sid, r.CarIdx);
+                if (d == null) continue;
+                d.LiveTyreSurfFL = r.TyreSurfFL; d.LiveTyreSurfFR = r.TyreSurfFR;
+                d.LiveTyreSurfRL = r.TyreSurfRL; d.LiveTyreSurfRR = r.TyreSurfRR;
+                d.LiveTyreInnerFL = r.TyreInnerFL; d.LiveTyreInnerFR = r.TyreInnerFR;
+                d.LiveTyreInnerRL = r.TyreInnerRL; d.LiveTyreInnerRR = r.TyreInnerRR;
+                d.LiveBrakeFL = r.BrakeFL; d.LiveBrakeFR = r.BrakeFR;
+                d.LiveBrakeRL = r.BrakeRL; d.LiveBrakeRR = r.BrakeRR;
+                d.LiveEngineTemp = r.EngineTemp;
+                d.LiveTelemValid = true;
+
+                // Telemetry trace for the speed/throttle/brake/gear charts. On lap rollover
+                // (lap number changed) the current trace becomes "previous". Sample by
+                // ~25 m lap-distance bucket (lapDistance comes from LapData -> LiveLapDistanceM).
+                int lapNum = d.LastCurrentLapNum ?? 0;
+                if (lapNum != d.TraceLapNum)
+                {
+                    if (d.TraceLapNum >= 0 && d.TraceCur.Count > 0)
+                        d.TracePrev = d.TraceCur;
+                    d.TraceCur = new System.Collections.Generic.Dictionary<int, int[]>();
+                    d.TraceLapNum = lapNum;
+                }
+                if (d.LiveLapDistanceM > 0f)
+                {
+                    int bucket = (int)(d.LiveLapDistanceM / 25f);
+                    float thr = r.Throttle < 0f ? 0f : (r.Throttle > 1f ? 1f : r.Throttle);
+                    float brk = r.Brake < 0f ? 0f : (r.Brake > 1f ? 1f : r.Brake);
+                    d.TraceCur[bucket] = new int[] {
+                        r.Speed, (int)Math.Round(thr * 100f), (int)Math.Round(brk * 100f), r.Gear
+                    };
+                }
+            }
+        }
+
         private void IngestLapData(string sid, SessionRun sess, LapDataEntry[] rows, long nowMs)
         {
             for (int i = 0; i < rows.Length; i++)
@@ -2204,6 +2278,20 @@ namespace Overtake.SimHub.Plugin.Store
                     d.GridPosition = row.GridPosition;
                 if (row.CarPosition > 0)
                     d.CarPosition = row.CarPosition;
+
+                // Live race UI fields (latest LapData wins; not used by export).
+                d.LiveDeltaToCarFrontMs = row.DeltaToCarFrontMs;
+                d.LiveDeltaToLeaderMs = row.DeltaToLeaderMs;
+                d.LiveCurrentLapTimeMs = (int)row.CurrentLapTimeInMS;
+                d.LiveSector = row.Sector;
+                d.LiveS1Ms = row.Sector1TimeInMS;
+                d.LiveS2Ms = row.Sector2TimeInMS;
+                d.LiveLapDistanceM = row.LapDistance;
+                d.LivePitStatus = row.PitStatus;
+                d.LivePenaltiesSec = row.Penalties;
+                d.LiveResultStatus = row.ResultStatus;
+                d.LiveDriverStatus = row.DriverStatus;
+                d.LiveCurrentLapInvalid = row.CurrentLapInvalid;
 
                 // Pit stops: track increments
                 int numPit = row.NumPitStops;

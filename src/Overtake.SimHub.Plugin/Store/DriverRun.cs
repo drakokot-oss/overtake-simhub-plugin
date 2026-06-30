@@ -120,6 +120,42 @@ namespace Overtake.SimHub.Plugin.Store
         // Car position in race (1=leader, 2=2nd...) — for FinalClassification row mapping
         public byte CarPosition;
 
+        // ---- Live race UI fields (v1 broadcast). Latest value wins; read-only for the
+        // web UI snapshot. None of these feed the .otk export pipeline. ----
+        public int LiveDeltaToCarFrontMs;
+        public int LiveDeltaToLeaderMs;
+        public int LiveCurrentLapTimeMs;
+        public byte LiveSector;
+        // Live sector splits of the IN-PROGRESS lap (ms). 0 until the sector closes.
+        public int LiveS1Ms;
+        public int LiveS2Ms;
+        // Track Map (packet 0 Motion + LapData lapDistance). Latest value wins.
+        public float LiveWorldX;
+        public float LiveWorldZ;
+        public float LiveYaw;
+        public float LiveLapDistanceM;
+        public bool LivePosValid;
+        public byte LivePitStatus;     // 0=none, 1=pitting, 2=in pit area
+        public byte LivePenaltiesSec;  // in-game accumulated time penalty (LapData)
+        public byte LiveResultStatus;
+        public byte LiveDriverStatus;  // 0=garagem,1=volta rapida,2=in lap,3=out lap,4=em pista
+        public byte LiveCurrentLapInvalid; // 1 = volta atual invalidada (corte de pista)
+        // Car Telemetry (packet 6) — tyre/brake/engine temps for the live Track Map.
+        // Tyre arrays mapped to named corners; latest value wins. Read-only (live UI).
+        public bool LiveTelemValid;
+        public int LiveTyreSurfFL, LiveTyreSurfFR, LiveTyreSurfRL, LiveTyreSurfRR;
+        public int LiveTyreInnerFL, LiveTyreInnerFR, LiveTyreInnerRL, LiveTyreInnerRR;
+        public int LiveBrakeFL, LiveBrakeFR, LiveBrakeRL, LiveBrakeRR;
+        public int LiveEngineTemp;
+        // Telemetry trace by lap-distance bucket (~25 m) for the current and previous lap.
+        // Value = [speedKmh, throttlePct, brakePct, gear]. Drives the Track Map charts.
+        public int TraceLapNum = -1;
+        public System.Collections.Generic.Dictionary<int, int[]> TraceCur = new System.Collections.Generic.Dictionary<int, int[]>();
+        public System.Collections.Generic.Dictionary<int, int[]> TracePrev = new System.Collections.Generic.Dictionary<int, int[]>();
+        public byte VisualTyreCompound;
+        public byte ActualTyreCompound;
+        public byte TyresAgeLaps;
+
         // Warnings tracking (from LapData packet 2)
         public int LastTotalWarnings;
         public int LastCornerCuttingWarnings;
@@ -190,6 +226,21 @@ namespace Overtake.SimHub.Plugin.Store
             LastSeenLapTimeMs = 0;
             LastTotalWarnings = 0;
             LastCornerCuttingWarnings = 0;
+            LiveS1Ms = 0;
+            LiveS2Ms = 0;
+            LiveWorldX = 0f;
+            LiveWorldZ = 0f;
+            LiveYaw = 0f;
+            LiveLapDistanceM = 0f;
+            LivePosValid = false;
+            TraceLapNum = -1;
+            TraceCur.Clear();
+            TracePrev.Clear();
+            LiveTelemValid = false;
+            LiveTyreSurfFL = LiveTyreSurfFR = LiveTyreSurfRL = LiveTyreSurfRR = 0;
+            LiveTyreInnerFL = LiveTyreInnerFR = LiveTyreInnerRL = LiveTyreInnerRR = 0;
+            LiveBrakeFL = LiveBrakeFR = LiveBrakeRL = LiveBrakeRR = 0;
+            LiveEngineTemp = 0;
             PenaltySnapshots.Clear();
             FuelMixLast = 0;
             FuelCapacityKg = 0f;

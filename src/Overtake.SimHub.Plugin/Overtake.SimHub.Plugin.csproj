@@ -78,6 +78,7 @@
     <Compile Include="UdpReceiver.cs" />
     <Compile Include="Packets\GameInfo.cs" />
     <Compile Include="Packets\PacketHeader.cs" />
+    <Compile Include="Packets\MotionData.cs" />
     <Compile Include="Packets\SessionData.cs" />
     <Compile Include="Packets\LapDataEntry.cs" />
     <Compile Include="Packets\EventData.cs" />
@@ -87,6 +88,7 @@
     <Compile Include="Packets\SessionHistoryData.cs" />
     <Compile Include="Packets\LobbyInfoData.cs" />
     <Compile Include="Packets\CarStatusData.cs" />
+    <Compile Include="Packets\CarTelemetryData.cs" />
     <Compile Include="Parsers\PacketParser.cs" />
     <Compile Include="Store\DriverRun.cs" />
     <Compile Include="Store\SessionRun.cs" />
@@ -97,6 +99,9 @@
     <Compile Include="Finalizer\LeagueFinalizer.cs" />
     <Compile Include="Packets\WireLayoutProbe.cs" />
     <Compile Include="Packets\PacketStrings.cs" />
+    <Compile Include="Live\LiveSnapshotBuilder.cs" />
+    <Compile Include="Live\LiveBroadcaster.cs" />
+    <Compile Include="Live\RaceWebServer.cs" />
     <Compile Include="Security\KeyStore.cs" />
     <Compile Include="Security\OtkWriter.cs" />
     <Compile Include="UI\SettingsControl.xaml.cs">
@@ -112,6 +117,8 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\overtake-icon.png" />
+    <EmbeddedResource Include="Assets\race-ui.html" />
+    <EmbeddedResource Include="Assets\overlays.html" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
