@@ -17,6 +17,7 @@ namespace Overtake.SimHub.Plugin.Parsers
         public FinalClassificationData FinalClassification;
         public LobbyInfoData LobbyInfo;
         public CarStatusEntry[] CarStatus;
+        public CarTelemetryEntry[] CarTelemetry;
         public CarDamageEntry[] CarDamage;
         public SessionHistoryData SessionHistory;
 
@@ -67,6 +68,9 @@ namespace Overtake.SimHub.Plugin.Parsers
                     break;
                 case 4:
                     result.Participants = ParticipantsData.Parse(data, header.PacketFormat, bodyWireFormatOverride);
+                    break;
+                case 6:
+                    result.CarTelemetry = CarTelemetryEntry.Parse(data);
                     break;
                 case 7:
                     result.CarStatus = CarStatusEntry.Parse(data, header.PacketFormat, bodyWireFormatOverride);

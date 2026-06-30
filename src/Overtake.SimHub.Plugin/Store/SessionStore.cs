@@ -588,6 +588,10 @@ namespace Overtake.SimHub.Plugin.Store
             if (pid == 0 && parsed.Motion != null)
                 IngestMotion(sid, parsed.Motion);
 
+            // 6) Car Telemetry (tyre/brake/engine temps — live UI only)
+            else if (pid == 6 && parsed.CarTelemetry != null)
+                IngestCarTelemetry(sid, parsed.CarTelemetry);
+
             // 1) Session
             else if (pid == 1 && parsed.Session != null)
                 IngestSession(sess, parsed.Session, nowMs);
@@ -2202,6 +2206,26 @@ namespace Overtake.SimHub.Plugin.Store
                 d.LiveWorldZ = rows[i].WorldZ;
                 d.LiveYaw = rows[i].Yaw;
                 d.LivePosValid = true;
+            }
+        }
+
+        private void IngestCarTelemetry(string sid, CarTelemetryEntry[] rows)
+        {
+            if (rows == null) return;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var r = rows[i];
+                if (r == null) continue;
+                var d = EnsureDriver(sid, r.CarIdx);
+                if (d == null) continue;
+                d.LiveTyreSurfFL = r.TyreSurfFL; d.LiveTyreSurfFR = r.TyreSurfFR;
+                d.LiveTyreSurfRL = r.TyreSurfRL; d.LiveTyreSurfRR = r.TyreSurfRR;
+                d.LiveTyreInnerFL = r.TyreInnerFL; d.LiveTyreInnerFR = r.TyreInnerFR;
+                d.LiveTyreInnerRL = r.TyreInnerRL; d.LiveTyreInnerRR = r.TyreInnerRR;
+                d.LiveBrakeFL = r.BrakeFL; d.LiveBrakeFR = r.BrakeFR;
+                d.LiveBrakeRL = r.BrakeRL; d.LiveBrakeRR = r.BrakeRR;
+                d.LiveEngineTemp = r.EngineTemp;
+                d.LiveTelemValid = true;
             }
         }
 

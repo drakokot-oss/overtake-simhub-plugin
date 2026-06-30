@@ -139,6 +139,13 @@ namespace Overtake.SimHub.Plugin.Store
         public byte LivePenaltiesSec;  // in-game accumulated time penalty (LapData)
         public byte LiveResultStatus;
         public byte LiveDriverStatus;
+        // Car Telemetry (packet 6) — tyre/brake/engine temps for the live Track Map.
+        // Tyre arrays mapped to named corners; latest value wins. Read-only (live UI).
+        public bool LiveTelemValid;
+        public int LiveTyreSurfFL, LiveTyreSurfFR, LiveTyreSurfRL, LiveTyreSurfRR;
+        public int LiveTyreInnerFL, LiveTyreInnerFR, LiveTyreInnerRL, LiveTyreInnerRR;
+        public int LiveBrakeFL, LiveBrakeFR, LiveBrakeRL, LiveBrakeRR;
+        public int LiveEngineTemp;
         public byte VisualTyreCompound;
         public byte ActualTyreCompound;
         public byte TyresAgeLaps;
@@ -220,6 +227,11 @@ namespace Overtake.SimHub.Plugin.Store
             LiveYaw = 0f;
             LiveLapDistanceM = 0f;
             LivePosValid = false;
+            LiveTelemValid = false;
+            LiveTyreSurfFL = LiveTyreSurfFR = LiveTyreSurfRL = LiveTyreSurfRR = 0;
+            LiveTyreInnerFL = LiveTyreInnerFR = LiveTyreInnerRL = LiveTyreInnerRR = 0;
+            LiveBrakeFL = LiveBrakeFR = LiveBrakeRL = LiveBrakeRR = 0;
+            LiveEngineTemp = 0;
             PenaltySnapshots.Clear();
             FuelMixLast = 0;
             FuelCapacityKg = 0f;

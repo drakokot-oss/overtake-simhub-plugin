@@ -116,6 +116,10 @@ namespace Overtake.SimHub.Plugin.Live
                     { "stints", StintCodes(d) },
                     { "tyreAge", (int)d.TyresAgeLaps },
                     { "tyreWear", TyreWear(d) },
+                    { "tyreTempsSurface", TyreTemps(d, true) },
+                    { "tyreTempsInner", TyreTemps(d, false) },
+                    { "brakeTemps", BrakeTemps(d) },
+                    { "engineTemp", d.LiveTelemValid ? (object)d.LiveEngineTemp : null },
                     { "damage", Damage(d) },
                     { "stops", d.LastNumPitStops ?? d.PitStops.Count },
                     { "ersPct", (int)Math.Round(d.ErsStorePctLast) },
@@ -471,6 +475,28 @@ namespace Overtake.SimHub.Plugin.Live
                 if (t > 0 && (best == 0 || t < best)) { best = t; bestLap = d.Laps[i]; }
             }
             if (bestLap != null) { s1 = bestLap.Sector1Ms; s2 = bestLap.Sector2Ms; s3 = bestLap.Sector3Ms; }
+        }
+
+        // Tyre temperatures (Car Telemetry packet 6). null until the packet arrives,
+        // so the UI can show "aguardando" instead of a misleading 0.
+        private static Dictionary<string, object> TyreTemps(DriverRun d, bool surface)
+        {
+            if (!d.LiveTelemValid) return null;
+            return surface
+                ? new Dictionary<string, object> {
+                    { "fl", d.LiveTyreSurfFL }, { "fr", d.LiveTyreSurfFR },
+                    { "rl", d.LiveTyreSurfRL }, { "rr", d.LiveTyreSurfRR } }
+                : new Dictionary<string, object> {
+                    { "fl", d.LiveTyreInnerFL }, { "fr", d.LiveTyreInnerFR },
+                    { "rl", d.LiveTyreInnerRL }, { "rr", d.LiveTyreInnerRR } };
+        }
+
+        private static Dictionary<string, object> BrakeTemps(DriverRun d)
+        {
+            if (!d.LiveTelemValid) return null;
+            return new Dictionary<string, object> {
+                { "fl", d.LiveBrakeFL }, { "fr", d.LiveBrakeFR },
+                { "rl", d.LiveBrakeRL }, { "rr", d.LiveBrakeRR } };
         }
 
         private static Dictionary<string, object> TyreWear(DriverRun d)
