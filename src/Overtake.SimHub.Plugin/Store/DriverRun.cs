@@ -146,6 +146,11 @@ namespace Overtake.SimHub.Plugin.Store
         public int LiveTyreInnerFL, LiveTyreInnerFR, LiveTyreInnerRL, LiveTyreInnerRR;
         public int LiveBrakeFL, LiveBrakeFR, LiveBrakeRL, LiveBrakeRR;
         public int LiveEngineTemp;
+        // Telemetry trace by lap-distance bucket (~25 m) for the current and previous lap.
+        // Value = [speedKmh, throttlePct, brakePct, gear]. Drives the Track Map charts.
+        public int TraceLapNum = -1;
+        public System.Collections.Generic.Dictionary<int, int[]> TraceCur = new System.Collections.Generic.Dictionary<int, int[]>();
+        public System.Collections.Generic.Dictionary<int, int[]> TracePrev = new System.Collections.Generic.Dictionary<int, int[]>();
         public byte VisualTyreCompound;
         public byte ActualTyreCompound;
         public byte TyresAgeLaps;
@@ -227,6 +232,9 @@ namespace Overtake.SimHub.Plugin.Store
             LiveYaw = 0f;
             LiveLapDistanceM = 0f;
             LivePosValid = false;
+            TraceLapNum = -1;
+            TraceCur.Clear();
+            TracePrev.Clear();
             LiveTelemValid = false;
             LiveTyreSurfFL = LiveTyreSurfFR = LiveTyreSurfRL = LiveTyreSurfRR = 0;
             LiveTyreInnerFL = LiveTyreInnerFR = LiveTyreInnerRL = LiveTyreInnerRR = 0;

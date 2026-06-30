@@ -2226,6 +2226,27 @@ namespace Overtake.SimHub.Plugin.Store
                 d.LiveBrakeRL = r.BrakeRL; d.LiveBrakeRR = r.BrakeRR;
                 d.LiveEngineTemp = r.EngineTemp;
                 d.LiveTelemValid = true;
+
+                // Telemetry trace for the speed/throttle/brake/gear charts. On lap rollover
+                // (lap number changed) the current trace becomes "previous". Sample by
+                // ~25 m lap-distance bucket (lapDistance comes from LapData -> LiveLapDistanceM).
+                int lapNum = d.LastCurrentLapNum ?? 0;
+                if (lapNum != d.TraceLapNum)
+                {
+                    if (d.TraceLapNum >= 0 && d.TraceCur.Count > 0)
+                        d.TracePrev = d.TraceCur;
+                    d.TraceCur = new System.Collections.Generic.Dictionary<int, int[]>();
+                    d.TraceLapNum = lapNum;
+                }
+                if (d.LiveLapDistanceM > 0f)
+                {
+                    int bucket = (int)(d.LiveLapDistanceM / 25f);
+                    float thr = r.Throttle < 0f ? 0f : (r.Throttle > 1f ? 1f : r.Throttle);
+                    float brk = r.Brake < 0f ? 0f : (r.Brake > 1f ? 1f : r.Brake);
+                    d.TraceCur[bucket] = new int[] {
+                        r.Speed, (int)Math.Round(thr * 100f), (int)Math.Round(brk * 100f), r.Gear
+                    };
+                }
             }
         }
 

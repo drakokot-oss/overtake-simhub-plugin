@@ -198,6 +198,18 @@
   .tlegend { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin:10px 0 2px; font-size:10.5px; color:var(--txt-dim); }
   .tlegend span { display:inline-flex; align-items:center; gap:5px; }
   .tlegend i { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  /* keep the map visible (aligned at the top) while the long pilot panel scrolls */
+  .tmv2 .tmcanvas-box { position:sticky; top:14px; }
+  .qstat { font-size:11px; color:var(--txt-dim); }
+  /* telemetry charts: speed / throttle / brake / gear, current vs previous lap */
+  .charts { display:flex; flex-direction:column; gap:8px; }
+  .chartbox { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .chart-t { font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:var(--txt-dim); margin-bottom:4px; }
+  .chart { width:100%; height:46px; display:block; }
+  .chart-empty { font-size:11px; color:var(--txt-faint); padding:12px 0; text-align:center; }
+  .chart-legend { display:flex; gap:16px; justify-content:center; margin-top:8px; font-size:10.5px; color:var(--txt-dim); }
+  .chart-legend span { display:inline-flex; align-items:center; gap:6px; }
+  .chart-legend i { width:14px; height:3px; border-radius:2px; display:inline-block; }
 </style>
 </head>
 <body>
@@ -275,7 +287,7 @@
       <div style="overflow:auto; max-height:70vh">
         <table class="lb">
           <thead><tr>
-            <th>P</th><th>Piloto</th><th>Melhor</th><th>S1</th><th>S2</th><th>S3</th><th>Gap pole</th><th>Int</th><th>Pneu</th>
+            <th>P</th><th>Piloto</th><th>Melhor</th><th>S1</th><th>S2</th><th>S3</th><th>Gap pole</th><th>Int</th><th>Pneu</th><th>Status</th>
           </tr></thead>
           <tbody id="qualyBody"></tbody>
         </table>
@@ -680,7 +692,7 @@
       return '<td class="'+cls+'">'+txt+'</td>';
     }
 
-    if(!g.length){ $("qualyBody").innerHTML='<tr><td colspan="9" class="empty">Sem voltas registradas.</td></tr>'; }
+    if(!g.length){ $("qualyBody").innerHTML='<tr><td colspan="10" class="empty">Sem voltas registradas.</td></tr>'; }
     else $("qualyBody").innerHTML = g.map(function(d,i){
       var pos=i+1;
       var cls = (cut>0 && pos>cut)?"elim":"";
@@ -696,6 +708,7 @@
         '<td class="mono">'+gap+'</td>'+
         '<td class="mono">'+int+'</td>'+
         '<td>'+tyreCell(d)+'</td>'+
+        '<td><span class="qstat">'+esc(d.status||"-")+'</span></td>'+
       '</tr>';
     }).join("");
     bindRows("qualyBody");
@@ -859,7 +872,8 @@
           battles.push({a:g[bi-1], b:cur, gap:cur.intervalMs});
         }
       }
-      battles.sort(function(x,y){ return x.gap-y.gap; });
+      // Top 3 ordenadas pela posicao mais relevante (mais a frente no grid primeiro).
+      battles.sort(function(x,y){ return x.a.pos-y.a.pos; });
       battles.slice(0,3).forEach(function(bt){
         cards.push(card("rgba(255,77,46,.16)","var(--accent)","VS","Briga pela P"+bt.b.pos,
           bt.a.tag+" vs "+bt.b.tag, "+"+(bt.gap/1000).toFixed(3)+"s"));
@@ -1075,6 +1089,38 @@
     '<div class="tlegend"><span><i style="background:var(--wet)"></i>frio</span><span><i style="background:var(--good)"></i>ideal</span><span><i style="background:var(--accent-2)"></i>quente</span><span><i style="background:var(--bad)"></i>superaq.</span></div>'+
     (hasT?'':'<div class="empty" style="padding:8px 6px;font-size:11px">Temperaturas aguardando o pacote Car Telemetry do jogo.</div>');
   }
+  // Speed/Throttle/Brake/Gear line charts: current lap (bright) vs previous lap (dim).
+  function miniChart(title, trace, fi, yMax){
+    var cur=(trace&&trace.cur)||[], prev=(trace&&trace.prev)||[];
+    if(!cur.length && !prev.length)
+      return '<div class="chartbox"><div class="chart-t">'+title+'</div><div class="chart-empty">sem dados de telemetria</div></div>';
+    var maxD=1;
+    if(cur.length) maxD=Math.max(maxD, cur[cur.length-1][0]);
+    if(prev.length) maxD=Math.max(maxD, prev[prev.length-1][0]);
+    function poly(arr,stroke,sw,op){
+      if(!arr.length) return "";
+      var pts=arr.map(function(p){
+        var x=(p[0]/maxD)*300;
+        var y=38-(Math.max(0,Math.min(p[fi],yMax))/yMax)*36;
+        return x.toFixed(1)+","+y.toFixed(1);
+      }).join(" ");
+      return '<polyline points="'+pts+'" fill="none" stroke="'+stroke+'" stroke-width="'+sw+'" opacity="'+op+'" vector-effect="non-scaling-stroke"/>';
+    }
+    return '<div class="chartbox"><div class="chart-t">'+title+'</div>'+
+      '<svg viewBox="0 0 300 40" preserveAspectRatio="none" class="chart">'+
+        poly(prev,"#7b8ca3",1,0.6)+poly(cur,"var(--accent-2)",1.6,1)+
+      '</svg></div>';
+  }
+  function chartsHtml(d){
+    return '<div class="section-t">Telemetria - volta atual vs anterior</div>'+
+      '<div class="charts">'+
+        miniChart("Velocidade (km/h)", d.trace, 1, 360)+
+        miniChart("Acelerador (%)", d.trace, 2, 100)+
+        miniChart("Freio (%)", d.trace, 3, 100)+
+        miniChart("Marcha", d.trace, 4, 8)+
+      '</div>'+
+      '<div class="chart-legend"><span><i style="background:var(--accent-2)"></i>volta atual</span><span><i style="background:#7b8ca3"></i>volta anterior</span></div>';
+  }
   function trackMapDetailHtml(d){
     return carDiagramHtml(d)+
       '<div class="section-t">ERS / Combustivel</div>'+
@@ -1083,6 +1129,7 @@
         '<div class="cell"><div class="k">Combustivel</div><div class="v">'+(d.fuelLaps!=null?('<b>'+d.fuelLaps+'</b> v'):"-")+'</div></div>'+
         '<div class="cell"><div class="k">Pneu</div><div class="v">'+stintLabel(d)+'</div></div>'+
       '</div>'+
+      chartsHtml(d)+
       pitPredBlock(d)+warnListBlock(d)+penListBlock(d)+
       '<div class="section-t">Ultimas voltas</div>'+lapsTable(d.laps);
   }

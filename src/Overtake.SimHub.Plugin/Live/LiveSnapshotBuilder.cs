@@ -120,6 +120,7 @@ namespace Overtake.SimHub.Plugin.Live
                     { "tyreTempsInner", TyreTemps(d, false) },
                     { "brakeTemps", BrakeTemps(d) },
                     { "engineTemp", d.LiveTelemValid ? (object)d.LiveEngineTemp : null },
+                    { "trace", TelemetryTrace(d) },
                     { "damage", Damage(d) },
                     { "stops", d.LastNumPitStops ?? d.PitStops.Count },
                     { "ersPct", (int)Math.Round(d.ErsStorePctLast) },
@@ -489,6 +490,34 @@ namespace Overtake.SimHub.Plugin.Live
                 : new Dictionary<string, object> {
                     { "fl", d.LiveTyreInnerFL }, { "fr", d.LiveTyreInnerFR },
                     { "rl", d.LiveTyreInnerRL }, { "rr", d.LiveTyreInnerRR } };
+        }
+
+        // Telemetry trace (speed/throttle/brake/gear by lap distance) for the charts:
+        // current lap vs previous lap. Downsampled to keep the payload bounded.
+        private static Dictionary<string, object> TelemetryTrace(DriverRun d)
+        {
+            var cur = TraceArray(d.TraceCur);
+            var prev = TraceArray(d.TracePrev);
+            if (cur == null && prev == null) return null;
+            return new Dictionary<string, object> { { "cur", cur }, { "prev", prev } };
+        }
+
+        private static List<object> TraceArray(Dictionary<int, int[]> trace)
+        {
+            if (trace == null || trace.Count == 0) return null;
+            var keys = new List<int>(trace.Keys);
+            keys.Sort();
+            const int max = 70;
+            int step = keys.Count > max ? (int)Math.Ceiling(keys.Count / (double)max) : 1;
+            var outp = new List<object>();
+            for (int i = 0; i < keys.Count; i += step)
+            {
+                int b = keys[i];
+                int[] v = trace[b];
+                // [distanceM, speedKmh, throttlePct, brakePct, gear]
+                outp.Add(new object[] { b * 25, v[0], v[1], v[2], v[3] });
+            }
+            return outp;
         }
 
         private static Dictionary<string, object> BrakeTemps(DriverRun d)

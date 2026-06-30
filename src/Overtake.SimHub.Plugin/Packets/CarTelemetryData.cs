@@ -31,6 +31,12 @@ namespace Overtake.SimHub.Plugin.Packets
         public int TyreInnerFL, TyreInnerFR, TyreInnerRL, TyreInnerRR;
         public int BrakeFL, BrakeFR, BrakeRL, BrakeRR;
         public int EngineTemp;
+        // For the live speed/throttle/brake/gear charts. Offsets unchanged 2025/2026
+        // (they precede the changed fields): speed@0, throttle@2, brake@10, gear@15.
+        public int Speed;        // km/h
+        public float Throttle;   // 0..1
+        public float Brake;      // 0..1
+        public int Gear;         // -1..8
 
         /// <summary>Backwards-compatible entry point — assumes the 2025 wire format.</summary>
         public static CarTelemetryEntry[] Parse(byte[] data)
@@ -66,6 +72,10 @@ namespace Overtake.SimHub.Plugin.Packets
                 entries[i] = new CarTelemetryEntry
                 {
                     CarIdx = i,
+                    Speed = BitConverter.ToUInt16(data, off + 0),
+                    Throttle = BitConverter.ToSingle(data, off + 2),
+                    Brake = BitConverter.ToSingle(data, off + 10),
+                    Gear = (sbyte)data[off + 15],
                     // brakesTemperature[4] (u16) @22 — order RL,RR,FL,FR
                     BrakeRL = BitConverter.ToUInt16(data, off + 22),
                     BrakeRR = BitConverter.ToUInt16(data, off + 24),
