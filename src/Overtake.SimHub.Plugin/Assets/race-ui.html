@@ -286,6 +286,14 @@
     </div>
   </div>
 
+  <div class="panel" style="margin-top:14px">
+    <h3>Overlays para transmissao (OBS)</h3>
+    <div class="dbody">
+      <div style="color:var(--txt-dim);font-size:12px;margin-bottom:8px">Adicione como "Fonte de Navegador" no OBS. Fundo transparente.</div>
+      <div id="overlayLinks" class="kv"></div>
+    </div>
+  </div>
+
   <div class="footnote" id="foot">Overtake Telemetry - build de teste. A pagina conecta sozinha ao SimHub e atualiza em tempo real.</div>
 </div>
 
@@ -993,6 +1001,20 @@
   window.addEventListener("resize",function(){ if(curView==="trackmap") renderTrackMap(); });
   // Finalize check keeps running even if packets stop arriving (game closed).
   setInterval(function(){ if(state){ maybeFinalize(); applyFinalized(); } }, 15000);
+
+  (function buildOverlayLinks(){
+    var el=$("overlayLinks"); if(!el) return;
+    var base=location.origin && location.origin!=="null" ? location.origin : (location.protocol+"//"+location.host);
+    var ovs=[
+      ["tower","Timing Tower"],["lower","Faixa inferior"],["battle","Briga (head-to-head)"],
+      ["driver","Card de piloto"],["weather","Clima"],["gaps","Grafico de gaps"]
+    ];
+    el.innerHTML = ovs.map(function(o){
+      var url=base+"/overlays?view="+o[0];
+      return '<div class="cell"><div class="k">'+o[1]+'</div>'+
+        '<div class="v" style="font-size:12px"><a href="'+url+'" target="_blank" style="color:var(--accent-2);text-decoration:none">'+url+'</a></div></div>';
+    }).join("");
+  })();
 
   activateView("broadcast");
   connect();

@@ -116,6 +116,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Assets\overtake-icon.png" />
     <EmbeddedResource Include="Assets\race-ui.html" />
+    <EmbeddedResource Include="Assets\overlays.html" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
