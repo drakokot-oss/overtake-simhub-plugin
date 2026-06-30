@@ -362,6 +362,21 @@
   var finalized = false;     // race finished + grace window elapsed
   var tmCar = null;          // selected driver in Track Map
   var trackPts = {};         // lapDist bucket -> {x,z} accumulated track outline
+  // Per-track outline cache (localStorage): once a lap is captured the circuit shows
+  // INSTANTLY next time, instead of redrawing as cars pass.
+  var tmTrackKey = null, tmLastSave = 0;
+  function tmKey(){ var s=(state&&state.session)||{}; return 'otk_tm_'+(s.game||'')+'_'+(s.trackName||''); }
+  function tmLoadCache(){
+    try{ var raw=localStorage.getItem(tmKey()); if(!raw) return;
+      var a=JSON.parse(raw); trackPts={};
+      a.forEach(function(e){ trackPts[e[0]]={x:e[1],z:e[2],n:1}; });
+    }catch(e){}
+  }
+  function tmSaveCache(){
+    try{ var a=[]; for(var k in trackPts){ if(trackPts.hasOwnProperty(k)) a.push([Number(k), Math.round(trackPts[k].x*10)/10, Math.round(trackPts[k].z*10)/10]); }
+      if(a.length>40) localStorage.setItem(tmKey(), JSON.stringify(a));
+    }catch(e){}
+  }
   var tmHits = [];           // last-rendered car screen positions for click hit-testing
   var tmLastRender = 0;      // throttle canvas redraws (ms)
   var tmCanvasW = 0, tmCanvasH = 0;
@@ -769,7 +784,11 @@
     var now=Date.now();
     if(!force && (now-tmLastRender)<250) return; // max ~4 fps unless forced (click/resize/tab)
     tmLastRender=now;
+    // Track changed? reset and load the cached outline so the map is instant.
+    var key=tmKey();
+    if(key!==tmTrackKey){ tmTrackKey=key; trackPts={}; tmLoadCache(); }
     accumulateTrack();
+    if(now-tmLastSave>4000){ tmLastSave=now; tmSaveCache(); }
     var g=state.grid||[];
     var dpr=window.devicePixelRatio||1;
     var w=cv.clientWidth, h=cv.clientHeight;
