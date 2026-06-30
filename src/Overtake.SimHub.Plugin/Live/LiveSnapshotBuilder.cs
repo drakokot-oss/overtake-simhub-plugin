@@ -479,13 +479,23 @@ namespace Overtake.SimHub.Plugin.Live
 
         private static List<string> StintCodes(DriverRun d)
         {
+            // d.TyreStints comes from SessionHistory/FinalClassification packets and
+            // holds the real stint list; each entry has a "tyreVisual" compound id.
             var list = new List<string>();
-            foreach (var c in d.TyreStints)
+            if (d.TyreStints != null)
             {
-                string code = VisualCompoundCode(c);
-                if (!string.IsNullOrEmpty(code)) list.Add(code);
+                foreach (var stint in d.TyreStints)
+                {
+                    object tv;
+                    if (stint == null || !stint.TryGetValue("tyreVisual", out tv) || tv == null) continue;
+                    int code;
+                    if (!int.TryParse(tv.ToString(), out code)) continue;
+                    string c = VisualCompoundCode((byte)code);
+                    if (!string.IsNullOrEmpty(c)) list.Add(c);
+                }
             }
-            // Fallback: if no stint history yet, show the current compound.
+            // Fallback: SessionHistory may not have arrived yet (early in a stint /
+            // online lobbies that throttle it) — show the current live compound.
             if (list.Count == 0)
             {
                 string cur = VisualCompoundCode(d.VisualTyreCompound);
