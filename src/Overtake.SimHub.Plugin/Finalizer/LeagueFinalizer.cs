@@ -284,6 +284,17 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 stName, trackName, trackId));
         }
 
+        /// <summary>
+        /// Read-only phantom check exposed for the live broadcast UI so its grid
+        /// matches the .otk export exactly (same AI-filler / empty-slot exclusion).
+        /// Does not mutate the store — safe to call on every live snapshot.
+        /// </summary>
+        public static bool IsPhantomForLive(string tag, DriverRun dr, SessionRun sess, SessionStore store)
+        {
+            if (dr == null || sess == null) return true;
+            return IsPhantomEntry(tag, dr, sess, store);
+        }
+
         private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess, SessionStore store)
         {
             if (string.IsNullOrEmpty(tag))

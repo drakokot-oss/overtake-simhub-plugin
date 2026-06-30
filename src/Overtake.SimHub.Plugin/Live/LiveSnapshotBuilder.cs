@@ -77,9 +77,10 @@ namespace Overtake.SimHub.Plugin.Live
                 ParticipantEntry teamInfo;
                 sess.TeamByCarIdx.TryGetValue(d.CarIdx, out teamInfo);
 
-                // Skip AI filler placeholders with no race presence.
-                if (teamInfo != null && teamInfo.TeamId == 255
-                    && d.CarPosition == 0 && (d.LastCurrentLapNum ?? 0) == 0)
+                // Phantom filter — parity with the .otk export. Drops AI grid fillers
+                // and empty padded slots (e.g. "Car_18" with 0 laps) the game pads the
+                // grid with, so the live UI shows only the real drivers.
+                if (LeagueFinalizer.IsPhantomForLive(d.Tag, d, sess, store))
                     continue;
 
                 int bestMs = BestLapMs(d);
