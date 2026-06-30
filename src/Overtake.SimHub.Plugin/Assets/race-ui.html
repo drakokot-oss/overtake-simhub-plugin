@@ -180,7 +180,8 @@
   .tmv2 .tmcanvas-box { margin-bottom:14px; }
   .tmv2 #trackCanvas { height:42vh; }
   /* pilot info laid out across the full page width */
-  .tmgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:12px; align-items:start; }
+  .tmgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
+  @media(max-width:820px){ .tmgrid { grid-template-columns:1fr; } }
   .tmcard { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
   .tmcard.wide { grid-column:1 / -1; }
   .tmcard > .section-t:first-child { margin-top:0; }
@@ -205,16 +206,22 @@
   .tlegend i { width:10px; height:10px; border-radius:3px; display:inline-block; }
   .qstat { font-size:11px; color:var(--txt-dim); }
   /* telemetry charts: speed / throttle / brake / gear, current vs previous lap */
-  .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px; }
+  .charts { display:flex; flex-direction:column; gap:12px; }
   .chartbox { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:8px 10px; position:relative; }
   .chart-t { font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:var(--txt-dim); margin-bottom:4px; display:flex; justify-content:space-between; }
   .chart-wrap { position:relative; display:flex; gap:6px; }
   .chart-yax { display:flex; flex-direction:column; justify-content:space-between; font-size:9px; color:var(--txt-faint); text-align:right; width:26px; padding:2px 0; }
   .chart-plot { position:relative; flex:1; }
-  .chart { width:100%; height:64px; display:block; }
+  .chart { width:100%; height:104px; display:block; }
   .chart-xax { display:flex; justify-content:space-between; font-size:9px; color:var(--txt-faint); margin-top:2px; }
   .chart-guide { position:absolute; top:0; bottom:0; width:1px; background:rgba(231,237,245,.35); display:none; pointer-events:none; }
-  .chart-tip { position:absolute; z-index:30; background:var(--bg-2); border:1px solid var(--line); border-radius:7px; padding:5px 8px; font-size:11px; color:var(--txt); pointer-events:none; display:none; white-space:nowrap; box-shadow:0 8px 22px rgba(0,0,0,.5); }
+  .chart-dot { position:absolute; width:8px; height:8px; border-radius:50%; border:2px solid var(--bg-2); transform:translate(-50%,-50%); display:none; pointer-events:none; box-shadow:0 0 6px rgba(0,0,0,.6); }
+  .chart-tip { position:absolute; z-index:30; background:var(--bg-2); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:11px; color:var(--txt); pointer-events:none; display:none; white-space:nowrap; box-shadow:0 10px 26px rgba(0,0,0,.55); min-width:96px; }
+  .chart-tip .tip-d { font-size:9.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--txt-faint); margin-bottom:3px; }
+  .chart-tip .tip-cur { font-size:17px; font-weight:800; line-height:1; }
+  .chart-tip .tip-dl { font-size:10.5px; font-weight:700; margin-left:7px; }
+  .chart-tip .tip-prev { font-size:10.5px; color:#7b8ca3; margin-top:4px; }
+  .chart-tip .up { color:var(--good); } .chart-tip .dn { color:var(--bad); }
   .chart-empty { font-size:11px; color:var(--txt-faint); padding:12px 0; text-align:center; }
   .chart-legend { display:flex; gap:16px; justify-content:center; margin-top:8px; font-size:10.5px; color:var(--txt-dim); }
   .chart-legend span { display:inline-flex; align-items:center; gap:6px; }
@@ -377,6 +384,29 @@
       if(a.length>40) localStorage.setItem(tmKey(), JSON.stringify(a));
     }catch(e){}
   }
+  // ---- Qualy result preservation ----
+  // The live snapshot only ever reflects the CURRENT session, so once the race
+  // starts the qualifying result is gone. We snapshot the grid while a quali/
+  // shootout session is live and keep showing it on the Classificacao tab during
+  // the race (per-track, persisted to localStorage so a reload mid-race keeps it).
+  var qualySnap = null, qLastSave = 0;
+  function qualifyingSession(s){ var id=s&&s.sessionTypeId; return id>=5 && id<=14; } // Q1-3 + (short/one-shot) + shootout
+  function qKey(s){ s=s||{}; return 'otk_qualy_'+(s.game||'')+'_'+(s.trackName||''); }
+  function slimDriver(d){ var o={}; for(var k in d){ if(d.hasOwnProperty(k) && k!=="trace" && k!=="laps" && k!=="penalties" && k!=="warningsDetail" && k!=="damage") o[k]=d[k]; } return o; }
+  function captureQualy(){
+    if(!state || !state.session || !qualifyingSession(state.session)) return;
+    var ss=state.session;
+    // Keep the in-memory copy fresh every tick; persist to disk at most every 5s.
+    qualySnap={ session:{game:ss.game,trackName:ss.trackName,sessionTypeId:ss.sessionTypeId,sessionTypeName:ss.sessionTypeName}, grid:(state.grid||[]).map(slimDriver), tsMs:state.tsMs };
+    var now=(state.tsMs||0);
+    if(now-qLastSave>5000){ qLastSave=now; try{ localStorage.setItem(qKey(ss), JSON.stringify(qualySnap)); }catch(e){} }
+  }
+  function qualySnapFor(s){
+    s=s||{};
+    if(qualySnap && qualySnap.session && qualySnap.session.game===s.game && qualySnap.session.trackName===s.trackName) return qualySnap;
+    try{ var raw=localStorage.getItem(qKey(s)); if(raw){ var c=JSON.parse(raw); if(c&&c.grid&&c.grid.length){ qualySnap=c; return c; } } }catch(e){}
+    return null;
+  }
   var tmHits = [];           // last-rendered car screen positions for click hit-testing
   var tmLastRender = 0;      // throttle canvas redraws (ms)
   var tmCanvasW = 0, tmCanvasH = 0;
@@ -474,6 +504,7 @@
       var want = state.session.mode==="qualy" ? "qualy" : "broadcast";
       if((curView==="broadcast"||curView==="qualy") && curView!==want) activateView(want, true);
     }
+    captureQualy();
     renderSessionBar();
     renderForecast();
     renderRace();
@@ -684,7 +715,11 @@
     return last||0;
   }
   function renderQualy(){
-    var g=(state.grid||[]).slice();
+    var live=state.session||{};
+    // During a race (or practice), show the PRESERVED qualy result instead of the
+    // live best-laps board, if we have one for this track.
+    var snap = !qualifyingSession(live) ? qualySnapFor(live) : null;
+    var g=((snap?snap.grid:state.grid)||[]).slice();
     // session-best per sector (purple) + personal-best reference (green)
     var bS1=0,bS2=0,bS3=0, pole=0;
     g.forEach(function(d){
@@ -698,9 +733,9 @@
       var a1=a.bestLapMs>0?a.bestLapMs:9e9, b1=b.bestLapMs>0?b.bestLapMs:9e9;
       return a1-b1;
     });
-    var s=state.session||{};
+    var s=snap?snap.session:live;
     var cut = s.sessionTypeId===5?15:(s.sessionTypeId===6?10:0);
-    $("qualyTitle").textContent = "Classificacao - "+(s.sessionTypeName||"setores");
+    $("qualyTitle").textContent = "Classificacao - "+(s.sessionTypeName||"setores")+(snap?" (resultado do qualy)":"");
 
     function sc(d,i,sb){
       var v=sectorVal(d,i);
@@ -942,17 +977,23 @@
   // ---- driver drawer ----
   function bindRows(bodyId){
     // Event delegation: bind ONCE to the <tbody> (which persists across the per-tick
-    // innerHTML re-renders). Re-adding per-row listeners every tick made the click
-    // intermittent — a click landing just as the rows were replaced was lost.
+    // innerHTML re-renders). We listen on MOUSEDOWN, not click: the per-tick render
+    // replaces the rows, and a real "click" only fires if mousedown AND mouseup land
+    // on the same (still-attached) node. When a row was swapped out between press and
+    // release, the click was silently dropped — hence "needs 3-4 tries". mousedown
+    // fires immediately on press, before any re-render can interfere.
     var body=$(bodyId);
     if(!body || body.getAttribute("data-bound")==="1") return;
     body.setAttribute("data-bound","1");
-    body.addEventListener("click",function(e){
+    function pick(e){
       var r=e.target.closest ? e.target.closest("tr[data-car]") : null;
       if(!r) return;
       var idx=parseInt(r.getAttribute("data-car"),10);
       if(carMap[idx]){ openDrawerCar=idx; renderDrawer(carMap[idx]); openDrawer(); }
-    });
+    }
+    body.addEventListener("mousedown",pick);
+    // Keyboard / accessibility fallback (Enter/Space on a focused row).
+    body.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" ") pick(e); });
   }
   function pitPredBlock(d){
     var s=state.session||{};
@@ -1128,7 +1169,7 @@
   // with y-axis scale, x-axis distance and a hover tooltip (see bindChartHover).
   function miniChart(title, trace, fi, yMax, unit, color){
     var cur=(trace&&trace.cur)||[], prev=(trace&&trace.prev)||[];
-    var head='<div class="chartbox" data-fi="'+fi+'" data-ymax="'+yMax+'" data-unit="'+unit+'">'+
+    var head='<div class="chartbox" data-fi="'+fi+'" data-ymax="'+yMax+'" data-unit="'+unit+'" data-color="'+color+'">'+
       '<div class="chart-t"><span>'+title+'</span></div>';
     if(!cur.length && !prev.length)
       return head+'<div class="chart-empty">sem dados de telemetria</div></div>';
@@ -1151,7 +1192,7 @@
         '<div class="chart-plot">'+
           '<svg viewBox="0 0 300 100" preserveAspectRatio="none" class="chart">'+
             poly(prev,"#7b8ca3",1,0.55)+poly(cur,color,1.6,1)+
-          '</svg><div class="chart-guide"></div>'+
+          '</svg><div class="chart-guide"></div><div class="chart-dot" style="background:'+color+'"></div>'+
         '</div>'+
       '</div>'+
       '<div class="chart-xax"><span>0</span><span>'+Math.round(maxD)+' m</span></div>'+
@@ -1167,29 +1208,41 @@
       '</div>'+
       '<div class="chart-legend"><span>linha forte = volta atual</span><span><i style="background:#7b8ca3"></i>volta anterior</span></div>';
   }
-  function hideChartTips(host){ var t=host.querySelectorAll(".chart-guide,.chart-tip"); for(var i=0;i<t.length;i++) t[i].style.display="none"; }
+  function hideChartTips(host){ var t=host.querySelectorAll(".chart-guide,.chart-tip,.chart-dot"); for(var i=0;i<t.length;i++) t[i].style.display="none"; }
   function bindChartHover(){
     var host=$("tmDetail"); if(!host || host.getAttribute("data-chov")==="1") return;
     host.setAttribute("data-chov","1");
+    function nearest(a,dist){ if(!a.length)return null; var b=a[0],bd=1e12; for(var i=0;i<a.length;i++){var dd=Math.abs(a[i][0]-dist); if(dd<bd){bd=dd;b=a[i];}} return b; }
     host.addEventListener("mousemove",function(e){
       var plot=e.target.closest?e.target.closest(".chart-plot"):null;
       var box=plot?plot.closest(".chartbox"):null;
       if(!plot||!box||tmCar==null||!carMap[tmCar]||!carMap[tmCar].trace){ hideChartTips(host); return; }
-      var fi=parseInt(box.getAttribute("data-fi"),10), unit=box.getAttribute("data-unit")||"";
       var tr=carMap[tmCar].trace, cur=tr.cur||[], prev=tr.prev||[];
       var maxD=1; if(cur.length)maxD=Math.max(maxD,cur[cur.length-1][0]); if(prev.length)maxD=Math.max(maxD,prev[prev.length-1][0]);
       var rect=plot.getBoundingClientRect();
       var fx=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width)), dist=fx*maxD;
-      function near(a){ if(!a.length)return null; var b=a[0],bd=1e12; for(var i=0;i<a.length;i++){var dd=Math.abs(a[i][0]-dist); if(dd<bd){bd=dd;b=a[i];}} return b; }
-      var c=near(cur), p=near(prev);
-      var guide=plot.querySelector(".chart-guide"); if(guide){ guide.style.display="block"; guide.style.left=(fx*rect.width)+"px"; }
+      // Hide every tooltip first; draw a synced guide line across ALL charts at this distance.
+      hideChartTips(host);
+      var boxes=host.querySelectorAll(".chartbox");
+      for(var bi=0; bi<boxes.length; bi++){
+        var g=boxes[bi].querySelector(".chart-guide");
+        if(g){ g.style.display="block"; g.style.left=(fx*100)+"%"; }
+      }
+      var fi=parseInt(box.getAttribute("data-fi"),10), unit=box.getAttribute("data-unit")||"", col=box.getAttribute("data-color")||"var(--txt)", yMax=parseFloat(box.getAttribute("data-ymax"))||1;
+      var c=nearest(cur,dist), p=nearest(prev,dist), u=unit?(" "+unit):"";
+      // Marker dot on the current-lap line at the hovered point.
+      var dot=plot.querySelector(".chart-dot");
+      if(dot && c){ dot.style.display="block"; dot.style.left=(fx*100)+"%"; dot.style.top=((1-Math.max(0,Math.min(c[fi],yMax))/yMax)*100)+"%"; }
       var tip=box.querySelector(".chart-tip");
       if(tip){
-        var u=unit?(" "+unit):"";
-        tip.innerHTML='<b>'+Math.round(dist)+' m</b>'+(c?' · atual <b>'+c[fi]+u+'</b>':'')+(p?' · ant <b style="color:#7b8ca3">'+p[fi]+u+'</b>':'');
+        var dl="";
+        if(c && p){ var dv=c[fi]-p[fi]; if(dv!==0) dl='<span class="tip-dl '+(dv>0?"up":"dn")+'">'+(dv>0?"+":"")+dv+'</span>'; }
+        tip.innerHTML='<div class="tip-d">'+Math.round(dist)+' m</div>'+
+          '<div><span class="tip-cur" style="color:'+col+'">'+(c?c[fi]+u:"-")+'</span>'+dl+'</div>'+
+          (p?'<div class="tip-prev">ant '+p[fi]+u+'</div>':'');
         tip.style.display="block";
         var tx=Math.max(0,Math.min(plot.offsetWidth-tip.offsetWidth, fx*rect.width-tip.offsetWidth/2));
-        tip.style.left=(plot.offsetLeft+tx)+"px"; tip.style.top=(plot.offsetTop-2)+"px";
+        tip.style.left=(plot.offsetLeft+tx)+"px"; tip.style.top=(plot.offsetTop-4)+"px";
       }
     });
     host.addEventListener("mouseleave",function(){ hideChartTips(host); });
@@ -1197,6 +1250,8 @@
   function trackMapDetailHtml(d){
     bindChartHover();
     var warn=warnListBlock(d), pen=penListBlock(d);
+    // warnings + penalties share a row when both exist; a lone card spans full width.
+    var wpCls=(warn&&pen)?"tmcard":"tmcard wide";
     return '<div class="tmgrid">'+
       '<div class="tmcard"><div class="section-t">Pneus / temperaturas</div>'+carDiagramHtml(d)+'</div>'+
       '<div class="tmcard">'+
@@ -1208,8 +1263,8 @@
         '</div>'+pitPredBlock(d)+
       '</div>'+
       '<div class="tmcard wide">'+chartsHtml(d)+'</div>'+
-      (warn?'<div class="tmcard">'+warn+'</div>':'')+
-      (pen?'<div class="tmcard">'+pen+'</div>':'')+
+      (warn?'<div class="'+wpCls+'">'+warn+'</div>':'')+
+      (pen?'<div class="'+wpCls+'">'+pen+'</div>':'')+
       '<div class="tmcard wide"><div class="section-t">Ultimas voltas</div>'+lapsTable(d.laps)+'</div>'+
     '</div>';
   }
