@@ -550,13 +550,19 @@ namespace Overtake.SimHub.Plugin.Live
         {
             var dmg = d.LatestDamage;
             if (dmg == null)
-                return new Dictionary<string, object> { { "wingFL", 0 }, { "wingFR", 0 }, { "wingRear", 0 }, { "worst", 0 } };
+                return new Dictionary<string, object> {
+                    { "wingFL", 0 }, { "wingFR", 0 }, { "wingRear", 0 },
+                    { "tyreFL", 0 }, { "tyreFR", 0 }, { "tyreRL", 0 }, { "tyreRR", 0 }, { "worst", 0 } };
             int worst = Math.Max(Math.Max(dmg.WingFrontLeft, dmg.WingFrontRight), dmg.WingRear);
             return new Dictionary<string, object>
             {
                 { "wingFL", dmg.WingFrontLeft },
                 { "wingFR", dmg.WingFrontRight },
                 { "wingRear", dmg.WingRear },
+                { "tyreFL", dmg.TyreDmgFL },
+                { "tyreFR", dmg.TyreDmgFR },
+                { "tyreRL", dmg.TyreDmgRL },
+                { "tyreRR", dmg.TyreDmgRR },
                 { "worst", worst },
             };
         }
