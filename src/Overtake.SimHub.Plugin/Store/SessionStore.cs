@@ -2291,6 +2291,7 @@ namespace Overtake.SimHub.Plugin.Store
                 d.LivePenaltiesSec = row.Penalties;
                 d.LiveResultStatus = row.ResultStatus;
                 d.LiveDriverStatus = row.DriverStatus;
+                d.LiveCurrentLapInvalid = row.CurrentLapInvalid;
 
                 // Pit stops: track increments
                 int numPit = row.NumPitStops;

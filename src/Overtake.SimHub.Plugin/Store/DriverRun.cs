@@ -138,7 +138,8 @@ namespace Overtake.SimHub.Plugin.Store
         public byte LivePitStatus;     // 0=none, 1=pitting, 2=in pit area
         public byte LivePenaltiesSec;  // in-game accumulated time penalty (LapData)
         public byte LiveResultStatus;
-        public byte LiveDriverStatus;
+        public byte LiveDriverStatus;  // 0=garagem,1=volta rapida,2=in lap,3=out lap,4=em pista
+        public byte LiveCurrentLapInvalid; // 1 = volta atual invalidada (corte de pista)
         // Car Telemetry (packet 6) — tyre/brake/engine temps for the live Track Map.
         // Tyre arrays mapped to named corners; latest value wins. Read-only (live UI).
         public bool LiveTelemValid;

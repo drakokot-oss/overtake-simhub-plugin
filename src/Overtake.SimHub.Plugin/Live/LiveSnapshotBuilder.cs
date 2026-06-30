@@ -135,6 +135,9 @@ namespace Overtake.SimHub.Plugin.Live
                     { "cornerCutWarnings", d.LastCornerCuttingWarnings },
                     { "pitStatus", (int)d.LivePitStatus },
                     { "status", StatusStr(d) },
+                    { "driverStatus", (int)d.LiveDriverStatus },
+                    { "lapInvalid", d.LiveCurrentLapInvalid == 1 },
+                    { "lapState", LapStatePt(d) },
                     // Track Map (Motion): world position + lap distance + heading.
                     { "x", d.LivePosValid ? (object)Round1(d.LiveWorldX) : null },
                     { "z", d.LivePosValid ? (object)Round1(d.LiveWorldZ) : null },
@@ -649,6 +652,23 @@ namespace Overtake.SimHub.Plugin.Live
             }
             if (d.LivePitStatus == 1) return "Pit";
             if (d.LivePitStatus == 2) return "No pit";
+            return "Em pista";
+        }
+
+        // Lap context (qualifying board): out lap / flying lap / in lap, based on
+        // DriverStatus (LapData). Pit lane wins. Used to label "Volta de saida" /
+        // "Em volta" on the Classificacao tab.
+        private static string LapStatePt(DriverRun d)
+        {
+            if (d.LivePitStatus == 1) return "Box";
+            switch (d.LiveDriverStatus)
+            {
+                case 0: return "Garagem";
+                case 1: return "Em volta";          // flying lap
+                case 2: return "Volta de entrada";  // in lap
+                case 3: return "Volta de saida";    // out lap
+                case 4: return "Em pista";
+            }
             return "Em pista";
         }
 
