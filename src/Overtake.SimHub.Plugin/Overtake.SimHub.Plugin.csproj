@@ -78,6 +78,7 @@
     <Compile Include="UdpReceiver.cs" />
     <Compile Include="Packets\GameInfo.cs" />
     <Compile Include="Packets\PacketHeader.cs" />
+    <Compile Include="Packets\MotionData.cs" />
     <Compile Include="Packets\SessionData.cs" />
     <Compile Include="Packets\LapDataEntry.cs" />
     <Compile Include="Packets\EventData.cs" />

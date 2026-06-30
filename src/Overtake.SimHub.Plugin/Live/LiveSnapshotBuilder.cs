@@ -56,12 +56,14 @@ namespace Overtake.SimHub.Plugin.Live
                 { "mode", isQualy ? "qualy" : "race" },
                 { "totalLaps", sess.TotalLaps },
                 { "currentLap", currentLap },
+                { "trackLength", sess.TrackLength },
                 { "timeLeftSec", sess.SessionTimeLeftSec },
                 { "weather", sess.Weather },
                 { "trackTempC", sess.LatestTrackTempC },
                 { "airTempC", sess.LatestAirTempC },
                 { "safetyCar", sess.SafetyCarStatus },
                 { "rainNextPct", rainNext >= 0 ? (object)rainNext : null },
+                { "forecast", Forecast(sess) },
                 { "networkGame", sess.NetworkGame },
                 { "numDrivers", sess.Drivers.Count },
             };
@@ -83,6 +85,10 @@ namespace Overtake.SimHub.Plugin.Live
                 int bestMs = BestLapMs(d);
                 int s1, s2, s3;
                 BestSectors(d, out s1, out s2, out s3);
+                int pbS1, pbS2, pbS3;
+                PersonalBestSectors(d, out pbS1, out pbS2, out pbS3);
+                int lastS1, lastS2, lastS3;
+                LastLapSectors(d, out lastS1, out lastS2, out lastS3);
 
                 grid.Add(new Dictionary<string, object>
                 {
@@ -98,6 +104,11 @@ namespace Overtake.SimHub.Plugin.Live
                     { "curLapMs", d.LiveCurrentLapTimeMs },
                     { "sector", (int)d.LiveSector + 1 },
                     { "s1", s1 }, { "s2", s2 }, { "s3", s3 },
+                    // Live sector splits of the in-progress lap + last completed lap +
+                    // personal-best per sector (for F1-style sector colouring).
+                    { "liveS1", d.LiveS1Ms }, { "liveS2", d.LiveS2Ms },
+                    { "lastS1", lastS1 }, { "lastS2", lastS2 }, { "lastS3", lastS3 },
+                    { "pbS1", pbS1 }, { "pbS2", pbS2 }, { "pbS3", pbS3 },
                     { "intervalMs", d.LiveDeltaToCarFrontMs },
                     { "gapMs", d.LiveDeltaToLeaderMs },
                     { "compound", VisualCompoundCode(d.VisualTyreCompound) },
@@ -111,10 +122,16 @@ namespace Overtake.SimHub.Plugin.Live
                     { "fuelLaps", Round1(d.FuelRemainingLapsLast) },
                     { "penaltiesSec", (int)d.LivePenaltiesSec },
                     { "penaltiesCount", DedupPenaltyCount(d) },
+                    { "penalties", PenaltyList(d) },
                     { "warnings", d.LastTotalWarnings },
                     { "cornerCutWarnings", d.LastCornerCuttingWarnings },
                     { "pitStatus", (int)d.LivePitStatus },
                     { "status", StatusStr(d) },
+                    // Track Map (Motion): world position + lap distance + heading.
+                    { "x", d.LivePosValid ? (object)Round1(d.LiveWorldX) : null },
+                    { "z", d.LivePosValid ? (object)Round1(d.LiveWorldZ) : null },
+                    { "yaw", d.LivePosValid ? (object)Math.Round((double)d.LiveYaw, 3) : null },
+                    { "lapDist", (int)Math.Max(0, d.LiveLapDistanceM) },
                     { "laps", LapList(d) },
                 });
             }
@@ -124,12 +141,17 @@ namespace Overtake.SimHub.Plugin.Live
                 int pb = (int)b["pos"]; if (pb == 0) pb = 999;
                 return pa.CompareTo(pb);
             });
+
+            // Predicted rejoin position if the car pits NOW (race mode only).
+            if (!isQualy)
+                ComputePitRejoin(grid, (int)sess.TrackId.GetValueOrDefault(-1));
+
             root["grid"] = grid;
 
             var events = new List<Dictionary<string, object>>();
             int from = Math.Max(0, sess.Events.Count - 25);
             for (int i = sess.Events.Count - 1; i >= from; i--)
-                events.Add(sess.Events[i]);
+                events.Add(EnrichEvent(sess.Events[i]));
             root["events"] = events;
 
             return root;
@@ -174,15 +196,21 @@ namespace Overtake.SimHub.Plugin.Live
             return best;
         }
 
+        // Only the last 5 completed laps (per request). Ascending by lap number.
+        private const int MaxLapsInSnapshot = 5;
+
         private static List<Dictionary<string, object>> LapList(DriverRun d)
         {
-            var list = new List<Dictionary<string, object>>();
-            // Sorted by lap number ascending for a clean per-driver history.
-            var laps = new List<LapRecord>(d.Laps);
+            var laps = new List<LapRecord>();
+            foreach (var lr in d.Laps)
+                if (lr.LapTimeMs > 0) laps.Add(lr);
             laps.Sort((a, b) => a.LapNumber.CompareTo(b.LapNumber));
-            foreach (var lr in laps)
+            int start = Math.Max(0, laps.Count - MaxLapsInSnapshot);
+
+            var list = new List<Dictionary<string, object>>();
+            for (int i = start; i < laps.Count; i++)
             {
-                if (lr.LapTimeMs <= 0) continue;
+                var lr = laps[i];
                 list.Add(new Dictionary<string, object>
                 {
                     { "n", lr.LapNumber },
@@ -193,6 +221,195 @@ namespace Overtake.SimHub.Plugin.Live
                 });
             }
             return list;
+        }
+
+        // Personal best per sector across all completed laps (each sector taken
+        // independently — may come from different laps, like the game's purple logic).
+        private static void PersonalBestSectors(DriverRun d, out int s1, out int s2, out int s3)
+        {
+            s1 = s2 = s3 = 0;
+            foreach (var lr in d.Laps)
+            {
+                if (lr.Sector1Ms > 0 && (s1 == 0 || lr.Sector1Ms < s1)) s1 = lr.Sector1Ms;
+                if (lr.Sector2Ms > 0 && (s2 == 0 || lr.Sector2Ms < s2)) s2 = lr.Sector2Ms;
+                if (lr.Sector3Ms > 0 && (s3 == 0 || lr.Sector3Ms < s3)) s3 = lr.Sector3Ms;
+            }
+        }
+
+        // Sectors of the most recent completed lap (highest lap number).
+        private static void LastLapSectors(DriverRun d, out int s1, out int s2, out int s3)
+        {
+            s1 = s2 = s3 = 0;
+            LapRecord last = null;
+            foreach (var lr in d.Laps)
+                if (lr.LapTimeMs > 0 && (last == null || lr.LapNumber > last.LapNumber)) last = lr;
+            if (last != null) { s1 = last.Sector1Ms; s2 = last.Sector2Ms; s3 = last.Sector3Ms; }
+        }
+
+        private static List<Dictionary<string, object>> Forecast(SessionRun sess)
+        {
+            var list = new List<Dictionary<string, object>>();
+            if (sess.WeatherForecast == null) return list;
+            int taken = 0;
+            foreach (var f in sess.WeatherForecast)
+            {
+                if (taken >= 8) break; // cap to keep the strip readable + payload small
+                object off, w, rain, tt, at;
+                f.TryGetValue("timeOffsetMin", out off);
+                f.TryGetValue("weather", out w);
+                f.TryGetValue("rainPercentage", out rain);
+                f.TryGetValue("trackTempC", out tt);
+                f.TryGetValue("airTempC", out at);
+                list.Add(new Dictionary<string, object>
+                {
+                    { "offsetMin", off }, { "weather", w }, { "rainPct", rain },
+                    { "trackTempC", tt }, { "airTempC", at },
+                });
+                taken++;
+            }
+            return list;
+        }
+
+        // Actionable penalties, deduplicated, with a human description (PT).
+        private static List<Dictionary<string, object>> PenaltyList(DriverRun d)
+        {
+            var list = new List<Dictionary<string, object>>();
+            var seen = new HashSet<string>();
+            foreach (var ps in d.PenaltySnapshots)
+            {
+                if (!ps.PenaltyType.HasValue) continue;
+                int pt = ps.PenaltyType.Value;
+                if (pt != 0 && pt != 1 && pt != 4) continue; // DT / SG / Time only
+                string key = pt + "|" + (ps.InfringementType ?? -1) + "|" + (ps.LapNum ?? -1) + "|" + (ps.TimeSec ?? -1);
+                if (!seen.Add(key)) continue;
+                list.Add(new Dictionary<string, object>
+                {
+                    { "type", pt },
+                    { "timeSec", ps.TimeSec ?? 0 },
+                    { "lap", ps.LapNum ?? 0 },
+                    { "desc", PenaltyDescPt(pt, ps.InfringementType ?? -1, ps.TimeSec ?? 0) },
+                });
+            }
+            return list;
+        }
+
+        // Predicted finishing position if the car pits on this lap. Heuristic:
+        // it loses ~PitLossSec of track time, so it rejoins behind every car whose
+        // gap-to-leader is within (myGap + pitLoss). Spectator-friendly estimate.
+        private static void ComputePitRejoin(List<Dictionary<string, object>> grid, int trackId)
+        {
+            int pitLossMs = PitLossSecForTrack(trackId) * 1000;
+            // Build a quick array of gaps (ms) for cars that have a real race position.
+            for (int i = 0; i < grid.Count; i++)
+            {
+                var me = grid[i];
+                int myPos = (int)me["pos"];
+                if (myPos <= 0) { me["pitRejoinPos"] = null; me["pitLossSec"] = pitLossMs / 1000; continue; }
+                int myGap = (int)me["gapMs"];
+                long projected = (long)myGap + pitLossMs;
+                int ahead = 0;
+                for (int j = 0; j < grid.Count; j++)
+                {
+                    if (j == i) continue;
+                    int oPos = (int)grid[j]["pos"];
+                    if (oPos <= 0) continue;
+                    int oGap = (int)grid[j]["gapMs"];
+                    if (oGap <= projected) ahead++;
+                }
+                me["pitRejoinPos"] = ahead + 1;
+                me["pitLossSec"] = pitLossMs / 1000;
+            }
+        }
+
+        // Rough pit-lane time loss in seconds. We don't have per-track pit deltas,
+        // so use a single conservative average; clearly labelled as an estimate in UI.
+        private static int PitLossSecForTrack(int trackId)
+        {
+            return 22;
+        }
+
+        // Attach a human-readable PT description to penalty/retirement events for the feed.
+        private static Dictionary<string, object> EnrichEvent(Dictionary<string, object> ev)
+        {
+            if (ev == null) return ev;
+            object codeObj;
+            if (!ev.TryGetValue("code", out codeObj)) return ev;
+            string code = codeObj as string;
+            object dataObj;
+            ev.TryGetValue("data", out dataObj);
+            var data = dataObj as Dictionary<string, object>;
+
+            if (code == "PENA" && data != null)
+            {
+                int pt = AsInt(data, "penaltyType", -1);
+                int inf = AsInt(data, "infringementType", -1);
+                int sec = AsInt(data, "timeSec", 0);
+                data["desc"] = PenaltyDescPt(pt, inf, sec);
+            }
+            return ev;
+        }
+
+        private static int AsInt(Dictionary<string, object> d, string k, int def)
+        {
+            object o;
+            if (d != null && d.TryGetValue(k, out o) && o != null)
+            {
+                int v;
+                if (int.TryParse(o.ToString(), out v)) return v;
+            }
+            return def;
+        }
+
+        private static string PenaltyTypePt(int pt)
+        {
+            switch (pt)
+            {
+                case 0: return "Drive-through";
+                case 1: return "Stop & Go";
+                case 2: return "Punicao de grid";
+                case 3: return "Lembrete de punicao";
+                case 4: return "Punicao de tempo";
+                case 5: return "Aviso";
+                case 6: return "Desqualificado";
+                case 17: return "Bandeira preta";
+                default: return "Punicao";
+            }
+        }
+
+        private static string InfringementPt(int inf)
+        {
+            switch (inf)
+            {
+                case 0: case 1: return "bloqueio";
+                case 3: return "colisao grave";
+                case 4: return "colisao leve";
+                case 5: case 6: return "nao devolveu posicao";
+                case 7: case 8: case 9: return "corte de curva com ganho";
+                case 10: return "cruzou a saida do pit";
+                case 11: return "ignorou bandeira azul";
+                case 12: return "ignorou bandeira amarela";
+                case 13: case 14: case 15: case 16: return "drive-through nao cumprido";
+                case 17: return "excesso de velocidade no pit";
+                case 18: return "parado tempo demais";
+                case 25: case 26: case 27: case 28: case 29: case 30: return "volta invalidada";
+                case 33: return "bloqueando o pit lane";
+                case 34: return "queima de largada";
+                case 35: case 36: case 37: return "infracao sob safety car";
+                case 38: return "excesso de ritmo sob VSC";
+                case 45: return "stop&go nao cumprido";
+                case 46: return "drive-through nao cumprido";
+                case 52: return "ganho ilegal de tempo";
+                case 53: return "pit obrigatorio nao cumprido";
+                default: return "";
+            }
+        }
+
+        private static string PenaltyDescPt(int pt, int inf, int sec)
+        {
+            string head = PenaltyTypePt(pt);
+            if (pt == 4 && sec > 0) head += " (+" + sec + "s)";
+            string tail = InfringementPt(inf);
+            return string.IsNullOrEmpty(tail) ? head : head + " - " + tail;
         }
 
         private static void BestSectors(DriverRun d, out int s1, out int s2, out int s3)
@@ -212,11 +429,13 @@ namespace Overtake.SimHub.Plugin.Live
         {
             var tw = d.LatestTyreWear;
             if (tw == null)
-                return new Dictionary<string, object> { { "avg", 0 }, { "fl", 0 }, { "fr", 0 }, { "rl", 0 }, { "rr", 0 } };
+                return new Dictionary<string, object> { { "avg", 0 }, { "max", 0 }, { "fl", 0 }, { "fr", 0 }, { "rl", 0 }, { "rr", 0 } };
             double avg = (tw.FL + tw.FR + tw.RL + tw.RR) / 4.0;
+            double max = Math.Max(Math.Max(tw.FL, tw.FR), Math.Max(tw.RL, tw.RR));
             return new Dictionary<string, object>
             {
                 { "avg", Math.Round(avg, 1) },
+                { "max", Math.Round(max, 1) },
                 { "fl", Math.Round((double)tw.FL, 1) },
                 { "fr", Math.Round((double)tw.FR, 1) },
                 { "rl", Math.Round((double)tw.RL, 1) },

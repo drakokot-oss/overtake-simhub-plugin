@@ -26,6 +26,8 @@ namespace Overtake.SimHub.Plugin.Packets
         // Live race UI (v1 broadcast): gaps + current sector. ms = minutes*60000 + msPart.
         public int DeltaToCarFrontMs;
         public int DeltaToLeaderMs;
+        // Live race UI (Track Map): metres travelled on the current lap (off 20).
+        public float LapDistance;
         public byte Sector;
         public byte CarPosition;
         public byte CurrentLapNum;
@@ -92,6 +94,7 @@ namespace Overtake.SimHub.Plugin.Packets
                     Sector2TimeInMS = SectorMs(BitConverter.ToUInt16(data, off + 11), data[off + 13]),
                     DeltaToCarFrontMs = SectorMs(BitConverter.ToUInt16(data, off + 14), data[off + 16]),
                     DeltaToLeaderMs = SectorMs(BitConverter.ToUInt16(data, off + 17), data[off + 19]),
+                    LapDistance = BitConverter.ToSingle(data, off + 20),
                     Sector = data[off + 36],
                     CarPosition = data[off + 32],
                     CurrentLapNum = data[off + 33],

@@ -584,8 +584,12 @@ namespace Overtake.SimHub.Plugin.Store
                 sess.LastGameMinorVersion = header.GameMinorVersion;
             }
 
+            // 0) Motion (Track Map — live UI only)
+            if (pid == 0 && parsed.Motion != null)
+                IngestMotion(sid, parsed.Motion);
+
             // 1) Session
-            if (pid == 1 && parsed.Session != null)
+            else if (pid == 1 && parsed.Session != null)
                 IngestSession(sess, parsed.Session, nowMs);
 
             // 4) Participants
@@ -2184,6 +2188,23 @@ namespace Overtake.SimHub.Plugin.Store
             }
         }
 
+        // Track Map (live UI only). Updates world position for already-registered
+        // drivers; EnsureDriver returns null for unmapped slots so no phantoms.
+        private void IngestMotion(string sid, MotionEntry[] rows)
+        {
+            if (rows == null) return;
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (rows[i] == null) continue;
+                var d = EnsureDriver(sid, rows[i].CarIdx);
+                if (d == null) continue;
+                d.LiveWorldX = rows[i].WorldX;
+                d.LiveWorldZ = rows[i].WorldZ;
+                d.LiveYaw = rows[i].Yaw;
+                d.LivePosValid = true;
+            }
+        }
+
         private void IngestLapData(string sid, SessionRun sess, LapDataEntry[] rows, long nowMs)
         {
             for (int i = 0; i < rows.Length; i++)
@@ -2218,6 +2239,9 @@ namespace Overtake.SimHub.Plugin.Store
                 d.LiveDeltaToLeaderMs = row.DeltaToLeaderMs;
                 d.LiveCurrentLapTimeMs = (int)row.CurrentLapTimeInMS;
                 d.LiveSector = row.Sector;
+                d.LiveS1Ms = row.Sector1TimeInMS;
+                d.LiveS2Ms = row.Sector2TimeInMS;
+                d.LiveLapDistanceM = row.LapDistance;
                 d.LivePitStatus = row.PitStatus;
                 d.LivePenaltiesSec = row.Penalties;
                 d.LiveResultStatus = row.ResultStatus;

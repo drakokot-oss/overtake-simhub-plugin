@@ -10,6 +10,7 @@ namespace Overtake.SimHub.Plugin.Parsers
     {
         public PacketHeader Header;
         public SessionData Session;
+        public MotionEntry[] Motion;
         public LapDataEntry[] LapData;
         public EventData Event;
         public ParticipantsData Participants;
@@ -52,6 +53,9 @@ namespace Overtake.SimHub.Plugin.Parsers
 
             switch (header.PacketId)
             {
+                case 0:
+                    result.Motion = MotionEntry.Parse(data);
+                    break;
                 case 1:
                     result.Session = SessionData.Parse(data);
                     break;

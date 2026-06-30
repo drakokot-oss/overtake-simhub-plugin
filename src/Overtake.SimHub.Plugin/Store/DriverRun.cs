@@ -126,6 +126,15 @@ namespace Overtake.SimHub.Plugin.Store
         public int LiveDeltaToLeaderMs;
         public int LiveCurrentLapTimeMs;
         public byte LiveSector;
+        // Live sector splits of the IN-PROGRESS lap (ms). 0 until the sector closes.
+        public int LiveS1Ms;
+        public int LiveS2Ms;
+        // Track Map (packet 0 Motion + LapData lapDistance). Latest value wins.
+        public float LiveWorldX;
+        public float LiveWorldZ;
+        public float LiveYaw;
+        public float LiveLapDistanceM;
+        public bool LivePosValid;
         public byte LivePitStatus;     // 0=none, 1=pitting, 2=in pit area
         public byte LivePenaltiesSec;  // in-game accumulated time penalty (LapData)
         public byte LiveResultStatus;
@@ -204,6 +213,13 @@ namespace Overtake.SimHub.Plugin.Store
             LastSeenLapTimeMs = 0;
             LastTotalWarnings = 0;
             LastCornerCuttingWarnings = 0;
+            LiveS1Ms = 0;
+            LiveS2Ms = 0;
+            LiveWorldX = 0f;
+            LiveWorldZ = 0f;
+            LiveYaw = 0f;
+            LiveLapDistanceM = 0f;
+            LivePosValid = false;
             PenaltySnapshots.Clear();
             FuelMixLast = 0;
             FuelCapacityKg = 0f;
