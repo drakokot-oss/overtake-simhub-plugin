@@ -62,11 +62,15 @@ namespace Overtake.SimHub.Plugin.Packets
 
             var entries = new CarTelemetryEntry[NumCars];
             int p = PacketHeader.Size;
+            // engineTemperature is the last field we read: u8 @38 in 2026 (needs off+39),
+            // u16 @38..39 in 2025 (needs off+40). Make the per-entry guard width-aware so a
+            // truncated final entry can never read past the buffer.
+            int needed = engineU8 ? 39 : 40;
 
             for (int i = 0; i < NumCars; i++)
             {
                 int off = p + i * entrySize;
-                if (off + MinFields > data.Length)
+                if (off + needed > data.Length)
                     break;
 
                 entries[i] = new CarTelemetryEntry

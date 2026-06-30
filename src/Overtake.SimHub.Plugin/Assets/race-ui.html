@@ -873,7 +873,10 @@
     function qStatus(d){
       var st=d.status||"";
       if(/Retirado|Abandonou|DSQ|Finalizado|classificado/i.test(st)) return '<span class="qstat">'+esc(st)+'</span>';
-      if(d.lapInvalid && (d.driverStatus===1 || d.driverStatus===4)) return '<span class="qstat cancel">Volta cancelada</span>';
+      // Cancelled lap: flag whenever the lap is invalid and the driver is on a timed lap.
+      // driverStatus 2=in lap, 3=out lap are excluded; a missing driverStatus (older/partial
+      // snapshot) still flags it, so the Status pill agrees with the red struck-through sectors.
+      if(d.lapInvalid && d.driverStatus!==2 && d.driverStatus!==3) return '<span class="qstat cancel">Volta cancelada</span>';
       var ls=d.lapState||st||"-", cls="qstat";
       if(ls==="Em volta") cls+=" hot";
       else if(/sa.?da|entrada/i.test(ls)) cls+=" out";
