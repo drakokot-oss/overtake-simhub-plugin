@@ -3,31 +3,28 @@ using System;
 namespace Overtake.SimHub.Plugin.Packets
 {
     /// <summary>
-    /// Packet ID 6: Car Telemetry — one CarTelemetryData entry per car, 60 bytes each.
-    /// The live Track Map reads tyre surface/inner temps, brake temps and engine temp.
+    /// Packet ID 6: Car Telemetry — one CarTelemetryData entry per car. The live Track
+    /// Map reads tyre surface/inner temps, brake temps and engine temp.
     ///
-    /// The struct is identical in 2025 and 2026 (the 2026 "CarTelemetry2"/packet 16 is a
-    /// separate active-aero packet, NOT a change to this one), so a single 60-byte stride
-    /// covers both formats — only the car count differs (handled by NumCars + length guard).
-    /// Format-agnostic, same as Motion.
+    /// FORMAT-AWARE. The 2026 wire QUANTISES m_engineTemperature from uint16 to uint8,
+    /// shrinking each entry from 60 → 59 bytes. Confirmed by the official EA 2026 spec
+    /// size: PacketCarTelemetry = 1448 bytes = 29 (header) + 24 * 59 + 3 (trailer). Using
+    /// the wrong stride drifts every car index > 0 (garbage temps, e.g. engine 26214°C).
+    /// brakesTemperature@22 / surface@30 / inner@34 are unchanged (they precede engine).
     ///
-    /// Tyre/brake arrays are ordered [RL, RR, FL, FR] (index 0=RL, 1=RR, 2=FL, 3=FR),
-    /// the standard F1 UDP wheel order.
-    ///
+    /// Tyre/brake arrays are ordered [RL, RR, FL, FR] (index 0=RL, 1=RR, 2=FL, 3=FR).
     /// Live race UI only (Track Map). Not used by the .otk export pipeline.
-    /// Layout per car (packed, little-endian):
-    ///   u16 speed @0; f throttle @2; f steer @6; f brake @10; u8 clutch @14;
-    ///   s8 gear @15; u16 rpm @16; u8 drs @18; u8 revPct @19; u16 revBits @20;
-    ///   u16 brakesTemperature[4] @22; u8 tyresSurfaceTemperature[4] @30;
-    ///   u8 tyresInnerTemperature[4] @34; u16 engineTemperature @38;
-    ///   f tyresPressure[4] @40; u8 surfaceType[4] @56.
+    /// Per-car: speed@0 throttle@2 steer@6 brake@10 clutch@14 gear@15 rpm@16 drs@18
+    ///   revPct@19 revBits@20 ; u16 brakesTemp[4]@22 ; u8 surf[4]@30 ; u8 inner[4]@34 ;
+    ///   2025: u16 engineTemp@38 (entry 60) ; 2026: u8 engineTemp@38 (entry 59).
     /// </summary>
     public class CarTelemetryEntry
     {
-        public const int EntrySize = 60;
+        public const int EntrySize2025 = 60;
+        public const int EntrySize2026 = 59;
         public const int NumCars = GameInfo.MaxSupportedCars;
-        // We only need bytes through engineTemperature (@38..39).
-        private const int MinFields = 40;
+        // We only need bytes through engineTemperature (@38..39 in 2025, @38 in 2026).
+        private const int MinFields = 39;
 
         public int CarIdx;
         public int TyreSurfFL, TyreSurfFR, TyreSurfRL, TyreSurfRR;
@@ -35,17 +32,34 @@ namespace Overtake.SimHub.Plugin.Packets
         public int BrakeFL, BrakeFR, BrakeRL, BrakeRR;
         public int EngineTemp;
 
+        /// <summary>Backwards-compatible entry point — assumes the 2025 wire format.</summary>
         public static CarTelemetryEntry[] Parse(byte[] data)
+        {
+            return Parse(data, 2025, null);
+        }
+
+        public static CarTelemetryEntry[] Parse(byte[] data, ushort packetFormat)
+        {
+            return Parse(data, packetFormat, null);
+        }
+
+        public static CarTelemetryEntry[] Parse(byte[] data, ushort packetFormat, ushort? bodyWireFormatOverride)
         {
             if (data == null || data.Length < PacketHeader.Size + MinFields)
                 return null;
+
+            ushort bodyFmt = packetFormat >= 2026
+                ? (bodyWireFormatOverride ?? (ushort)2026)
+                : (ushort)2025;
+            int entrySize = bodyFmt >= 2026 ? EntrySize2026 : EntrySize2025;
+            bool engineU8 = bodyFmt >= 2026;
 
             var entries = new CarTelemetryEntry[NumCars];
             int p = PacketHeader.Size;
 
             for (int i = 0; i < NumCars; i++)
             {
-                int off = p + i * EntrySize;
+                int off = p + i * entrySize;
                 if (off + MinFields > data.Length)
                     break;
 
@@ -67,8 +81,8 @@ namespace Overtake.SimHub.Plugin.Packets
                     TyreInnerRR = data[off + 35],
                     TyreInnerFL = data[off + 36],
                     TyreInnerFR = data[off + 37],
-                    // engineTemperature (u16) @38
-                    EngineTemp = BitConverter.ToUInt16(data, off + 38),
+                    // engineTemperature @38 — u16 in 2025, u8 in 2026
+                    EngineTemp = engineU8 ? data[off + 38] : BitConverter.ToUInt16(data, off + 38),
                 };
             }
 

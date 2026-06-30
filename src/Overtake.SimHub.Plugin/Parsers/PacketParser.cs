@@ -55,7 +55,7 @@ namespace Overtake.SimHub.Plugin.Parsers
             switch (header.PacketId)
             {
                 case 0:
-                    result.Motion = MotionEntry.Parse(data);
+                    result.Motion = MotionEntry.Parse(data, header.PacketFormat, bodyWireFormatOverride);
                     break;
                 case 1:
                     result.Session = SessionData.Parse(data);
@@ -70,7 +70,7 @@ namespace Overtake.SimHub.Plugin.Parsers
                     result.Participants = ParticipantsData.Parse(data, header.PacketFormat, bodyWireFormatOverride);
                     break;
                 case 6:
-                    result.CarTelemetry = CarTelemetryEntry.Parse(data);
+                    result.CarTelemetry = CarTelemetryEntry.Parse(data, header.PacketFormat, bodyWireFormatOverride);
                     break;
                 case 7:
                     result.CarStatus = CarStatusEntry.Parse(data, header.PacketFormat, bodyWireFormatOverride);
