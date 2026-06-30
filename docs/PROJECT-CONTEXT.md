@@ -4,6 +4,19 @@ Referência técnica interna para desenvolvimento e manutenção do plugin.
 
 ---
 
+## Documentacao Live Race UI (Jun/2026)
+
+Feature em desenvolvimento na branch `feat/race-ui-test-build` — dashboard web + overlays OBS servidos pelo plugin.
+
+| Documento | Conteudo |
+|-----------|----------|
+| **`docs/LIVE-RACE-UI-HANDOFF.md`** | Handoff completo: arquitetura, schema JSON, features, backlog, como retomar |
+| **`docs/LIVE-CLOUD-BROADCAST-DESIGN.md`** | Plano futuro: streaming publico via cloud (Supabase), monetizacao, multi-liga |
+
+> O handoff pode existir apenas localmente ate ser commitado — ver secao 11 do proprio arquivo.
+
+---
+
 ## Arquitetura — Pipeline de dados
 
 ```

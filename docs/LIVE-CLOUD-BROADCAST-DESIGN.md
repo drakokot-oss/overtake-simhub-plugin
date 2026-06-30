@@ -4,8 +4,10 @@
 > arquitetura, multi-tenancy, gating por assinatura e custos ANTES de construir
 > qualquer coisa. O modo local atual (servidor web embarcado no plugin) continua
 > valendo e não muda. O `.otk` continua 100% local e inalterado.
+>
+> **Implementacao local (ja feita):** ver `docs/LIVE-RACE-UI-HANDOFF.md`
 
-Última atualização: 2026-06-29
+Última atualização: 2026-06-30
 
 ---
 

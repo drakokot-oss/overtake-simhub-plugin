@@ -125,6 +125,7 @@ namespace Overtake.SimHub.Plugin.Live
                     { "penaltiesSec", (int)d.LivePenaltiesSec },
                     { "penaltiesCount", DedupPenaltyCount(d) },
                     { "penalties", PenaltyList(d) },
+                    { "warningsDetail", WarningList(d) },
                     { "warnings", d.LastTotalWarnings },
                     { "cornerCutWarnings", d.LastCornerCuttingWarnings },
                     { "pitStatus", (int)d.LivePitStatus },
@@ -273,15 +274,41 @@ namespace Overtake.SimHub.Plugin.Live
         }
 
         // Actionable penalties, deduplicated, with a human description (PT).
+        // Warnings (type 5) go to WarningList instead.
         private static List<Dictionary<string, object>> PenaltyList(DriverRun d)
         {
             var list = new List<Dictionary<string, object>>();
             var seen = new HashSet<string>();
             foreach (var ps in d.PenaltySnapshots)
             {
+                // Served DT / Stop-Go (no PenaltyType on the snapshot).
+                if (ps.EventCode == "DTSV")
+                {
+                    string sk = "DTSV|" + (ps.LapNum ?? -1);
+                    if (!seen.Add(sk)) continue;
+                    list.Add(new Dictionary<string, object>
+                    {
+                        { "type", 0 }, { "timeSec", 0 }, { "lap", ps.LapNum ?? 0 },
+                        { "desc", "Drive-through cumprido" },
+                    });
+                    continue;
+                }
+                if (ps.EventCode == "SGSV")
+                {
+                    string sk = "SGSV|" + (ps.LapNum ?? -1);
+                    if (!seen.Add(sk)) continue;
+                    list.Add(new Dictionary<string, object>
+                    {
+                        { "type", 1 }, { "timeSec", 0 }, { "lap", ps.LapNum ?? 0 },
+                        { "desc", "Stop & Go cumprido" },
+                    });
+                    continue;
+                }
                 if (!ps.PenaltyType.HasValue) continue;
                 int pt = ps.PenaltyType.Value;
-                if (pt != 0 && pt != 1 && pt != 4) continue; // DT / SG / Time only
+                if (pt == 5) continue; // warnings -> WarningList
+                // DT / SG / grid / reminder / time / DSQ / black flag
+                if (pt != 0 && pt != 1 && pt != 2 && pt != 3 && pt != 4 && pt != 6 && pt != 17) continue;
                 string key = pt + "|" + (ps.InfringementType ?? -1) + "|" + (ps.LapNum ?? -1) + "|" + (ps.TimeSec ?? -1);
                 if (!seen.Add(key)) continue;
                 list.Add(new Dictionary<string, object>
@@ -290,6 +317,25 @@ namespace Overtake.SimHub.Plugin.Live
                     { "timeSec", ps.TimeSec ?? 0 },
                     { "lap", ps.LapNum ?? 0 },
                     { "desc", PenaltyDescPt(pt, ps.InfringementType ?? -1, ps.TimeSec ?? 0) },
+                });
+            }
+            return list;
+        }
+
+        // Warning events (type 5) with infringement description.
+        private static List<Dictionary<string, object>> WarningList(DriverRun d)
+        {
+            var list = new List<Dictionary<string, object>>();
+            var seen = new HashSet<string>();
+            foreach (var ps in d.PenaltySnapshots)
+            {
+                if (!ps.PenaltyType.HasValue || ps.PenaltyType.Value != 5) continue;
+                string key = (ps.InfringementType ?? -1) + "|" + (ps.LapNum ?? -1);
+                if (!seen.Add(key)) continue;
+                list.Add(new Dictionary<string, object>
+                {
+                    { "lap", ps.LapNum ?? 0 },
+                    { "desc", PenaltyDescPt(5, ps.InfringementType ?? -1, 0) },
                 });
             }
             return list;

@@ -140,7 +140,8 @@
   "use strict";
   function $(id){ return document.getElementById(id); }
   function qp(k){ try{ return new URLSearchParams(location.search).get(k); }catch(e){ return null; } }
-  var VIEW = (qp("view") || (location.hash||"").replace("#","") || "tower").toLowerCase();
+  // Hash (#tower) works reliably on file:// previews; ?view= works on http:// server.
+  var VIEW = ((location.hash||"").replace("#","") || qp("view") || "tower").toLowerCase();
   var FOCUS = parseInt(qp("car"),10); if(isNaN(FOCUS)) FOCUS=null;
   var A = parseInt(qp("a"),10); if(isNaN(A)) A=null;
   var B = parseInt(qp("b"),10); if(isNaN(B)) B=null;

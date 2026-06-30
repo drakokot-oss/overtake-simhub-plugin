@@ -115,7 +115,12 @@
   table.laptable td { padding:6px 10px; border-bottom:1px solid rgba(35,44,59,.5); font-size:12.5px; text-align:right; }
   table.laptable td:first-child { text-align:center; color:var(--txt-faint); font-weight:700; }
   .delta-up { color:var(--good); } .delta-down { color:var(--bad); }
-  .overlaywrap { display:grid; place-items:start center; padding:20px 0; }
+  .overlaywrap { display:flex; flex-direction:column; gap:14px; padding:14px 0; }
+  .ov-subtabs { display:flex; flex-wrap:wrap; gap:6px; }
+  .ov-subtabs button { background:var(--panel); border:1px solid var(--line); color:var(--txt-dim); border-radius:8px; padding:7px 12px; font-size:12px; font-weight:700; cursor:pointer; }
+  .ov-subtabs button.active { background:rgba(255,77,46,.18); border-color:rgba(255,77,46,.45); color:var(--accent-2); }
+  .ov-frame-wrap { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; min-height:420px; }
+  .ov-frame-wrap iframe { width:100%; height:480px; border:0; display:block; background:transparent; }
   .overlay { width:440px; background:rgba(10,13,18,.86); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.5); }
   .ovhead { display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,77,46,.12); border-bottom:1px solid var(--line); font-size:12px; font-weight:800; }
   .ovrow { display:grid; grid-template-columns:24px 4px 1fr 70px 30px; gap:8px; align-items:center; padding:7px 12px; border-bottom:1px solid rgba(35,44,59,.5); }
@@ -261,9 +266,16 @@
 
   <!-- OVERLAY -->
   <div class="overlaywrap hide" id="view-overlay">
-    <div class="overlay">
-      <div class="ovhead"><span class="dot"></span> <span id="ovHeadTxt">AO VIVO</span></div>
-      <div id="ovBody"></div>
+    <div class="ov-subtabs" id="ovSubtabs"></div>
+    <div class="ov-frame-wrap">
+      <iframe id="ovFrame" title="Overlay preview"></iframe>
+    </div>
+    <div class="panel">
+      <h3>URLs para OBS (fundo transparente)</h3>
+      <div class="dbody">
+        <div style="color:var(--txt-dim);font-size:12px;margin-bottom:8px">Adicione cada URL como "Fonte de Navegador" no OBS. Largura/altura conforme o overlay.</div>
+        <div id="overlayLinks" class="kv"></div>
+      </div>
     </div>
   </div>
 
@@ -286,13 +298,6 @@
     </div>
   </div>
 
-  <div class="panel" style="margin-top:14px">
-    <h3>Overlays para transmissao (OBS)</h3>
-    <div class="dbody">
-      <div style="color:var(--txt-dim);font-size:12px;margin-bottom:8px">Adicione como "Fonte de Navegador" no OBS. Fundo transparente.</div>
-      <div id="overlayLinks" class="kv"></div>
-    </div>
-  </div>
 
   <div class="footnote" id="foot">Overtake Telemetry - build de teste. A pagina conecta sozinha ao SimHub e atualiza em tempo real.</div>
 </div>
@@ -314,6 +319,10 @@
   var tmCar = null;          // selected driver in Track Map
   var trackPts = {};         // lapDist bucket -> {x,z} accumulated track outline
   var tmHits = [];           // last-rendered car screen positions for click hit-testing
+  var tmLastRender = 0;      // throttle canvas redraws (ms)
+  var tmCanvasW = 0, tmCanvasH = 0;
+  var tmSelectSig = "";      // skip rebuilding <select> unless grid composition changed
+  var curOvView = "tower";   // active overlay sub-tab
   var RACE_GRACE_MS = 10*60*1000; // keep race data 10 min after it ends
   var raceEndedAt = 0;       // ms timestamp the race was detected as finished
 
@@ -410,11 +419,11 @@
     renderForecast();
     renderRace();
     renderQualy();
-    renderOverlay();
     renderFeed();
     renderHighlights();
     updateTmSelect();
-    if(curView==="trackmap") renderTrackMap();
+    if(curView==="trackmap") renderTrackMap(false);
+    if(curView==="overlay") syncOverlayFrame();
     if(tmCar!=null && carMap[tmCar]) $("tmDetail").innerHTML = driverDetailHtml(carMap[tmCar]);
     if(openDrawerCar!=null && carMap[openDrawerCar]) renderDrawer(carMap[openDrawerCar]);
   }
@@ -494,6 +503,10 @@
     }).join("");
   }
 
+  function stintLabel(d){
+    var st=(d.stints&&d.stints.length)?d.stints:[d.compound||"?"];
+    return st.join(" \u203a ")+" \u00b7 "+(d.tyreAge||0)+"v";
+  }
   function tyreBadge(c,extra){
     var cls=("SMHIW".indexOf(c)>=0)?c:"U";
     var lbl=(c&&c!=="U")?c:"?";
@@ -675,32 +688,23 @@
       '<div class="kv"><div class="cell" style="grid-column:span 3"><div class="k">Pole atual</div><div class="v">'+msLap(pole)+'</div></div></div>';
   }
 
-  function renderOverlay(){
-    var g=(state.grid||[]).slice(0,8);
-    var s=state.session||{};
-    $("ovHeadTxt").textContent = (s.sessionTypeName||"AO VIVO")+(s.mode==="race"?(" - V"+(s.currentLap||0)+(s.totalLaps?("/"+s.totalLaps):"")):"");
-    $("ovBody").innerHTML = g.map(function(d,i){
-      return '<div class="ovrow">'+
-        '<div class="p">'+(d.pos||(i+1))+'</div>'+
-        '<div class="teambar" style="background:'+teamColor(d.team)+'"></div>'+
-        '<div class="nm">'+esc(d.tag)+'</div>'+
-        '<div class="it">'+(i===0?(s.mode==="qualy"?msLap(d.bestLapMs):"Lider"):msGap(s.mode==="qualy"?(d.bestLapMs- (g[0].bestLapMs||0)):d.intervalMs))+'</div>'+
-        '<div class="compound"><span class="tyre '+(("SMHIW".indexOf(d.compound)>=0)?d.compound:"U")+'">'+(d.compound||"?")+'</span></div>'+
-      '</div>';
-    }).join("");
-  }
+  function renderOverlay(){ /* legacy mini-tower removed; overlays live in /overlays + Overlay tab */ }
 
   // ---- Track Map ----
+  function tmSelectSignature(g){
+    return g.map(function(d){ return d.carIdx+":"+(d.tag||""); }).join("|");
+  }
   function updateTmSelect(){
     var sel=$("tmSelect"); if(!sel) return;
     var g=state.grid||[];
-    var cur=sel.value;
+    var sig=tmSelectSignature(g);
+    if(sig===tmSelectSig) return; // avoid rebuilding dropdown every tick (breaks clicks)
+    tmSelectSig=sig;
     var opts='<option value="">-- escolha um piloto --</option>'+g.map(function(d){
       return '<option value="'+d.carIdx+'">P'+(d.pos||"-")+' '+esc(d.tag)+'</option>';
     }).join("");
     sel.innerHTML=opts;
     if(tmCar!=null) sel.value=String(tmCar);
-    else if(cur) sel.value=cur;
   }
   function accumulateTrack(){
     var g=state.grid||[];
@@ -710,14 +714,21 @@
       if(!trackPts[bucket]) trackPts[bucket]={x:d.x,z:d.z};
     });
   }
-  function renderTrackMap(){
+  function renderTrackMap(force){
     var cv=$("trackCanvas"); if(!cv) return;
+    var now=Date.now();
+    if(!force && (now-tmLastRender)<250) return; // max ~4 fps unless forced (click/resize/tab)
+    tmLastRender=now;
     accumulateTrack();
     var g=state.grid||[];
     var dpr=window.devicePixelRatio||1;
     var w=cv.clientWidth, h=cv.clientHeight;
     if(w<=0||h<=0) return;
-    cv.width=Math.floor(w*dpr); cv.height=Math.floor(h*dpr);
+    // Only reset backing store when CSS size changes (avoids flicker / lost clicks).
+    if(w!==tmCanvasW || h!==tmCanvasH){
+      tmCanvasW=w; tmCanvasH=h;
+      cv.width=Math.floor(w*dpr); cv.height=Math.floor(h*dpr);
+    }
     var ctx=cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.clearRect(0,0,w,h);
 
@@ -752,8 +763,8 @@
     g.forEach(function(d){
       if(d.x==null||d.z==null) return;
       var q=px(d), sel=(tmCar!=null&&d.carIdx===tmCar);
-      tmHits.push({idx:d.carIdx, x:q.x, y:q.y});
-      ctx.beginPath(); ctx.arc(q.x,q.y, sel?9:6, 0, Math.PI*2);
+      tmHits.push({idx:d.carIdx, x:q.x, y:q.y, r: sel?12:10});
+      ctx.beginPath(); ctx.arc(q.x,q.y, sel?9:7, 0, Math.PI*2);
       ctx.fillStyle=teamColorHex(d.team); ctx.fill();
       if(sel){ ctx.lineWidth=3; ctx.strokeStyle="#fff"; ctx.stroke(); }
       ctx.fillStyle="#0a0d12"; ctx.font="bold 9px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
@@ -868,8 +879,32 @@
     if(!list.length) return "";
     return '<div class="section-t">Punicoes aplicadas</div>'+
       '<div class="laps" style="max-height:none"><table class="laptable">'+
-      '<thead><tr><th style="text-align:left">Punicao</th><th>Volta</th></tr></thead><tbody>'+
-      list.map(function(p){ return '<tr><td style="text-align:left">'+esc(p.desc||"")+'</td><td>'+(p.lap||"-")+'</td></tr>'; }).join("")+
+      '<thead><tr><th style="text-align:left">Punicao</th><th>Volta</th><th>Tempo</th></tr></thead><tbody>'+
+      list.map(function(p){
+        var ts=(p.timeSec>0)?("+"+p.timeSec+"s"):"-";
+        return '<tr><td style="text-align:left">'+esc(p.desc||"")+'</td><td>'+(p.lap||"-")+'</td><td>'+ts+'</td></tr>';
+      }).join("")+
+      '</tbody></table></div>';
+  }
+  function warnListBlock(d){
+    var list=d.warningsDetail||[];
+    var cc=d.cornerCutWarnings||0, total=d.warnings||0, other=Math.max(0,total-cc);
+    if(!list.length && total<=0) return "";
+    var rows="";
+    if(list.length){
+      rows=list.map(function(w){
+        return '<tr><td style="text-align:left">'+esc(w.desc||"Aviso")+'</td><td>'+(w.lap||"-")+'</td></tr>';
+      }).join("");
+    } else if(total>0){
+      // Fallback when game only reports aggregate counts (no PENA warning events yet).
+      for(var i=0;i<cc;i++) rows+='<tr><td style="text-align:left">Corte de curva</td><td>-</td></tr>';
+      for(var j=0;j<other;j++) rows+='<tr><td style="text-align:left">Outro aviso</td><td>-</td></tr>';
+    }
+    var summary = total>0 ? (' <span class="age">('+total+' total)</span>') : '';
+    return '<div class="section-t">Avisos detalhados'+summary+'</div>'+
+      '<div class="laps" style="max-height:none"><table class="laptable">'+
+      '<thead><tr><th style="text-align:left">Aviso</th><th>Volta</th></tr></thead><tbody>'+
+      rows+
       '</tbody></table></div>';
   }
   function driverDetailHtml(d){
@@ -884,7 +919,7 @@
         '<div class="kv">'+
           '<div class="cell"><div class="k">Posicao</div><div class="v">P'+(d.pos||"-")+'</div></div>'+
           '<div class="cell"><div class="k">Grid</div><div class="v">P'+(d.grid||"-")+'</div></div>'+
-          '<div class="cell"><div class="k">Pneu</div><div class="v">'+(d.compound||"?")+' '+(d.tyreAge||0)+'v</div></div>'+
+          '<div class="cell"><div class="k">Pneu</div><div class="v">'+stintLabel(d)+'</div></div>'+
         '</div>'+
         pitPredBlock(d)+
         '<div class="section-t">ERS / Combustivel</div>'+
@@ -906,12 +941,13 @@
           corner("Asa diant. E",dm.wingFL)+corner("Asa diant. D",dm.wingFR)+
           corner("Asa traseira",dm.wingRear)+corner("Pior",dm.worst)+
         '</div>'+
-        '<div class="section-t">Punicoes e avisos</div>'+
+        '<div class="section-t">Punicoes e avisos (resumo)</div>'+
         '<div class="kv">'+
           '<div class="cell"><div class="k">Penalidade (s)</div><div class="v">+'+(d.penaltiesSec||0)+'s</div></div>'+
           '<div class="cell"><div class="k">Avisos corte</div><div class="v">'+(d.cornerCutWarnings||0)+'</div></div>'+
           '<div class="cell"><div class="k">Outros avisos</div><div class="v">'+warnOther+'</div></div>'+
         '</div>'+
+        warnListBlock(d)+
         penListBlock(d)+
         '<div class="section-t">Ultimas voltas</div>'+
         lapsTable(d.laps);
@@ -964,7 +1000,8 @@
   // ---- tabs ----
   function activateView(view, fromAuto){
     curView=view;
-    if(view==="trackmap"){ setTimeout(function(){ renderTrackMap(); }, 30); }
+    if(view==="trackmap"){ setTimeout(function(){ renderTrackMap(true); }, 30); }
+    if(view==="overlay") syncOverlayFrame();
     ["broadcast","qualy","trackmap","overlay"].forEach(function(v){
       var el=$("view-"+v); if(el){ if(v===view) el.classList.remove("hide"); else el.classList.add("hide"); }
     });
@@ -980,37 +1017,67 @@
 
   var tmSel=$("tmSelect");
   if(tmSel) tmSel.addEventListener("change",function(){
-    var v=this.value; tmCar = (v==="")?null:parseInt(v,10);
-    if(tmCar!=null && carMap[tmCar]) $("tmDetail").innerHTML=driverDetailHtml(carMap[tmCar]);
-    else $("tmDetail").innerHTML='<div class="empty">Selecione um piloto.</div>';
-    renderTrackMap();
+    var v=this.value;
+    if(v===""){ tmCar=null; $("tmDetail").innerHTML='<div class="empty">Selecione um piloto.</div>'; renderTrackMap(true); }
+    else selectTmCar(parseInt(v,10));
   });
-  var tmCanvas=$("trackCanvas");
-  if(tmCanvas) tmCanvas.addEventListener("click",function(ev){
-    var rect=this.getBoundingClientRect();
-    var mx=ev.clientX-rect.left, my=ev.clientY-rect.top;
+  function pickTmCar(mx,my){
     var bestD=1e9, best=null;
-    tmHits.forEach(function(h){ var dx=h.x-mx, dy=h.y-my, dd=dx*dx+dy*dy; if(dd<bestD){ bestD=dd; best=h; } });
-    if(best && bestD < 30*30){
-      tmCar=best.idx;
-      var sel=$("tmSelect"); if(sel) sel.value=String(tmCar);
-      if(carMap[tmCar]) $("tmDetail").innerHTML=driverDetailHtml(carMap[tmCar]);
-      renderTrackMap();
-    }
-  });
-  window.addEventListener("resize",function(){ if(curView==="trackmap") renderTrackMap(); });
+    tmHits.forEach(function(h){
+      var r=h.r||12, dx=h.x-mx, dy=h.y-my, dd=dx*dx+dy*dy;
+      if(dd < r*r && dd<bestD){ bestD=dd; best=h; }
+    });
+    return best;
+  }
+  function selectTmCar(idx){
+    tmCar=idx;
+    var sel=$("tmSelect"); if(sel) sel.value=String(tmCar);
+    if(carMap[tmCar]) $("tmDetail").innerHTML=driverDetailHtml(carMap[tmCar]);
+    else $("tmDetail").innerHTML='<div class="empty">Selecione um piloto.</div>';
+    renderTrackMap(true);
+  }
+  var tmCanvas=$("trackCanvas");
+  if(tmCanvas){
+    tmCanvas.addEventListener("mousedown",function(ev){
+      ev.preventDefault();
+      var rect=this.getBoundingClientRect();
+      var best=pickTmCar(ev.clientX-rect.left, ev.clientY-rect.top);
+      if(best) selectTmCar(best.idx);
+    });
+  }
+  window.addEventListener("resize",function(){ if(curView==="trackmap") renderTrackMap(true); });
   // Finalize check keeps running even if packets stop arriving (game closed).
   setInterval(function(){ if(state){ maybeFinalize(); applyFinalized(); } }, 15000);
 
-  (function buildOverlayLinks(){
-    var el=$("overlayLinks"); if(!el) return;
-    var base=location.origin && location.origin!=="null" ? location.origin : (location.protocol+"//"+location.host);
-    var ovs=[
-      ["tower","Timing Tower"],["lower","Faixa inferior"],["battle","Briga (head-to-head)"],
-      ["driver","Card de piloto"],["weather","Clima"],["gaps","Grafico de gaps"]
-    ];
-    el.innerHTML = ovs.map(function(o){
-      var url=base+"/overlays?view="+o[0];
+  var OVERLAY_VIEWS=[
+    ["tower","Timing Tower"],["lower","Faixa inferior"],["battle","Briga H2H"],
+    ["driver","Card piloto"],["weather","Clima"],["gaps","Grafico gaps"]
+  ];
+  function overlayBase(){
+    return (location.origin && location.origin!=="null") ? location.origin : (location.protocol+"//"+location.host);
+  }
+  function overlayUrl(view){ return overlayBase()+"/overlays?view="+view; }
+  function syncOverlayFrame(){
+    var fr=$("ovFrame"); if(!fr) return;
+    var want=overlayUrl(curOvView);
+    if(fr.getAttribute("data-src")!==want){ fr.setAttribute("data-src",want); fr.src=want; }
+  }
+  (function initOverlayTab(){
+    var tabs=$("ovSubtabs"); if(!tabs) return;
+    tabs.innerHTML=OVERLAY_VIEWS.map(function(o){
+      return '<button type="button" data-ov="'+o[0]+'">'+o[1]+'</button>';
+    }).join("");
+    tabs.querySelectorAll("button").forEach(function(b){
+      b.addEventListener("click",function(){
+        curOvView=b.getAttribute("data-ov");
+        tabs.querySelectorAll("button").forEach(function(x){ x.classList.toggle("active", x===b); });
+        syncOverlayFrame();
+      });
+    });
+    var first=tabs.querySelector("button"); if(first){ first.classList.add("active"); }
+    var el=$("overlayLinks");
+    if(el) el.innerHTML=OVERLAY_VIEWS.map(function(o){
+      var url=overlayUrl(o[0]);
       return '<div class="cell"><div class="k">'+o[1]+'</div>'+
         '<div class="v" style="font-size:12px"><a href="'+url+'" target="_blank" style="color:var(--accent-2);text-decoration:none">'+url+'</a></div></div>';
     }).join("");
