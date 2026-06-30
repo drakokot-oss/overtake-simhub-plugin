@@ -733,8 +733,13 @@
     var g=state.grid||[];
     g.forEach(function(d){
       if(d.x==null||d.z==null||d.lapDist==null) return;
-      var bucket=Math.round(d.lapDist/12); // ~12 m resolution closed loop
-      if(!trackPts[bucket]) trackPts[bucket]={x:d.x,z:d.z};
+      if(d.pitStatus) return;                          // skip pit-lane points (off the racing line)
+      if(Math.abs(d.x)<1 && Math.abs(d.z)<1) return;   // skip world origin (uninitialised position)
+      var bucket=Math.round(d.lapDist/12);             // ~12 m resolution closed loop
+      if(bucket<0) return;
+      var p=trackPts[bucket];
+      if(!p) trackPts[bucket]={x:d.x,z:d.z,n:1};
+      else { p.x=(p.x*p.n+d.x)/(p.n+1); p.z=(p.z*p.n+d.z)/(p.n+1); p.n++; } // average dampens jitter/outliers
     });
   }
   function renderTrackMap(force){
@@ -755,9 +760,9 @@
     var ctx=cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.clearRect(0,0,w,h);
 
-    // bounding box from accumulated outline + current cars
+    // bounding box from the accumulated outline + current (non-origin) cars
     var pts=[]; for(var k in trackPts){ if(trackPts.hasOwnProperty(k)) pts.push(trackPts[k]); }
-    g.forEach(function(d){ if(d.x!=null&&d.z!=null) pts.push({x:d.x,z:d.z}); });
+    g.forEach(function(d){ if(d.x!=null&&d.z!=null && !(Math.abs(d.x)<1&&Math.abs(d.z)<1)) pts.push({x:d.x,z:d.z}); });
     var hasPos = pts.length>0;
     $("tmInfo").textContent = hasPos ? (Object.keys(trackPts).length+" pts") : "sem posicao (Motion UDP)";
     if(!hasPos){
@@ -772,14 +777,27 @@
     var ox=(w-spanX*scale)/2, oz=(h-spanZ*scale)/2;
     function px(p){ return {x:ox+(p.x-minX)*scale, y:oz+(p.z-minZ)*scale}; }
 
-    // track outline (sorted by lap distance bucket)
+    // Track outline: connect buckets in lap-distance order, but BREAK the line on
+    // implausibly long segments (a single bad/pit/outlier point would otherwise draw
+    // two long spikes across the map — the "crossing lines" bug). Close the loop only
+    // when start and end buckets are actually adjacent (start/finish line).
     var keys=Object.keys(trackPts).map(Number).sort(function(a,b){return a-b;});
-    if(keys.length>8){
-      ctx.beginPath();
-      keys.forEach(function(kk,i){ var q=px(trackPts[kk]); if(i===0)ctx.moveTo(q.x,q.y); else ctx.lineTo(q.x,q.y); });
-      ctx.closePath();
-      ctx.strokeStyle="rgba(123,140,163,.35)"; ctx.lineWidth=10; ctx.lineJoin="round"; ctx.stroke();
-      ctx.strokeStyle="rgba(231,237,245,.10)"; ctx.lineWidth=2; ctx.stroke();
+    if(keys.length>12){
+      var op=keys.map(function(kk){ return px(trackPts[kk]); });
+      var segs=[];
+      for(var si=1;si<op.length;si++){ var ax=op[si].x-op[si-1].x, ay=op[si].y-op[si-1].y; segs.push(Math.sqrt(ax*ax+ay*ay)); }
+      var ss=segs.slice().sort(function(a,b){return a-b;});
+      var med=ss.length?ss[Math.floor(ss.length/2)]:1;
+      var maxSeg=Math.max(med*5, 28);
+      ctx.beginPath(); ctx.moveTo(op[0].x, op[0].y);
+      for(var oi=1;oi<op.length;oi++){
+        var bx=op[oi].x-op[oi-1].x, by=op[oi].y-op[oi-1].y, dist=Math.sqrt(bx*bx+by*by);
+        if(dist>maxSeg) ctx.moveTo(op[oi].x, op[oi].y); else ctx.lineTo(op[oi].x, op[oi].y);
+      }
+      var a0=op[0], b0=op[op.length-1], cx2=a0.x-b0.x, cy2=a0.y-b0.y;
+      if(Math.sqrt(cx2*cx2+cy2*cy2)<=maxSeg) ctx.lineTo(a0.x, a0.y);
+      ctx.strokeStyle="rgba(123,140,163,.4)"; ctx.lineWidth=9; ctx.lineJoin="round"; ctx.lineCap="round"; ctx.stroke();
+      ctx.strokeStyle="rgba(231,237,245,.12)"; ctx.lineWidth=2; ctx.stroke();
     }
     // cars
     tmHits=[];
