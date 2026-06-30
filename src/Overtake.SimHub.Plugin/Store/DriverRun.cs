@@ -142,6 +142,9 @@ namespace Overtake.SimHub.Plugin.Store
         public byte VisualTyreCompound;
         public byte ActualTyreCompound;
         public byte TyresAgeLaps;
+        // Live race UI: ordered list of visual compounds used this session (stints).
+        // A new entry is appended whenever the visual compound changes.
+        public readonly List<byte> TyreStints = new List<byte>();
 
         // Warnings tracking (from LapData packet 2)
         public int LastTotalWarnings;
@@ -220,6 +223,7 @@ namespace Overtake.SimHub.Plugin.Store
             LiveYaw = 0f;
             LiveLapDistanceM = 0f;
             LivePosValid = false;
+            TyreStints.Clear();
             PenaltySnapshots.Clear();
             FuelMixLast = 0;
             FuelCapacityKg = 0f;

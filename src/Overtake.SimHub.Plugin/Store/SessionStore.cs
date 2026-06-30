@@ -776,7 +776,14 @@ namespace Overtake.SimHub.Plugin.Store
                 }
 
                 // Live race UI: tyre compound + age (latest wins).
-                if (entries[i].VisualTyreCompound != 0) d.VisualTyreCompound = entries[i].VisualTyreCompound;
+                if (entries[i].VisualTyreCompound != 0)
+                {
+                    d.VisualTyreCompound = entries[i].VisualTyreCompound;
+                    // Stint history: append on each compound change (new tyre fitted).
+                    int n = d.TyreStints.Count;
+                    if (n == 0 || d.TyreStints[n - 1] != entries[i].VisualTyreCompound)
+                        d.TyreStints.Add(entries[i].VisualTyreCompound);
+                }
                 if (entries[i].ActualTyreCompound != 0) d.ActualTyreCompound = entries[i].ActualTyreCompound;
                 d.TyresAgeLaps = entries[i].TyresAgeLaps;
 

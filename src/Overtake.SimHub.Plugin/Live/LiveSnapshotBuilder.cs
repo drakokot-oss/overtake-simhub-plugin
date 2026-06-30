@@ -113,6 +113,7 @@ namespace Overtake.SimHub.Plugin.Live
                     { "intervalMs", d.LiveDeltaToCarFrontMs },
                     { "gapMs", d.LiveDeltaToLeaderMs },
                     { "compound", VisualCompoundCode(d.VisualTyreCompound) },
+                    { "stints", StintCodes(d) },
                     { "tyreAge", (int)d.TyresAgeLaps },
                     { "tyreWear", TyreWear(d) },
                     { "damage", Damage(d) },
@@ -476,6 +477,23 @@ namespace Overtake.SimHub.Plugin.Live
             return count;
         }
 
+        private static List<string> StintCodes(DriverRun d)
+        {
+            var list = new List<string>();
+            foreach (var c in d.TyreStints)
+            {
+                string code = VisualCompoundCode(c);
+                if (!string.IsNullOrEmpty(code)) list.Add(code);
+            }
+            // Fallback: if no stint history yet, show the current compound.
+            if (list.Count == 0)
+            {
+                string cur = VisualCompoundCode(d.VisualTyreCompound);
+                if (!string.IsNullOrEmpty(cur)) list.Add(cur);
+            }
+            return list;
+        }
+
         private static string VisualCompoundCode(byte v)
         {
             switch (v)
@@ -495,8 +513,8 @@ namespace Overtake.SimHub.Plugin.Live
             {
                 case 0: return "Nenhum";
                 case 1: return "Medio";
-                case 2: return "Hotlap";
-                case 3: return "Ultrapassagem";
+                case 2: return "Volta Rapida";
+                case 3: return "Boost";
                 default: return "-";
             }
         }
@@ -519,9 +537,27 @@ namespace Overtake.SimHub.Plugin.Live
 
         private static string GameLabel(SessionRun sess)
         {
+            // Content first (parity with .otk export): the F1 26 "2026 Season Pack"
+            // runs on the 2025 wire format, so packetFormat alone reports F1_25 even
+            // when the content is 2026. Detect via team ids (220-230) or Madring (42).
+            bool content2026 = false;
+            if (sess.TrackId.HasValue && sess.TrackId.Value == Packets.GameInfo.F1_26TrackIdMadring)
+                content2026 = true;
+            if (!content2026)
+            {
+                foreach (var te in sess.TeamByCarIdx.Values)
+                {
+                    if (te != null && Packets.GameInfo.IsF1_26TeamId(te.TeamId))
+                    {
+                        content2026 = true;
+                        break;
+                    }
+                }
+            }
+            if (content2026) return "F1_26";
+            if (sess.LastPacketFormat != 0)
+                return Packets.GameInfo.GameNameFromPacketFormat(sess.LastPacketFormat);
             if (sess.LastGameYear >= 26) return "F1_26";
-            if (sess.LastGameYear >= 25) return "F1_25";
-            if (sess.LastPacketFormat >= 2026) return "F1_26";
             return "F1_25";
         }
 

@@ -157,7 +157,14 @@
   .tmwrap { display:grid; grid-template-columns:1fr 360px; gap:14px; align-items:start; }
   @media (max-width:1200px){ .tmwrap { grid-template-columns:1fr; } }
   .tmcanvas-box { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:10px; }
-  #trackCanvas { width:100%; height:62vh; display:block; border-radius:10px; background:radial-gradient(700px 400px at 50% 40%, #121925, #0c1118); }
+  #trackCanvas { width:100%; height:62vh; display:block; border-radius:10px; background:radial-gradient(700px 400px at 50% 40%, #121925, #0c1118); cursor:pointer; }
+  /* tyre stint sequence */
+  .tyre.past { opacity:.5; transform:scale(.85); }
+  .stintsep { color:var(--txt-faint); font-size:10px; margin:0 1px; }
+  /* ERS bar + mode stack */
+  .erswrap { display:flex; flex-direction:column; gap:2px; min-width:110px; }
+  .ersline { display:flex; align-items:center; gap:6px; }
+  .ersmode { font-size:10px; color:var(--txt-dim); letter-spacing:.3px; }
   .tmtools { display:flex; align-items:center; gap:10px; padding:0 4px 10px; }
   .tmtools select { background:var(--panel-2); color:var(--txt); border:1px solid var(--line); border-radius:9px; padding:7px 10px; font-size:13px; font-weight:600; }
   .hide { display:none !important; }
@@ -298,6 +305,7 @@
   var finalized = false;     // race finished + grace window elapsed
   var tmCar = null;          // selected driver in Track Map
   var trackPts = {};         // lapDist bucket -> {x,z} accumulated track outline
+  var tmHits = [];           // last-rendered car screen positions for click hit-testing
   var RACE_GRACE_MS = 10*60*1000; // keep race data 10 min after it ends
   var raceEndedAt = 0;       // ms timestamp the race was detected as finished
 
@@ -478,11 +486,18 @@
     }).join("");
   }
 
+  function tyreBadge(c,extra){
+    var cls=("SMHIW".indexOf(c)>=0)?c:"U";
+    var lbl=(c&&c!=="U")?c:"?";
+    return '<span class="tyre '+cls+(extra||"")+'">'+lbl+'</span>';
+  }
   function tyreCell(d){
-    var c=d.compound||"U";
-    var cls = ("SMHIW".indexOf(c)>=0)?c:"U";
-    var label = c==="U"?"?":c;
-    return '<span class="compound"><span class="tyre '+cls+'">'+label+'</span><span class="age">'+(d.tyreAge||0)+'v</span></span>';
+    // Show every compound used this session (stints); last one is the current tyre.
+    var st = (d.stints&&d.stints.length)?d.stints:[d.compound||"U"];
+    var html = st.map(function(c,i){
+      return tyreBadge(c, (i===st.length-1)?"":" past");
+    }).join('<span class="stintsep">\u203a</span>');
+    return '<span class="compound">'+html+'<span class="age">'+(d.tyreAge||0)+'v</span></span>';
   }
   function wearCell(d){
     // Tied to the MOST worn tyre (worst corner), not the average.
@@ -500,7 +515,10 @@
   }
   function ersCell(d){
     var e=d.ersPct||0;
-    return '<span class="ersbar"><i style="width:'+Math.min(100,e)+'%;background:'+ersColor(e)+'"></i></span> <span class="age">'+e+'%</span>';
+    var mode=d.ersMode||"-";
+    return '<div class="erswrap">'+
+      '<div class="ersline"><span class="ersbar"><i style="width:'+Math.min(100,e)+'%;background:'+ersColor(e)+'"></i></span> <span class="age">'+e+'%</span></div>'+
+      '<div class="ersmode">'+esc(mode)+'</div></div>';
   }
   function dmgCell(d){
     var worst=(d.damage&&d.damage.worst)||0;
@@ -722,9 +740,11 @@
       ctx.strokeStyle="rgba(231,237,245,.10)"; ctx.lineWidth=2; ctx.stroke();
     }
     // cars
+    tmHits=[];
     g.forEach(function(d){
       if(d.x==null||d.z==null) return;
       var q=px(d), sel=(tmCar!=null&&d.carIdx===tmCar);
+      tmHits.push({idx:d.carIdx, x:q.x, y:q.y});
       ctx.beginPath(); ctx.arc(q.x,q.y, sel?9:6, 0, Math.PI*2);
       ctx.fillStyle=teamColorHex(d.team); ctx.fill();
       if(sel){ ctx.lineWidth=3; ctx.strokeStyle="#fff"; ctx.stroke(); }
@@ -769,6 +789,22 @@
     var pen=null;
     g.forEach(function(d){ if((d.penaltiesSec||0)>0 && (!pen || d.penaltiesSec>pen.penaltiesSec)) pen=d; });
     if(pen && pen.penaltiesSec>0) cards.push(card("rgba(255,84,112,.15)","var(--bad)","!","Maior punicao", pen.tag, "+"+pen.penaltiesSec+"s de penalidade"));
+
+    // Principais brigas (corrida): pares de posicao com intervalo < 1.0s
+    if((state.session||{}).mode==="race"){
+      var battles=[];
+      for(var bi=1;bi<g.length;bi++){
+        var cur=g[bi];
+        if(cur.intervalMs>0 && cur.intervalMs<1000 && cur.status!=="Abandonou"){
+          battles.push({a:g[bi-1], b:cur, gap:cur.intervalMs});
+        }
+      }
+      battles.sort(function(x,y){ return x.gap-y.gap; });
+      battles.slice(0,3).forEach(function(bt){
+        cards.push(card("rgba(255,77,46,.16)","var(--accent)","VS","Briga pela P"+bt.b.pos,
+          bt.a.tag+" vs "+bt.b.tag, "+"+(bt.gap/1000).toFixed(3)+"s"));
+      });
+    }
 
     el.innerHTML = cards.join("") || '<div class="empty">Sem destaques no momento.</div>';
   }
@@ -940,6 +976,19 @@
     if(tmCar!=null && carMap[tmCar]) $("tmDetail").innerHTML=driverDetailHtml(carMap[tmCar]);
     else $("tmDetail").innerHTML='<div class="empty">Selecione um piloto.</div>';
     renderTrackMap();
+  });
+  var tmCanvas=$("trackCanvas");
+  if(tmCanvas) tmCanvas.addEventListener("click",function(ev){
+    var rect=this.getBoundingClientRect();
+    var mx=ev.clientX-rect.left, my=ev.clientY-rect.top;
+    var bestD=1e9, best=null;
+    tmHits.forEach(function(h){ var dx=h.x-mx, dy=h.y-my, dd=dx*dx+dy*dy; if(dd<bestD){ bestD=dd; best=h; } });
+    if(best && bestD < 30*30){
+      tmCar=best.idx;
+      var sel=$("tmSelect"); if(sel) sel.value=String(tmCar);
+      if(carMap[tmCar]) $("tmDetail").innerHTML=driverDetailHtml(carMap[tmCar]);
+      renderTrackMap();
+    }
   });
   window.addEventListener("resize",function(){ if(curView==="trackmap") renderTrackMap(); });
   // Finalize check keeps running even if packets stop arriving (game closed).
