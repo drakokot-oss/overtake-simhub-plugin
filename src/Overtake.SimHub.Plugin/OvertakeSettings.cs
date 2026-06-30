@@ -20,7 +20,8 @@ namespace Overtake.SimHub.Plugin
         // when new fields are introduced (so missing-from-save fields like AutoCleanAfterExport
         // get the intended default, not C# zero-value).
         // 0 = pre-v1.1.31, 1 = v1.1.31 (added AutoCleanAfterExport),
-        // 2 = test build (added Race UI web server settings).
+        // 2 = test build (added Race UI web server settings),
+        // 3 = test build (added live cloud-broadcast settings).
         public int SettingsSchemaVersion;
 
         // Race UI (web) — Rota B. Local web server + WebSocket serving the live
@@ -28,6 +29,13 @@ namespace Overtake.SimHub.Plugin
         public bool RaceUiEnabled;
         public int RaceUiPort;
         public bool RaceUiAllowLan;
+
+        // Live cloud broadcast (overtakef1) — sends the same read-only snapshot to the
+        // portal via the live-ingest Edge Function. Token is generated in the portal
+        // (Perfil > Transmissao / SimHub). BaseUrl empty = use the built-in default.
+        // Does not touch the .otk pipeline.
+        public string LiveBroadcastToken;
+        public string LiveBroadcastBaseUrl;
 
         public OvertakeSettings()
         {
@@ -37,10 +45,12 @@ namespace Overtake.SimHub.Plugin
             AutoExportJson = true;
             AutoCleanAfterExport = true;
             LastExportPath = "";
-            SettingsSchemaVersion = 2;
+            SettingsSchemaVersion = 3;
             RaceUiEnabled = true;
             RaceUiPort = 8088;
             RaceUiAllowLan = false;
+            LiveBroadcastToken = "";
+            LiveBroadcastBaseUrl = "";
         }
     }
 }

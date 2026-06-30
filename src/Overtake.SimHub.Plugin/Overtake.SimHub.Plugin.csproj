@@ -100,6 +100,7 @@
     <Compile Include="Packets\WireLayoutProbe.cs" />
     <Compile Include="Packets\PacketStrings.cs" />
     <Compile Include="Live\LiveSnapshotBuilder.cs" />
+    <Compile Include="Live\LiveBroadcaster.cs" />
     <Compile Include="Live\RaceWebServer.cs" />
     <Compile Include="Security\KeyStore.cs" />
     <Compile Include="Security\OtkWriter.cs" />
