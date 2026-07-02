@@ -59,7 +59,7 @@ namespace Overtake.SimHub.Plugin
         // Live cloud broadcast (overtakef1) — streams the same snapshot to the portal.
         private LiveBroadcaster _live;
         private long _lastLivePushMs;
-        private const long LivePublishIntervalMs = 400; // ~2-3 Hz to the cloud
+        private const long LivePublishIntervalMs = 1000; // ~1 Hz to the cloud (fan-out N+1: corta ~2,5x o custo de mensagens; imperceptivel num placar)
         private string _lastLiveJson;
 
         public PluginManager PluginManager { get; set; }
@@ -629,6 +629,24 @@ namespace Overtake.SimHub.Plugin
                     _settings.LastExportPath = path;
                     this.SaveCommonSettings("OvertakeSettings", _settings);
                     global::SimHub.Logging.Current.Info(string.Format("[Overtake] Auto-exported to {0}", path));
+                    // Auto-upload do OTK pos-live: se esta captura foi transmitida ao vivo, sobe o
+                    // resultado pro site (staging aguardando confirmacao do admin). Best-effort.
+                    if (_live != null && _store != null && !string.IsNullOrEmpty(_store.LiveBroadcastSessionId))
+                    {
+                        try
+                        {
+                            byte[] otkBytes = File.ReadAllBytes(path);
+                            bool up = _live.PostOtk(_store.LiveBroadcastSessionId, otkBytes);
+                            global::SimHub.Logging.Current.Info(string.Format(
+                                "[Overtake] Auto-upload do OTK pos-live: {0}",
+                                up ? "ok" : ("falhou: " + _live.LastError)));
+                        }
+                        catch (Exception exUp)
+                        {
+                            global::SimHub.Logging.Current.Error(string.Format(
+                                "[Overtake] Auto-upload do OTK falhou: {0}", exUp.Message));
+                        }
+                    }
                     return true;
                 }
                 return false;

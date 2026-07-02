@@ -48,6 +48,8 @@ namespace Overtake.SimHub.Plugin.Live
 
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         private int _pushBusy; // single-in-flight guard (Interlocked) for streaming backpressure
+        private int _consecutiveFails; // circuit-breaker: falhas seguidas no push
+        private long _backoffUntilMs;  // até quando pausar o push (backoff exponencial)
 
         public LiveBroadcaster()
         {
@@ -284,16 +286,69 @@ namespace Overtake.SimHub.Plugin.Live
         public void PushSnapshot(string snapshotJson)
         {
             if (!Active || string.IsNullOrEmpty(LiveSessionId) || string.IsNullOrEmpty(snapshotJson)) return;
+            // Backoff após falhas transientes: não martelar o servidor (evita thundering-herd
+            // quando o backend dá um soluço — o 500 transiente que já observamos).
+            if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < _backoffUntilMs) return;
             if (Interlocked.CompareExchange(ref _pushBusy, 1, 0) != 0) return;
             string body = "{\"token\":" + J(Token) + ",\"liveSessionId\":" + J(LiveSessionId)
                 + ",\"snapshot\":" + snapshotJson + ",\"ended\":false}";
             Task.Run(() =>
             {
-                try { Post("live-ingest", body, 8000); LastError = null; LastPushMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); }
-                catch (WebException wex) { LastError = Describe(wex); }
-                catch (Exception ex) { LastError = ex.Message; }
+                try
+                {
+                    Post("live-ingest", body, 8000);
+                    LastError = null;
+                    LastPushMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    _consecutiveFails = 0;
+                    _backoffUntilMs = 0;
+                }
+                catch (WebException wex) { LastError = Describe(wex); HandlePushFailure(wex); }
+                catch (Exception ex) { LastError = ex.Message; HandlePushFailure(null); }
                 finally { Interlocked.Exchange(ref _pushBusy, 0); }
             });
+        }
+
+        /// <summary>
+        /// Circuit-breaker do stream: em erro de AUTH (401/403/404) para de vez (token revogado /
+        /// sem permissão / sessão sumiu — re-tentar não adianta). Em erro transiente (5xx/timeout)
+        /// aplica backoff exponencial (400ms→…→10s) e desiste após ~8 falhas seguidas. Evita que
+        /// um broadcaster problemático fique martelando o edge indefinidamente.
+        /// </summary>
+        private void HandlePushFailure(WebException wex)
+        {
+            int code = 0;
+            if (wex != null) { var r = wex.Response as HttpWebResponse; if (r != null) code = (int)r.StatusCode; }
+            if (code == 401 || code == 403 || code == 404) { Active = false; return; }
+            _consecutiveFails++;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long delay = (long)Math.Min(10000, 400 * Math.Pow(2, Math.Min(_consecutiveFails, 6)));
+            _backoffUntilMs = now + delay;
+            if (_consecutiveFails >= 8) Active = false;
+        }
+
+        /// <summary>
+        /// Auto-upload do .otk pós-live: envia os bytes do arquivo gerado pro servidor, que faz
+        /// STAGING do resultado na corrida vinculada (aguardando confirmação do admin). Retorna
+        /// true no sucesso. Contract: POST /functions/v1/live-otk-ingest { token, liveSessionId, otk(base64) }.
+        /// </summary>
+        public bool PostOtk(string liveSessionId, byte[] otkBytes)
+        {
+            LastError = null;
+            if (string.IsNullOrEmpty(Token)) { LastError = "token vazio"; return false; }
+            if (string.IsNullOrEmpty(liveSessionId) || otkBytes == null || otkBytes.Length == 0) { LastError = "otk/sessao vazios"; return false; }
+            try
+            {
+                string b64 = Convert.ToBase64String(otkBytes);
+                var sb = new StringBuilder();
+                sb.Append("{\"token\":").Append(J(Token));
+                sb.Append(",\"liveSessionId\":").Append(J(liveSessionId));
+                sb.Append(",\"otk\":").Append(J(b64));
+                sb.Append('}');
+                Post("live-otk-ingest", sb.ToString(), 30000); // OTK ~100-200KB em base64 → timeout maior
+                return true;
+            }
+            catch (WebException wex) { LastError = Describe(wex); return false; }
+            catch (Exception ex) { LastError = ex.Message; return false; }
         }
 
         /// <summary>Final ingest with ended=true (freezes the result on the portal), then go idle.</summary>
