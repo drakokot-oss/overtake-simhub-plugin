@@ -297,22 +297,32 @@
                     <ComboBox x:Name="CmbGrid" Margin="0,0,0,8"
                               SelectionChanged="CmbGrid_SelectionChanged" />
 
-                    <CheckBox x:Name="ChkNewRace"
-                              Content="Criar uma corrida nova agora"
-                              Margin="0,0,0,8"
-                              Checked="ChkNewRace_Changed"
-                              Unchecked="ChkNewRace_Changed" />
-
                     <StackPanel x:Name="PanelExistingRace">
-                        <TextBlock Text="Corrida" FontWeight="Bold" Margin="0,0,0,3" />
-                        <ComboBox x:Name="CmbRace" Margin="0,0,0,8" />
+                        <TextBlock Text="Corrida agendada" FontWeight="Bold" Margin="0,0,0,3" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <ComboBox x:Name="CmbRace" Width="320" Margin="0,0,10,0" />
+                            <Button x:Name="BtnRefreshRaces" Content="ATUALIZAR" Padding="12,5"
+                                    Click="BtnRefreshRaces_Click" />
+                        </StackPanel>
+                        <Button x:Name="BtnToggleNewRace" Content="Criar nova corrida..."
+                                Padding="12,5" HorizontalAlignment="Left" Margin="0,0,0,8"
+                                Click="BtnToggleNewRace_Click" />
                     </StackPanel>
 
-                    <StackPanel x:Name="PanelNewRace" Visibility="Collapsed">
-                        <TextBlock Text="Nome da corrida" FontWeight="Bold" Margin="0,0,0,3" />
-                        <TextBox x:Name="TxtNewRaceName" Margin="0,0,0,8" VerticalContentAlignment="Center" />
-                        <TextBlock Text="Pista (opcional)" FontWeight="Bold" Margin="0,0,0,3" />
-                        <TextBox x:Name="TxtNewRaceTrack" Margin="0,0,0,8" VerticalContentAlignment="Center" />
+                    <StackPanel x:Name="PanelNewRace" Visibility="Collapsed" Margin="0,0,0,8">
+                        <TextBlock Text="Pista (lista oficial)" FontWeight="Bold" Margin="0,0,0,3" />
+                        <ComboBox x:Name="CmbNewTrack" Margin="0,0,0,8" />
+                        <TextBlock Text="Data" FontWeight="Bold" Margin="0,0,0,3" />
+                        <DatePicker x:Name="DpNewRaceDate" Margin="0,0,0,8" HorizontalAlignment="Left" />
+                        <TextBlock Text="Hora (HH:MM)" FontWeight="Bold" Margin="0,0,0,3" />
+                        <TextBox x:Name="TxtNewRaceTime" Width="80" Text="20:00"
+                                 VerticalContentAlignment="Center" HorizontalAlignment="Left" Margin="0,0,0,8" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="BtnCreateRace" Content="CRIAR CORRIDA" Padding="14,5"
+                                    Click="BtnCreateRace_Click" />
+                            <Button x:Name="BtnCancelNewRace" Content="Cancelar" Padding="12,5"
+                                    Margin="10,0,0,0" Click="BtnToggleNewRace_Click" />
+                        </StackPanel>
                     </StackPanel>
 
                     <TextBlock Text="Tipo de sessao" FontWeight="Bold" Margin="0,0,0,3" />

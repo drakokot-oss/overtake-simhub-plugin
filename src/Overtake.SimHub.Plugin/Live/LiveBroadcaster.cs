@@ -10,6 +10,7 @@ using System.Web.Script.Serialization;
 namespace Overtake.SimHub.Plugin.Live
 {
     public class EligibleRace { public string RaceId; public string Name; public string Track; public string Status; }
+    public class ScheduledRace { public string Id; public string Name; public string Track; public string RaceDate; public string ScheduledTime; }
     public class EligibleGrid { public string GridId; public string GridName; public List<EligibleRace> Races = new List<EligibleRace>(); }
     public class EligibleLeague { public string LeagueId; public string LeagueName; public List<EligibleGrid> Grids = new List<EligibleGrid>(); }
 
@@ -21,8 +22,10 @@ namespace Overtake.SimHub.Plugin.Live
     /// Contract: §7 of docs/LIVE-AO-VIVO-IMPLEMENTACAO.md in f1-race-hub.
     ///  - apikey header = public anon key (required by the Supabase gateway).
     ///  - credential = the broadcast token (otklive_…), sent in the JSON body.
-    ///  - live-start mode=list -> eligible leagues/grids/races.
-    ///  - live-start (leagueId/gridId + raceId|createRace) -> { liveSessionId, channel }.
+    ///  - live-start mode=list -> eligible leagues/grids.
+    ///  - live-start (leagueId/gridId + raceId) -> { liveSessionId, channel }. Always an EXISTING race.
+    ///  - GET /rest/v1/races?grid_id=eq..&status=eq.scheduled -> scheduled races (public read).
+    ///  - POST /rest/v1/rpc/plugin_create_scheduled_race -> creates a scheduled race (option B).
     ///  - live-ingest { token, liveSessionId, snapshot, ended } at ~2-3 Hz; ended=true closes.
     /// </summary>
     public class LiveBroadcaster
@@ -37,6 +40,9 @@ namespace Overtake.SimHub.Plugin.Live
 
         public bool Active { get; private set; }
         public string LiveSessionId { get; private set; }
+        public string BoundRaceId { get; private set; }
+        public string BoundLeagueId { get; private set; }
+        public string BoundGridId { get; private set; }
         public string LastError { get; private set; }
         public long LastPushMs { get; private set; }
 
@@ -48,32 +54,42 @@ namespace Overtake.SimHub.Plugin.Live
             try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
         }
 
-        private string Endpoint(string fn)
+        // Project origin (https://<ref>.supabase.co) derived from BaseUrl, so we can hit
+        // both /functions/v1/ (edge functions) and /rest/v1/ (PostgREST + rpc).
+        private string Origin()
         {
             string b = string.IsNullOrEmpty(BaseUrl) ? DefaultBaseUrl : BaseUrl;
-            if (!b.EndsWith("/")) b += "/";
-            return b + fn;
+            try { return new Uri(b).GetLeftPart(UriPartial.Authority); }
+            catch { return "https://zjmnwmfbvqrzayousfxr.supabase.co"; }
         }
+        private string FnEndpoint(string fn) { return Origin() + "/functions/v1/" + fn; }
+        private string RestEndpoint(string path) { return Origin() + "/rest/v1/" + path; }
 
-        // Synchronous POST. Returns response body; throws on HTTP error (caller maps to LastError).
-        private string Post(string fn, string bodyJson, int timeoutMs)
+        // Synchronous request. Returns response body; throws on HTTP error (caller maps it).
+        private string Send(string method, string url, string bodyJson, int timeoutMs)
         {
-            var req = (HttpWebRequest)WebRequest.Create(Endpoint(fn));
-            req.Method = "POST";
-            req.ContentType = "application/json";
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.Method = method;
             req.Timeout = timeoutMs;
             req.ReadWriteTimeout = timeoutMs;
             req.Headers["apikey"] = AnonKey ?? "";
             req.Headers["Authorization"] = "Bearer " + (AnonKey ?? "");
             req.UserAgent = "OvertakeTelemetry/" + OvertakePlugin.PluginVersion;
-            byte[] payload = Encoding.UTF8.GetBytes(bodyJson ?? "");
-            req.ContentLength = payload.Length;
-            using (var s = req.GetRequestStream()) s.Write(payload, 0, payload.Length);
+            if (method != "GET" && bodyJson != null)
+            {
+                req.ContentType = "application/json";
+                byte[] payload = Encoding.UTF8.GetBytes(bodyJson);
+                req.ContentLength = payload.Length;
+                using (var s = req.GetRequestStream()) s.Write(payload, 0, payload.Length);
+            }
             using (var resp = (HttpWebResponse)req.GetResponse())
             using (var rs = resp.GetResponseStream())
             using (var rd = new StreamReader(rs, Encoding.UTF8))
                 return rd.ReadToEnd();
         }
+
+        private string Post(string fn, string bodyJson, int timeoutMs)
+        { return Send("POST", FnEndpoint(fn), bodyJson, timeoutMs); }
 
         // Minimal JSON string escaping (token/ids/names embedded by hand).
         private static string J(string s)
@@ -139,25 +155,23 @@ namespace Overtake.SimHub.Plugin.Live
         }
 
         /// <summary>
-        /// Go live. Pass raceId for an existing race, OR newRaceName/newRaceTrack to create
-        /// one on the fly (leave raceId null/empty). Returns false on error (see LastError).
+        /// Go live on an EXISTING race (raceId required — no more freeform createRace).
+        /// Use ListScheduledRaces / CreateScheduledRace to obtain the raceId first.
+        /// Returns false on error (see LastError).
         /// </summary>
-        public bool GoLive(string leagueId, string gridId, string raceId, string newRaceName, string newRaceTrack, string sessionType)
+        public bool GoLive(string leagueId, string gridId, string raceId, string sessionType)
         {
             LastError = null;
             if (string.IsNullOrEmpty(Token)) { LastError = "token vazio"; return false; }
             if (string.IsNullOrEmpty(leagueId) || string.IsNullOrEmpty(gridId)) { LastError = "selecione liga e grid"; return false; }
+            if (string.IsNullOrEmpty(raceId)) { LastError = "selecione (ou crie) uma corrida"; return false; }
             try
             {
                 var sb = new StringBuilder();
                 sb.Append("{\"token\":").Append(J(Token));
                 sb.Append(",\"leagueId\":").Append(J(leagueId));
                 sb.Append(",\"gridId\":").Append(J(gridId));
-                if (!string.IsNullOrEmpty(raceId))
-                    sb.Append(",\"raceId\":").Append(J(raceId));
-                else
-                    sb.Append(",\"createRace\":{\"name\":").Append(J(newRaceName))
-                      .Append(",\"track\":").Append(J(newRaceTrack)).Append(",\"scheduledTime\":null}");
+                sb.Append(",\"raceId\":").Append(J(raceId));
                 sb.Append(",\"sessionType\":").Append(J(string.IsNullOrEmpty(sessionType) ? "race" : sessionType));
                 sb.Append('}');
                 string resp = Post("live-start", sb.ToString(), 15000);
@@ -165,12 +179,103 @@ namespace Overtake.SimHub.Plugin.Live
                 string sid = S(root, "liveSessionId");
                 if (string.IsNullOrEmpty(sid)) { LastError = "resposta sem liveSessionId"; return false; }
                 LiveSessionId = sid;
+                BoundRaceId = raceId;
+                BoundLeagueId = leagueId;
+                BoundGridId = gridId;
                 Active = true;
                 return true;
             }
             catch (WebException wex) { LastError = Describe(wex); return false; }
             catch (Exception ex) { LastError = ex.Message; return false; }
         }
+
+        /// <summary>
+        /// List the grid's SCHEDULED races (public read via PostgREST). Returns null on error.
+        /// Contract 1: GET /rest/v1/races?grid_id=eq.{gridId}&amp;status=eq.scheduled&amp;select=...&amp;order=race_date.asc
+        /// </summary>
+        public List<ScheduledRace> ListScheduledRaces(string gridId)
+        {
+            LastError = null;
+            if (string.IsNullOrEmpty(gridId)) { LastError = "grid vazio"; return null; }
+            try
+            {
+                string url = RestEndpoint("races?grid_id=eq." + Uri.EscapeDataString(gridId)
+                    + "&status=eq.scheduled&select=id,name,track,race_date,scheduled_time&order=race_date.asc");
+                string resp = Send("GET", url, null, 15000);
+                var arr = _json.DeserializeObject(resp) as object[];
+                var list = new List<ScheduledRace>();
+                if (arr == null) return list;
+                foreach (var it in arr)
+                {
+                    var m = it as Dictionary<string, object>; if (m == null) continue;
+                    list.Add(new ScheduledRace
+                    {
+                        Id = S(m, "id"),
+                        Name = S(m, "name"),
+                        Track = S(m, "track"),
+                        RaceDate = S(m, "race_date"),
+                        ScheduledTime = S(m, "scheduled_time")
+                    });
+                }
+                return list;
+            }
+            catch (WebException wex) { LastError = Describe(wex); return null; }
+            catch (Exception ex) { LastError = ex.Message; return null; }
+        }
+
+        /// <summary>
+        /// Create a new scheduled race via the server RPC (option B). Returns the new raceId,
+        /// or null on error. Contract 3: POST /rest/v1/rpc/plugin_create_scheduled_race
+        /// body { _token, _grid_id, _track, _race_date (ISO date), _scheduled_time "HH:MM" }.
+        /// NOTE: the RPC is provided by the site; until it exists this returns null with a 404.
+        /// </summary>
+        public string CreateScheduledRace(string gridId, string track, string raceDateIso, string timeHHMM)
+        {
+            LastError = null;
+            if (string.IsNullOrEmpty(Token)) { LastError = "token vazio"; return null; }
+            if (string.IsNullOrEmpty(gridId)) { LastError = "grid vazio"; return null; }
+            if (string.IsNullOrEmpty(track)) { LastError = "selecione a pista"; return null; }
+            if (string.IsNullOrEmpty(raceDateIso)) { LastError = "informe a data"; return null; }
+            try
+            {
+                var sb = new StringBuilder();
+                sb.Append("{\"_token\":").Append(J(Token));
+                sb.Append(",\"_grid_id\":").Append(J(gridId));
+                sb.Append(",\"_track\":").Append(J(track));
+                sb.Append(",\"_race_date\":").Append(J(raceDateIso));
+                sb.Append(",\"_scheduled_time\":").Append(J(string.IsNullOrEmpty(timeHHMM) ? null : timeHHMM));
+                sb.Append('}');
+                string resp = Send("POST", RestEndpoint("rpc/plugin_create_scheduled_race"), sb.ToString(), 15000);
+                // RPC may return {"race_id":"uuid"}, a bare "uuid", or [{"race_id":"uuid"}].
+                var obj = _json.DeserializeObject(resp);
+                string id = ExtractRaceId(obj);
+                if (string.IsNullOrEmpty(id)) { LastError = "resposta sem race_id"; return null; }
+                return id;
+            }
+            catch (WebException wex) { LastError = Describe(wex); return null; }
+            catch (Exception ex) { LastError = ex.Message; return null; }
+        }
+
+        private static string ExtractRaceId(object obj)
+        {
+            var d = obj as Dictionary<string, object>;
+            if (d != null) return S(d, "race_id") ?? S(d, "id");
+            var arr = obj as object[];
+            if (arr != null && arr.Length > 0) return ExtractRaceId(arr[0]);
+            return obj as string;
+        }
+
+        /// <summary>Canonical track names — MUST match the site list exactly (tracksMatch).</summary>
+        public static readonly string[] CanonicalTracks = new[]
+        {
+            "Bahrain International Circuit", "Jeddah Corniche Circuit", "Albert Park Circuit",
+            "Suzuka International Racing Course", "Shanghai International Circuit", "Miami International Autodrome",
+            "Autodromo Enzo e Dino Ferrari", "Circuit de Monaco", "Circuit de Barcelona-Catalunya", "Madring (Madrid)",
+            "Circuit Gilles Villeneuve", "Red Bull Ring", "Red Bull Ring Reverse", "Silverstone Circuit", "Silverstone Reverse",
+            "Hungaroring", "Circuit de Spa-Francorchamps", "Circuit Zandvoort", "Zandvoort Reverse", "Autodromo Nazionale Monza",
+            "Marina Bay Street Circuit", "Lusail International Circuit", "Circuit of the Americas",
+            "Autodromo Hermanos Rodriguez", "Interlagos", "Las Vegas Strip Circuit", "Yas Marina Circuit"
+        };
 
         /// <summary>
         /// Fire-and-forget snapshot push with single-in-flight backpressure: if the previous

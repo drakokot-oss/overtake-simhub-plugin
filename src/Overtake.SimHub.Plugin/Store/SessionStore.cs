@@ -19,6 +19,12 @@ namespace Overtake.SimHub.Plugin.Store
 
         public bool Connected;
         public ulong? SessionUid;
+        // Live broadcast binding (set when the session went on air via the portal flow).
+        // Stamped into the OTK `capture` block so the site can auto-link the file to the race.
+        public string LiveRaceId;
+        public string LiveLeagueId;
+        public string LiveGridId;
+        public string LiveBroadcastSessionId;
         public long StartedAtMs;
         public long LastPacketMs;
         public Dictionary<int, int> PacketCounts = new Dictionary<int, int>();
@@ -204,6 +210,10 @@ namespace Overtake.SimHub.Plugin.Store
             _fullMyTeamStreak = 0;
             ResolvedBodyWireFormat = null;
             SessionUid = null;
+            LiveRaceId = null;
+            LiveLeagueId = null;
+            LiveGridId = null;
+            LiveBroadcastSessionId = null;
             StartedAtMs = NowMs();
             LastPacketMs = 0;
             PacketCounts.Clear();

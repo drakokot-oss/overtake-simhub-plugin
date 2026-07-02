@@ -256,12 +256,34 @@ namespace Overtake.SimHub.Plugin
             return _live.ListEligible();
         }
 
-        /// <summary>Open a live session (existing race via raceId, or createRace via name/track).</summary>
-        public bool LiveGoLive(string leagueId, string gridId, string raceId,
-            string newRaceName, string newRaceTrack, string sessionType)
+        /// <summary>Scheduled races of a grid (PostgREST read). Null on error.</summary>
+        public System.Collections.Generic.List<ScheduledRace> LiveListScheduledRaces(string gridId)
         {
             ConfigureLive();
-            return _live.GoLive(leagueId, gridId, raceId, newRaceName, newRaceTrack, sessionType);
+            return _live.ListScheduledRaces(gridId);
+        }
+
+        /// <summary>Create a scheduled race via the server RPC (option B). Returns raceId or null.</summary>
+        public string LiveCreateScheduledRace(string gridId, string track, string raceDateIso, string timeHHMM)
+        {
+            ConfigureLive();
+            return _live.CreateScheduledRace(gridId, track, raceDateIso, timeHHMM);
+        }
+
+        /// <summary>Open a live session on an EXISTING race (raceId required).</summary>
+        public bool LiveGoLive(string leagueId, string gridId, string raceId, string sessionType)
+        {
+            ConfigureLive();
+            bool ok = _live.GoLive(leagueId, gridId, raceId, sessionType);
+            if (ok && _store != null)
+            {
+                // Stamp the capture so the exported OTK carries the race binding.
+                _store.LiveRaceId = raceId;
+                _store.LiveLeagueId = leagueId;
+                _store.LiveGridId = gridId;
+                _store.LiveBroadcastSessionId = _live.LiveSessionId;
+            }
+            return ok;
         }
 
         /// <summary>Close the live session (sends ended=true with the last snapshot).</summary>

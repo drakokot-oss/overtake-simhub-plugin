@@ -897,6 +897,14 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "source", new Dictionary<string, object>() },
             };
 
+            // Live broadcast binding (additive; only when the session went on air via the
+            // portal flow). Lets the site auto-link this OTK to the right race on upload.
+            // Does NOT change the league-1.1 schema otherwise.
+            if (!string.IsNullOrEmpty(store.LiveRaceId)) capture["raceId"] = store.LiveRaceId;
+            if (!string.IsNullOrEmpty(store.LiveBroadcastSessionId)) capture["liveSessionId"] = store.LiveBroadcastSessionId;
+            if (!string.IsNullOrEmpty(store.LiveLeagueId)) capture["leagueId"] = store.LiveLeagueId;
+            if (!string.IsNullOrEmpty(store.LiveGridId)) capture["gridId"] = store.LiveGridId;
+
             // Participants will be rebuilt from session outputs so they match actual drivers shown
             var allParticipants = new List<string>();
 

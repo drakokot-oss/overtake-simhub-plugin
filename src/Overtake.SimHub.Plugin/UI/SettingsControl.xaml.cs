@@ -24,6 +24,7 @@ namespace Overtake.SimHub.Plugin.UI
         private static readonly SolidColorBrush DimBrush = new SolidColorBrush(Color.FromRgb(0x7B, 0x8C, 0xA3));
         private long _lastExportClickMs;
         private List<EligibleLeague> _eligible;
+        private string _pendingSelectRaceId; // race to auto-select after a create/reload
 
         public SettingsControl()
         {
@@ -623,24 +624,121 @@ namespace Overtake.SimHub.Plugin.UI
 
         private void CmbGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            CmbRace.Items.Clear();
-            var lg = FindLeague(SelectedTag(CmbLeague));
-            var g = FindGrid(lg, SelectedTag(CmbGrid));
-            if (g == null) return;
-            foreach (var r in g.Races)
-            {
-                string label = (r.Name ?? r.RaceId);
-                if (!string.IsNullOrEmpty(r.Track)) label += " - " + r.Track;
-                CmbRace.Items.Add(MakeItem(label, r.RaceId));
-            }
-            if (CmbRace.Items.Count > 0) CmbRace.SelectedIndex = 0;
+            LoadScheduledRaces(SelectedTag(CmbGrid));
         }
 
-        private void ChkNewRace_Changed(object sender, RoutedEventArgs e)
+        // Fetch the grid's SCHEDULED races (PostgREST) and fill the dropdown.
+        private void LoadScheduledRaces(string gridId)
         {
-            bool newRace = ChkNewRace.IsChecked == true;
-            PanelNewRace.Visibility = newRace ? Visibility.Visible : Visibility.Collapsed;
-            PanelExistingRace.Visibility = newRace ? Visibility.Collapsed : Visibility.Visible;
+            CmbRace.Items.Clear();
+            if (_plugin == null || string.IsNullOrEmpty(gridId)) return;
+            LblLiveStatus.Text = "Carregando corridas agendadas...";
+            LblLiveStatus.Foreground = DimBrush;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                var races = _plugin.LiveListScheduledRaces(gridId);
+                string err = _plugin.LiveLastError;
+                Dispatcher.Invoke(() =>
+                {
+                    if (SelectedTag(CmbGrid) != gridId) return; // grid changed while loading
+                    CmbRace.Items.Clear();
+                    if (races == null)
+                    {
+                        LblLiveStatus.Text = "Falha ao listar corridas: " + (err ?? "erro");
+                        LblLiveStatus.Foreground = RedBrush;
+                        return;
+                    }
+                    foreach (var r in races)
+                    {
+                        string label = string.IsNullOrEmpty(r.Name) ? "(sem nome)" : r.Name;
+                        if (!string.IsNullOrEmpty(r.RaceDate)) label += " - " + r.RaceDate;
+                        if (!string.IsNullOrEmpty(r.Track)) label += " - " + r.Track;
+                        CmbRace.Items.Add(MakeItem(label, r.Id));
+                    }
+                    if (!string.IsNullOrEmpty(_pendingSelectRaceId))
+                    {
+                        for (int i = 0; i < CmbRace.Items.Count; i++)
+                        {
+                            var it = CmbRace.Items[i] as ComboBoxItem;
+                            if (it != null && (it.Tag as string) == _pendingSelectRaceId) { CmbRace.SelectedIndex = i; break; }
+                        }
+                        _pendingSelectRaceId = null;
+                    }
+                    else if (CmbRace.Items.Count > 0) CmbRace.SelectedIndex = 0;
+                    LblLiveStatus.Text = races.Count == 0
+                        ? "Nenhuma corrida agendada neste grid. Use 'Criar nova corrida'."
+                        : races.Count + " corrida(s) agendada(s).";
+                    LblLiveStatus.Foreground = races.Count == 0 ? YellowBrush : DimBrush;
+                });
+            });
+        }
+
+        private void BtnRefreshRaces_Click(object sender, RoutedEventArgs e)
+        {
+            LoadScheduledRaces(SelectedTag(CmbGrid));
+        }
+
+        private void BtnToggleNewRace_Click(object sender, RoutedEventArgs e)
+        {
+            bool show = PanelNewRace.Visibility != Visibility.Visible;
+            PanelNewRace.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (show)
+            {
+                if (CmbNewTrack.Items.Count == 0)
+                {
+                    foreach (var t in LiveBroadcaster.CanonicalTracks) CmbNewTrack.Items.Add(t);
+                    CmbNewTrack.SelectedIndex = 0;
+                }
+                if (DpNewRaceDate.SelectedDate == null) DpNewRaceDate.SelectedDate = DateTime.Today;
+            }
+        }
+
+        private void BtnCreateRace_Click(object sender, RoutedEventArgs e)
+        {
+            if (_plugin == null) return;
+            string gridId = SelectedTag(CmbGrid);
+            if (string.IsNullOrEmpty(gridId))
+            {
+                LblLiveStatus.Text = "Selecione o grid (clique CONECTAR).";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            string track = CmbNewTrack.SelectedItem as string;
+            if (string.IsNullOrEmpty(track))
+            {
+                LblLiveStatus.Text = "Selecione a pista.";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            if (DpNewRaceDate.SelectedDate == null)
+            {
+                LblLiveStatus.Text = "Selecione a data.";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            string dateIso = DpNewRaceDate.SelectedDate.Value.ToString("yyyy-MM-dd");
+            string time = (TxtNewRaceTime.Text ?? "").Trim();
+            BtnCreateRace.IsEnabled = false;
+            LblLiveStatus.Text = "Criando corrida...";
+            LblLiveStatus.Foreground = DimBrush;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                string raceId = _plugin.LiveCreateScheduledRace(gridId, track, dateIso, time);
+                string err = _plugin.LiveLastError;
+                Dispatcher.Invoke(() =>
+                {
+                    BtnCreateRace.IsEnabled = true;
+                    if (string.IsNullOrEmpty(raceId))
+                    {
+                        LblLiveStatus.Text = "Falha ao criar corrida: " + (err ?? "erro");
+                        LblLiveStatus.Foreground = RedBrush;
+                        return;
+                    }
+                    PanelNewRace.Visibility = Visibility.Collapsed;
+                    _pendingSelectRaceId = raceId;
+                    LoadScheduledRaces(gridId); // reload + auto-select the new race
+                });
+            });
         }
 
         private void BtnGoLive_Click(object sender, RoutedEventArgs e)
@@ -648,35 +746,26 @@ namespace Overtake.SimHub.Plugin.UI
             if (_plugin == null) return;
             string leagueId = SelectedTag(CmbLeague);
             string gridId = SelectedTag(CmbGrid);
+            string raceId = SelectedTag(CmbRace);
             if (string.IsNullOrEmpty(leagueId) || string.IsNullOrEmpty(gridId))
             {
                 LblLiveStatus.Text = "Selecione liga e grid (clique CONECTAR).";
                 LblLiveStatus.Foreground = RedBrush;
                 return;
             }
-            bool newRace = ChkNewRace.IsChecked == true;
-            string raceId = newRace ? null : SelectedTag(CmbRace);
-            string newName = newRace ? (TxtNewRaceName.Text ?? "").Trim() : null;
-            string newTrack = newRace ? (TxtNewRaceTrack.Text ?? "").Trim() : null;
+            if (string.IsNullOrEmpty(raceId))
+            {
+                LblLiveStatus.Text = "Selecione a corrida (ou crie uma nova).";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
             string sessionType = SelectedTag(CmbSessionType) ?? "race";
-            if (newRace && string.IsNullOrEmpty(newName))
-            {
-                LblLiveStatus.Text = "Informe o nome da corrida nova.";
-                LblLiveStatus.Foreground = RedBrush;
-                return;
-            }
-            if (!newRace && string.IsNullOrEmpty(raceId))
-            {
-                LblLiveStatus.Text = "Selecione uma corrida ou marque 'criar nova'.";
-                LblLiveStatus.Foreground = RedBrush;
-                return;
-            }
             BtnGoLive.IsEnabled = false;
             LblLiveStatus.Text = "Entrando ao vivo...";
             LblLiveStatus.Foreground = DimBrush;
             System.Threading.Tasks.Task.Run(() =>
             {
-                bool ok = _plugin.LiveGoLive(leagueId, gridId, raceId, newName, newTrack, sessionType);
+                bool ok = _plugin.LiveGoLive(leagueId, gridId, raceId, sessionType);
                 string err = _plugin.LiveLastError;
                 Dispatcher.Invoke(() =>
                 {
