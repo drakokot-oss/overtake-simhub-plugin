@@ -192,8 +192,10 @@ namespace Overtake.SimHub.Plugin.Live
         }
 
         /// <summary>
-        /// List the grid's SCHEDULED races (public read via PostgREST). Returns null on error.
-        /// Contract 1: GET /rest/v1/races?grid_id=eq.{gridId}&amp;status=eq.scheduled&amp;select=...&amp;order=race_date.asc
+        /// List the grid's SCHEDULED races via the token-gated RPC `plugin_list_scheduled_races`
+        /// (SECURITY DEFINER). Funciona em liga PRIVADA — o GET anônimo do PostgREST era bloqueado
+        /// pela RLS (`can_access_league_via_grid`) quando a liga não é pública. Returns null on error.
+        /// Contract: POST /rest/v1/rpc/plugin_list_scheduled_races { _token, _grid_id }.
         /// </summary>
         public List<ScheduledRace> ListScheduledRaces(string gridId)
         {
@@ -201,9 +203,11 @@ namespace Overtake.SimHub.Plugin.Live
             if (string.IsNullOrEmpty(gridId)) { LastError = "grid vazio"; return null; }
             try
             {
-                string url = RestEndpoint("races?grid_id=eq." + Uri.EscapeDataString(gridId)
-                    + "&status=eq.scheduled&select=id,name,track,race_date,scheduled_time&order=race_date.asc");
-                string resp = Send("GET", url, null, 15000);
+                var reqBody = new StringBuilder();
+                reqBody.Append("{\"_token\":").Append(J(Token));
+                reqBody.Append(",\"_grid_id\":").Append(J(gridId));
+                reqBody.Append('}');
+                string resp = Send("POST", RestEndpoint("rpc/plugin_list_scheduled_races"), reqBody.ToString(), 15000);
                 var arr = _json.DeserializeObject(resp) as object[];
                 var list = new List<ScheduledRace>();
                 if (arr == null) return list;
