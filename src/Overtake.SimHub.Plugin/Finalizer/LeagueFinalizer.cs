@@ -1289,15 +1289,19 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
                 int bestMs = 0;
+                // Só voltas VÁLIDAS (bit 0 do ValidFlags) contam pro best lap. Voltas anuladas
+                // (track limits / flashback / reset) NÃO podem virar a "volta mais rápida" —
+                // isso afetava a classificação do qualy, a pole e o ranking. Mesma regra do campo `valid`.
                 foreach (var lap in dr.Laps)
-                    if (lap.LapTimeMs > 0 && (bestMs == 0 || lap.LapTimeMs < bestMs))
+                    if (lap.LapTimeMs > 0 && (lap.ValidFlags & 0x01) != 0 && (bestMs == 0 || lap.LapTimeMs < bestMs))
                         bestMs = lap.LapTimeMs;
-                if (dr.Best.ContainsKey("bestLapTimeMs") && dr.Best["bestLapTimeMs"] != null)
+                // O "best" do session-history/classificação do jogo pode conter volta anulada →
+                // usar SÓ como fallback quando não há nenhuma volta válida capturada (nunca sobrepõe uma válida).
+                if (bestMs == 0 && dr.Best.ContainsKey("bestLapTimeMs") && dr.Best["bestLapTimeMs"] != null)
                 {
                     int shBest;
                     if (int.TryParse(dr.Best["bestLapTimeMs"].ToString(), out shBest) && shBest > 0)
-                        if (bestMs == 0 || shBest < bestMs)
-                            bestMs = shBest;
+                        bestMs = shBest;
                 }
                 if (bestMs == 0 && dr.LastSeenLapTimeMs > 0)
                     bestMs = dr.LastSeenLapTimeMs;
