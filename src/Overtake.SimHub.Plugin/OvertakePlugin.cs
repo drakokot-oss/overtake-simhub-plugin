@@ -366,6 +366,23 @@ namespace Overtake.SimHub.Plugin
             bool fcStable = _sessionEndDetected && _raceFinalClassificationReceived
                 && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
             bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
+
+            // Auto-End da transmissão ao vivo quando a corrida termina (FC estável) — independe do
+            // auto-export. Evita sessão "ao vivo" pendurada por horas se o transmissor esquecer de
+            // clicar Encerrar (achado H2). End() é idempotente (Active vira false → não repete).
+            if (fcStable && _live != null && _live.Active)
+            {
+                try
+                {
+                    _live.End(_lastLiveJson);
+                    global::SimHub.Logging.Current.Info("[Overtake] Live auto-encerrado (fim de corrida detectado)");
+                }
+                catch (Exception exEnd)
+                {
+                    global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-End falhou: {0}", exEnd.Message));
+                }
+            }
+
             bool shouldExport = (armedReady || (_sessionEndDetected && (fcStable || fallbackElapsed)))
                 && _settings.AutoExportJson && _store.Sessions.Count > 0;
             if (shouldExport)
