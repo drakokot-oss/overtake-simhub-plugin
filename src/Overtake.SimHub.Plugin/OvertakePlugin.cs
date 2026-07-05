@@ -322,6 +322,7 @@ namespace Overtake.SimHub.Plugin
                             {
                                 _raceFinalClassificationReceived = true;
                                 _raceFcFirstMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                                global::SimHub.Logging.Current.Info("[Overtake] diag auto-End: FC (classificacao final) recebida");
                             }
                             break;
                         }
@@ -335,6 +336,9 @@ namespace Overtake.SimHub.Plugin
                     {
                         _sessionEndDetected = true;
                         _raceSendAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        global::SimHub.Logging.Current.Info(string.Format(
+                            "[Overtake] diag auto-End: fim de sessao (SEND) — fcRecebida={0} liveAtivo={1}",
+                            _raceFinalClassificationReceived, (_live != null && _live.Active)));
 
                         // Arm export as soon as Race SEND arrives with FC data.
                         // In online multiplayer SSTA (next session) arrives within

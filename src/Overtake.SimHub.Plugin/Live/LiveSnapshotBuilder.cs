@@ -517,8 +517,11 @@ namespace Overtake.SimHub.Plugin.Live
             {
                 int b = keys[i];
                 int[] v = trace[b];
-                // [distanceM, speedKmh, throttlePct, brakePct, gear]
-                outp.Add(new object[] { b * 25, v[0], v[1], v[2], v[3] });
+                // [distanceM, speedKmh, throttlePct, brakePct, gear] (+ ersPct, ersModeCode no traço v2)
+                if (v.Length > 5)
+                    outp.Add(new object[] { b * 25, v[0], v[1], v[2], v[3], v[4], v[5] });
+                else
+                    outp.Add(new object[] { b * 25, v[0], v[1], v[2], v[3] });
             }
             return outp;
         }

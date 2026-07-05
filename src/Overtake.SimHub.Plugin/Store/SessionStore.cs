@@ -2253,8 +2253,13 @@ namespace Overtake.SimHub.Plugin.Store
                     int bucket = (int)(d.LiveLapDistanceM / 25f);
                     float thr = r.Throttle < 0f ? 0f : (r.Throttle > 1f ? 1f : r.Throttle);
                     float brk = r.Brake < 0f ? 0f : (r.Brake > 1f ? 1f : r.Brake);
+                    // Traço v2: além de vel/acel/freio/marcha, grava ERS por posição — bateria %
+                    // (0-100) e o modo de deploy (0=nenhum,1=médio,2=hotlap,3=overtake). Habilita o
+                    // mapa de ERS por posição no portal do piloto. Campos extras são ignorados pelo
+                    // renderizador ao vivo (usa só 1-4) e captados pelo backend (guarda o array cru).
                     d.TraceCur[bucket] = new int[] {
-                        r.Speed, (int)Math.Round(thr * 100f), (int)Math.Round(brk * 100f), r.Gear
+                        r.Speed, (int)Math.Round(thr * 100f), (int)Math.Round(brk * 100f), r.Gear,
+                        (int)Math.Round(d.ErsStorePctLast), d.ErsDeployModeLast
                     };
                 }
             }
