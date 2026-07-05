@@ -371,10 +371,14 @@ namespace Overtake.SimHub.Plugin
                 && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
             bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
 
-            // Auto-End da transmissão ao vivo quando a corrida termina (FC estável) — independe do
-            // auto-export. Evita sessão "ao vivo" pendurada por horas se o transmissor esquecer de
-            // clicar Encerrar (achado H2). End() é idempotente (Active vira false → não repete).
-            if (fcStable && _live != null && _live.Active)
+            // Auto-End da transmissão ao vivo quando a corrida termina — independe do auto-export.
+            // NÃO exige a Classificação Final (FC): no F1 26 a FC pode não chegar (parsing) e se o
+            // piloto sai antes da tela de resultado a FC nunca vem. Basta o fim de sessão (SEND)
+            // estar estável (~5s) para encerrar o live; o End() não precisa dos dados da FC (só o
+            // export do OTK precisa). End() é idempotente (Active vira false → não repete).
+            bool liveEndReady = (fcStable
+                || (_sessionEndDetected && _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= FC_EXPORT_DELAY_MS));
+            if (liveEndReady && _live != null && _live.Active)
             {
                 try
                 {

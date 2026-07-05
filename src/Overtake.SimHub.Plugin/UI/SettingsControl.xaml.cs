@@ -15,6 +15,7 @@ namespace Overtake.SimHub.Plugin.UI
         private readonly OvertakePlugin _plugin;
         private readonly OvertakeSettings _settings;
         private readonly DispatcherTimer _statusTimer;
+        private bool _wasLiveActive;   // detecta a transição ao vivo → encerrado p/ atualizar o rótulo
 
         private static readonly SolidColorBrush TealBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xC4, 0xB6));
         private static readonly SolidColorBrush GreenBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xC4, 0xB6));
@@ -821,6 +822,15 @@ namespace Overtake.SimHub.Plugin.UI
                     LblLiveStatus.Foreground = GreenBrush;
                 }
             }
+            else if (_wasLiveActive)
+            {
+                // Transição ao vivo → encerrado (manual OU auto-End). Antes, sem este else, o
+                // rótulo ficava preso em "AO VIVO" mesmo após encerrar. Só no tick da transição,
+                // para não sobrescrever mensagens transitórias (ex.: "Token salvo.").
+                LblLiveStatus.Text = "Transmissao encerrada.";
+                LblLiveStatus.Foreground = DimBrush;
+            }
+            _wasLiveActive = active;
         }
 
         private string ResolveOutputFolder()
