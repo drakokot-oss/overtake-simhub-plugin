@@ -66,9 +66,45 @@ namespace Overtake.SimHub.Plugin.UI
             CmbSessionType.SelectedIndex = 0;
             UpdateLiveStatus();
 
+            SelectTab("status");
+
             UpdateStatusLabels();
             if (_statusTimer != null)
                 _statusTimer.Start();
+        }
+
+        // ── Navegacao por abas (alternancia de visibilidade) ──
+        private void BtnTab_Click(object sender, RoutedEventArgs e)
+        {
+            var b = sender as Button;
+            if (b != null && b.Tag != null)
+                SelectTab(b.Tag.ToString());
+        }
+
+        private void SelectTab(string tab)
+        {
+            PanelTabStatus.Visibility = tab == "status" ? Visibility.Visible : Visibility.Collapsed;
+            PanelTabLive.Visibility   = tab == "live"   ? Visibility.Visible : Visibility.Collapsed;
+            PanelTabConfig.Visibility = tab == "config" ? Visibility.Visible : Visibility.Collapsed;
+            PanelTabHelp.Visibility   = tab == "help"   ? Visibility.Visible : Visibility.Collapsed;
+            StyleTab(BtnTabStatus, tab == "status");
+            StyleTab(BtnTabLive,   tab == "live");
+            StyleTab(BtnTabConfig, tab == "config");
+            StyleTab(BtnTabHelp,   tab == "help");
+        }
+
+        private void StyleTab(Button b, bool active)
+        {
+            if (active)
+            {
+                b.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0xC4, 0xB6));
+                b.Foreground = new SolidColorBrush(Color.FromRgb(0x0A, 0x1A, 0x18));
+            }
+            else
+            {
+                b.Background = System.Windows.Media.Brushes.Transparent;
+                b.Foreground = new SolidColorBrush(Color.FromRgb(0x7B, 0x8C, 0xA3));
+            }
         }
 
         private void BtnApplyPort_Click(object sender, RoutedEventArgs e)
