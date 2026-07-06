@@ -371,26 +371,6 @@ namespace Overtake.SimHub.Plugin
                 && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
             bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
 
-            // Auto-End da transmissão ao vivo quando a corrida termina — independe do auto-export.
-            // NÃO exige a Classificação Final (FC): no F1 26 a FC pode não chegar (parsing) e se o
-            // piloto sai antes da tela de resultado a FC nunca vem. Basta o fim de sessão (SEND)
-            // estar estável (~5s) para encerrar o live; o End() não precisa dos dados da FC (só o
-            // export do OTK precisa). End() é idempotente (Active vira false → não repete).
-            bool liveEndReady = (fcStable
-                || (_sessionEndDetected && _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= FC_EXPORT_DELAY_MS));
-            if (liveEndReady && _live != null && _live.Active)
-            {
-                try
-                {
-                    _live.End(_lastLiveJson);
-                    global::SimHub.Logging.Current.Info("[Overtake] Live auto-encerrado (fim de corrida detectado)");
-                }
-                catch (Exception exEnd)
-                {
-                    global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-End falhou: {0}", exEnd.Message));
-                }
-            }
-
             bool shouldExport = (armedReady || (_sessionEndDetected && (fcStable || fallbackElapsed)))
                 && _settings.AutoExportJson && _store.Sessions.Count > 0;
             if (shouldExport)
@@ -401,6 +381,23 @@ namespace Overtake.SimHub.Plugin
                 _raceFcFirstMs = 0;
                 _autoExportArmed = false;
                 bool exportOk = TryAutoExport();
+
+                // Auto-End: encerra a transmissão ao vivo NO MESMO momento em que o OTK é gerado
+                // (em vez de na bandeirada). Assim o "ao vivo" fecha alinhado com a disponibilidade
+                // dos dados. End() é idempotente (Active vira false → não repete).
+                if (_live != null && _live.Active)
+                {
+                    try
+                    {
+                        _live.End(_lastLiveJson);
+                        global::SimHub.Logging.Current.Info("[Overtake] Live auto-encerrado (OTK gerado)");
+                    }
+                    catch (Exception exEnd)
+                    {
+                        global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-End falhou: {0}", exEnd.Message));
+                    }
+                }
+
                 // Camada 2 — auto-rotate AFTER successful auto-export so the next event
                 // starts in a fresh capture even if the user never clicks "Nova sessão".
                 // Disabled if AutoCleanAfterExport=false in settings.
@@ -409,6 +406,20 @@ namespace Overtake.SimHub.Plugin
                     BeginNewCaptureSession();
                     global::SimHub.Logging.Current.Info(
                         "[Overtake] Capture auto-cleaned after export (AutoCleanAfterExport=on)");
+                }
+            }
+            else if (_sessionEndDetected && fallbackElapsed && _live != null && _live.Active)
+            {
+                // Segurança: corrida terminou mas o export não vai ocorrer (auto-export desligado
+                // ou sem sessão). Não deixa a transmissão pendurada.
+                try
+                {
+                    _live.End(_lastLiveJson);
+                    global::SimHub.Logging.Current.Info("[Overtake] Live auto-encerrado (fim de corrida, sem export)");
+                }
+                catch (Exception exEnd)
+                {
+                    global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-End falhou: {0}", exEnd.Message));
                 }
             }
 

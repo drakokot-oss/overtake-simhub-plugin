@@ -214,8 +214,8 @@
                 </StackPanel>
             </styles:SHSection>
 
-            <!-- Race UI (web) - test build -->
-            <styles:SHSection Title="Race UI (web) - BUILD DE TESTE">
+            <!-- Race UI (web) -->
+            <styles:SHSection Title="Race UI (web)">
                 <StackPanel Margin="10">
                     <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
                         <Run FontWeight="Bold" Foreground="#2EC4B6">Acompanhamento da corrida em tempo real.</Run>
@@ -264,12 +264,16 @@
                 </StackPanel>
             </styles:SHSection>
 
-            <!-- Live cloud broadcast (overtakef1) - test build -->
-            <styles:SHSection Title="Transmissao ao vivo (overtakef1) - BUILD DE TESTE">
+            <!-- Live cloud broadcast (overtakef1) -->
+            <styles:SHSection Title="Transmissao ao vivo (overtakef1)">
                 <StackPanel Margin="10">
                     <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
                         <Run FontWeight="Bold" Foreground="#2EC4B6">Leve a corrida ao vivo para o portal overtakef1.</Run>
                         <Run>Gere o token em Perfil &gt; Transmissao / SimHub no site, cole abaixo, conecte, escolha a liga/grid/corrida e clique IR AO AR. Nao afeta o arquivo .otk.</Run>
+                    </TextBlock>
+                    <TextBlock TextWrapping="Wrap" Foreground="#E0A800" FontSize="11" Margin="0,0,0,10">
+                        <Run FontWeight="Bold">Exclusivo de ligas Elite ou Founder.</Run>
+                        <Run Foreground="#7B8CA3">A geracao do token e a transmissao ao vivo estao disponiveis apenas para admins de ligas Elite/Founder.</Run>
                     </TextBlock>
 
                     <TextBlock Text="Token de transmissao" FontWeight="Bold" Margin="0,0,0,3" />
