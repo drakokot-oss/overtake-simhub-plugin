@@ -40,6 +40,7 @@ namespace Overtake.SimHub.Plugin
         private bool _sessionEnded;
         private bool _raceFinalClassificationReceived;
         private bool _autoExportArmed; // Once armed, SSTA cannot cancel the pending export
+        private bool _redFlagPending;  // RedFlag seen; a SessionEnded from it is a stoppage, not a finish
         private long _raceSendAtMs;
         private long _raceFcFirstMs;
         private const long FC_EXPORT_DELAY_MS = 5000;
@@ -322,6 +323,9 @@ namespace Overtake.SimHub.Plugin
                             {
                                 _raceFinalClassificationReceived = true;
                                 _raceFcFirstMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                                // A real Final Classification = the race actually finished (checkered),
+                                // so any earlier red flag no longer blocks the export.
+                                _redFlagPending = false;
                                 global::SimHub.Logging.Current.Info("[Overtake] diag auto-End: FC (classificacao final) recebida");
                             }
                             break;
@@ -329,6 +333,21 @@ namespace Overtake.SimHub.Plugin
                     }
                 }
 
+                // RedFlag: the game emits SessionEnded/SessionStarted around a red-flag
+                // stoppage exactly like a real session boundary. Mark it pending so the
+                // 60s fallback export does NOT treat that SessionEnded as a finished race
+                // (that would export a partial, telemetry-only fragment mid-race and then
+                // split the resumed race into a second file). Cleared only when a real
+                // Final Classification arrives (checkered) or a new capture begins.
+                if (parsed.Event != null && parsed.Event.Code == "RDFL")
+                {
+                    if (!_redFlagPending)
+                    {
+                        _redFlagPending = true;
+                        global::SimHub.Logging.Current.Info(
+                            "[Overtake] Bandeira vermelha (RDFL) — export por fallback suspenso ate o fim real da corrida");
+                    }
+                }
                 if (parsed.Event != null && parsed.Event.Code == "SEND")
                 {
                     _sessionEnded = true;
@@ -369,7 +388,11 @@ namespace Overtake.SimHub.Plugin
                 && (nowMs - _raceSendAtMs) >= FC_EXPORT_DELAY_MS;
             bool fcStable = _sessionEndDetected && _raceFinalClassificationReceived
                 && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
-            bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
+            // Suppress the fallback while a red flag is pending and no real Final
+            // Classification has arrived: the SessionEnded came from a stoppage, the race
+            // will resume, so we must wait for the true finish (FC) or a new session.
+            bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000
+                && !(_redFlagPending && !_raceFinalClassificationReceived);
 
             bool shouldExport = (armedReady || (_sessionEndDetected && (fcStable || fallbackElapsed)))
                 && _settings.AutoExportJson && _store.Sessions.Count > 0;
@@ -591,6 +614,7 @@ namespace Overtake.SimHub.Plugin
             _sessionEnded = false;
             _raceFinalClassificationReceived = false;
             _autoExportArmed = false;
+            _redFlagPending = false;
             _raceSendAtMs = 0;
             _raceFcFirstMs = 0;
             _lastAutoExportMsg = "";
