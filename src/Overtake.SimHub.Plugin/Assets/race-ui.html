@@ -859,6 +859,8 @@
       var pb = i===1?d.pbS1:(i===2?d.pbS2:d.pbS3);
       var liveThis = ((i===1?d.liveS1:(i===2?d.liveS2:0))>0); // split set THIS lap
       var running = (d.sector===i) && ((i===1?d.liveS1:(i===2?d.liveS2:0))<=0);
+      var idle = d.pitStatus===1 || d.driverStatus===0 || /box|garagem|pit/i.test(d.status||"") || /box|garagem/i.test(d.lapState||"");
+      if(idle) running=false;
       var cls="sct ";
       if(running) cls+= d.lapInvalid?"cancel run":"none run";
       else if(v<=0) cls+="none";

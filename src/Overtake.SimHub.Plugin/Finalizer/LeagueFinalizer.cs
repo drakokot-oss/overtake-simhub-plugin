@@ -292,6 +292,12 @@ namespace Overtake.SimHub.Plugin.Finalizer
         public static bool IsPhantomForLive(string tag, DriverRun dr, SessionRun sess, SessionStore store)
         {
             if (dr == null || sess == null) return true;
+            // OFFLINE (single-player / quali contra IA): a IA E o grid real. Mostrar pilotos com
+            // nome real mesmo antes de completar a 1a volta (senao a qualy de 1 volta fica vazia
+            // ate alguem cruzar a linha). So slots genericos/vazios seguem filtrados.
+            // Nao afeta o OTK: este relaxamento e exclusivo do caminho LIVE.
+            if (sess.NetworkGame != 1 && !string.IsNullOrEmpty(tag) && !IsGenericTag(tag))
+                return false;
             return IsPhantomEntry(tag, dr, sess, store);
         }
 

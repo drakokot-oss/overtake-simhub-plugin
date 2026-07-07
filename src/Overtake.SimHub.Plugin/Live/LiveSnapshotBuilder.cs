@@ -198,11 +198,20 @@ namespace Overtake.SimHub.Plugin.Live
 
         private static int BestLapMs(DriverRun d)
         {
+            // Preferir o melhor VALIDO do jogo (SessionHistory) — ja exclui voltas anuladas.
+            // Evita que uma volta cancelada (corte de pista) apareca como pole no ao vivo.
+            if (d.Best != null && d.Best.ContainsKey("bestLapTimeMs") && d.Best["bestLapTimeMs"] != null)
+            {
+                try { int gm = Convert.ToInt32(d.Best["bestLapTimeMs"]); if (gm > 0) return gm; }
+                catch { /* cai no fallback */ }
+            }
+            // Fallback: menor volta VALIDA (bit 0 do ValidFlags), igual ao finalizer/OTK.
             int best = 0;
             for (int i = 0; i < d.Laps.Count; i++)
             {
-                int t = d.Laps[i].LapTimeMs;
-                if (t > 0 && (best == 0 || t < best)) best = t;
+                var lap = d.Laps[i];
+                if (lap.LapTimeMs > 0 && (lap.ValidFlags & 0x01) != 0 && (best == 0 || lap.LapTimeMs < best))
+                    best = lap.LapTimeMs;
             }
             return best;
         }
