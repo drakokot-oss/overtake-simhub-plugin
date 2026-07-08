@@ -2,6 +2,35 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.0.0] - 2026-07-08
+
+Primeira versao publica da geracao "ao vivo + F1 26". Consolida tudo de 1.1.47 a 1.1.56.
+Bump para **major (2.0.0)** pelo salto de escopo (UI nova, transmissao ao vivo, auto-OTK,
+suporte F1 26). Sem quebra de formato do `.otk` (segue schema league-1.x).
+
+### Added
+- **Transmissao ao vivo** para o portal overtakef1.com via Supabase Realtime (write-free):
+  token de transmissao colavel, seletor de corrida (agendada ou ad-hoc), stream de snapshot
+  (~1 Hz), gate de elegibilidade Elite/Founder feito no front. (`Live/LiveBroadcaster.cs`,
+  `Live/LiveSnapshotBuilder.cs`, `Live/RaceWebServer.cs`.)
+- **Envio automatico do `.otk`** ao fim da corrida (auto-upload pos-live) com circuit-breaker/backoff.
+- **Auto-encerrar** a transmissao no momento em que o OTK e gerado (antes: na bandeirada).
+- **Nova UI em abas** (Status / Transmitir / Config / Ajuda), PT-BR + EN + ES, com banner de
+  atualizacao severity-driven (aviso critico "Atualizacao necessaria" abaixo do minSupported).
+- ERS por posicao no traco do painel ao vivo.
+
+### Fixed
+- **Bandeira vermelha:** deixa de gerar dois `.otk` por corrida. O evento `RDFL` suspende o
+  export por fallback ate o fim real da corrida (classificacao final) ou nova sessao.
+- **Qualy ao vivo:** 1-volta mostra pilotos; melhor volta so conta voltas VALIDAS (nao pega
+  volta anulada como pole); piloto no box/garagem nao aparece "em pista" no setor.
+- **minSupportedVersion = 1.1.47:** versoes abaixo (decode F1 26 quebrado) recebem o banner
+  critico de atualizacao obrigatoria.
+
+### Note
+- Recomendacao para ligas: **UDP Format = 2025** no jogo (mais testado; evita caso raro de
+  troca de nomes em salas My Team no formato 2026).
+
 ## [1.1.47] - 2026-06-25
 
 ### Fixed (F1 26 Sprint Format offline — auto-export nao disparava + rotulos trocados)

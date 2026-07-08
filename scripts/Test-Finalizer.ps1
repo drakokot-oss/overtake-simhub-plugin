@@ -2698,17 +2698,24 @@ function Test-F126OfflineSprintMainIsId16() {
     }
 
     # Sprint Shootout (id=14) -> Sprint Race (wire id=15) before any Qualifying.
+    # Sleep between phases: terminal/order helpers (IsLastRaceSession,
+    # OccursAfterMainQualifying) tie-break on LastPacketMs, and on fast CI runners
+    # two phases can land in the SAME millisecond, flipping the <= boundary. The
+    # small sleeps guarantee strictly increasing per-session timestamps.
     & $feed ([uint64]500) ([byte]14); & $feedParticipants ([uint64]500); & $feedFc ([uint64]500)
+    Start-Sleep -Milliseconds 3
     & $feed ([uint64]501) ([byte]15); & $feedParticipants ([uint64]501); & $feedFc ([uint64]501)
     $closing15 = $isClosing.Invoke($null, [object[]]@([byte]15, $st))
     Assert "v1.1.47: F1 26 offline Sprint (wire id=15) before Quali NOT terminal" (-not $closing15)
     Assert "v1.1.47: HasClosedTerminalSession false before Main Quali" (-not $st.HasClosedTerminalSession())
 
     # Main Qualifying (id=9 One-Shot) -> still not terminal (Quali is not a Race).
+    Start-Sleep -Milliseconds 3
     & $feed ([uint64]502) ([byte]9); & $feedParticipants ([uint64]502); & $feedFc ([uint64]502)
     Assert "v1.1.47: HasClosedTerminalSession false after Quali only" (-not $st.HasClosedTerminalSession())
 
     # Main Race (wire id=16) after Quali -- NOW terminal (this is the bug fix).
+    Start-Sleep -Milliseconds 3
     & $feed ([uint64]503) ([byte]16); & $feedParticipants ([uint64]503); & $feedFc ([uint64]503)
     $closing16 = $isClosing.Invoke($null, [object[]]@([byte]16, $st))
     Assert "v1.1.47: F1 26 offline Main Race (wire id=16) IS terminal closing -> auto-export fires" $closing16

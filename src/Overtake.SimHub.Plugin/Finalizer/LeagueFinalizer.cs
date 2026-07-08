@@ -284,6 +284,23 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 stName, trackName, trackId));
         }
 
+        /// <summary>
+        /// Read-only phantom check exposed for the live broadcast UI so its grid
+        /// matches the .otk export exactly (same AI-filler / empty-slot exclusion).
+        /// Does not mutate the store — safe to call on every live snapshot.
+        /// </summary>
+        public static bool IsPhantomForLive(string tag, DriverRun dr, SessionRun sess, SessionStore store)
+        {
+            if (dr == null || sess == null) return true;
+            // OFFLINE (single-player / quali contra IA): a IA E o grid real. Mostrar pilotos com
+            // nome real mesmo antes de completar a 1a volta (senao a qualy de 1 volta fica vazia
+            // ate alguem cruzar a linha). So slots genericos/vazios seguem filtrados.
+            // Nao afeta o OTK: este relaxamento e exclusivo do caminho LIVE.
+            if (sess.NetworkGame != 1 && !string.IsNullOrEmpty(tag) && !IsGenericTag(tag))
+                return false;
+            return IsPhantomEntry(tag, dr, sess, store);
+        }
+
         private static bool IsPhantomEntry(string tag, DriverRun dr, SessionRun sess, SessionStore store)
         {
             if (string.IsNullOrEmpty(tag))
@@ -886,6 +903,14 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "source", new Dictionary<string, object>() },
             };
 
+            // Live broadcast binding (additive; only when the session went on air via the
+            // portal flow). Lets the site auto-link this OTK to the right race on upload.
+            // Does NOT change the league-1.1 schema otherwise.
+            if (!string.IsNullOrEmpty(store.LiveRaceId)) capture["raceId"] = store.LiveRaceId;
+            if (!string.IsNullOrEmpty(store.LiveBroadcastSessionId)) capture["liveSessionId"] = store.LiveBroadcastSessionId;
+            if (!string.IsNullOrEmpty(store.LiveLeagueId)) capture["leagueId"] = store.LiveLeagueId;
+            if (!string.IsNullOrEmpty(store.LiveGridId)) capture["gridId"] = store.LiveGridId;
+
             // Participants will be rebuilt from session outputs so they match actual drivers shown
             var allParticipants = new List<string>();
 
@@ -1270,15 +1295,19 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 string tag = dkvp.Key;
                 DriverRun dr = dkvp.Value;
                 int bestMs = 0;
+                // Só voltas VÁLIDAS (bit 0 do ValidFlags) contam pro best lap. Voltas anuladas
+                // (track limits / flashback / reset) NÃO podem virar a "volta mais rápida" —
+                // isso afetava a classificação do qualy, a pole e o ranking. Mesma regra do campo `valid`.
                 foreach (var lap in dr.Laps)
-                    if (lap.LapTimeMs > 0 && (bestMs == 0 || lap.LapTimeMs < bestMs))
+                    if (lap.LapTimeMs > 0 && (lap.ValidFlags & 0x01) != 0 && (bestMs == 0 || lap.LapTimeMs < bestMs))
                         bestMs = lap.LapTimeMs;
-                if (dr.Best.ContainsKey("bestLapTimeMs") && dr.Best["bestLapTimeMs"] != null)
+                // O "best" do session-history/classificação do jogo pode conter volta anulada →
+                // usar SÓ como fallback quando não há nenhuma volta válida capturada (nunca sobrepõe uma válida).
+                if (bestMs == 0 && dr.Best.ContainsKey("bestLapTimeMs") && dr.Best["bestLapTimeMs"] != null)
                 {
                     int shBest;
                     if (int.TryParse(dr.Best["bestLapTimeMs"].ToString(), out shBest) && shBest > 0)
-                        if (bestMs == 0 || shBest < bestMs)
-                            bestMs = shBest;
+                        bestMs = shBest;
                 }
                 if (bestMs == 0 && dr.LastSeenLapTimeMs > 0)
                     bestMs = dr.LastSeenLapTimeMs;

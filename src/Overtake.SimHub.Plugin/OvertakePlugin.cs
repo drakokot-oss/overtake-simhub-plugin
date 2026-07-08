@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using GameReaderCommon;
 using SimHub.Plugins;
 using Overtake.SimHub.Plugin.Finalizer;
+using Overtake.SimHub.Plugin.Live;
 using Overtake.SimHub.Plugin.Packets;
 using Overtake.SimHub.Plugin.Parsers;
 using Overtake.SimHub.Plugin.Store;
@@ -39,6 +40,7 @@ namespace Overtake.SimHub.Plugin
         private bool _sessionEnded;
         private bool _raceFinalClassificationReceived;
         private bool _autoExportArmed; // Once armed, SSTA cannot cancel the pending export
+        private bool _redFlagPending;  // RedFlag seen; a SessionEnded from it is a stoppage, not a finish
         private long _raceSendAtMs;
         private long _raceFcFirstMs;
         private const long FC_EXPORT_DELAY_MS = 5000;
@@ -47,6 +49,19 @@ namespace Overtake.SimHub.Plugin
         private string _latestReleaseNotes = "";
         private string _minSupportedVersion = "";
         private string _installerUrl = "";
+
+        // Race UI (web) — Rota B. Read-only live broadcast server.
+        private RaceWebServer _raceWeb;
+        private long _lastRaceUiPublishMs;
+        private const long RaceUiPublishIntervalMs = 150; // ~6-7 Hz
+        private readonly JavaScriptSerializer _liveSerializer =
+            new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+
+        // Live cloud broadcast (overtakef1) — streams the same snapshot to the portal.
+        private LiveBroadcaster _live;
+        private long _lastLivePushMs;
+        private const long LivePublishIntervalMs = 1000; // ~1 Hz to the cloud (fan-out N+1: corta ~2,5x o custo de mensagens; imperceptivel num placar)
+        private string _lastLiveJson;
 
         public PluginManager PluginManager { get; set; }
 
@@ -108,6 +123,22 @@ namespace Overtake.SimHub.Plugin
                 global::SimHub.Logging.Current.Info(
                     "[Overtake] Migrated settings schema 0 -> 1 (AutoCleanAfterExport=on)");
             }
+            if (_settings.SettingsSchemaVersion < 2)
+            {
+                _settings.RaceUiEnabled = true;
+                _settings.RaceUiPort = _settings.RaceUiPort > 0 ? _settings.RaceUiPort : 8088;
+                _settings.SettingsSchemaVersion = 2;
+                global::SimHub.Logging.Current.Info(
+                    "[Overtake] Migrated settings schema 1 -> 2 (Race UI web server defaults)");
+            }
+            if (_settings.SettingsSchemaVersion < 3)
+            {
+                if (_settings.LiveBroadcastToken == null) _settings.LiveBroadcastToken = "";
+                if (_settings.LiveBroadcastBaseUrl == null) _settings.LiveBroadcastBaseUrl = "";
+                _settings.SettingsSchemaVersion = 3;
+                global::SimHub.Logging.Current.Info(
+                    "[Overtake] Migrated settings schema 2 -> 3 (live cloud broadcast defaults)");
+            }
 
             _store = new SessionStore();
 
@@ -128,9 +159,138 @@ namespace Overtake.SimHub.Plugin
             this.AttachDelegate("Overtake.LatestVersion", () => _latestVersion);
             this.AttachDelegate("Overtake.UpdateStatus", () => UpdateAdvisor.StatusToken(CurrentUpdateSeverity));
 
+            this.AttachDelegate("Overtake.RaceUiUrl", () => _raceWeb != null && _raceWeb.Running ? _raceWeb.Url : "");
+            this.AttachDelegate("Overtake.RaceUiClients", () => _raceWeb != null ? _raceWeb.ClientCount : 0);
+
+            StartRaceWebServer();
+
+            _live = new LiveBroadcaster();
+            ConfigureLive();
+            this.AttachDelegate("Overtake.LiveBroadcasting", () => _live != null && _live.Active);
+
             global::SimHub.Logging.Current.Info("[Overtake] Plugin initialized");
 
             System.Threading.Tasks.Task.Run(() => CheckForUpdates());
+        }
+
+        /// <summary>Starts (or restarts) the live race UI web server per current settings.</summary>
+        internal void StartRaceWebServer()
+        {
+            try
+            {
+                if (_raceWeb != null) { _raceWeb.Stop(); _raceWeb = null; }
+                if (_settings == null || !_settings.RaceUiEnabled) return;
+                _raceWeb = new RaceWebServer();
+                _raceWeb.Start(_settings.RaceUiPort, _settings.RaceUiAllowLan);
+            }
+            catch (Exception ex)
+            {
+                global::SimHub.Logging.Current.Error(
+                    string.Format("[Overtake] Race UI web server failed to start: {0}", ex.Message));
+            }
+        }
+
+        internal void StopRaceWebServer()
+        {
+            try { if (_raceWeb != null) { _raceWeb.Stop(); _raceWeb = null; } }
+            catch { }
+        }
+
+        internal string RaceWebUrl
+        {
+            get { return _raceWeb != null && _raceWeb.Running ? _raceWeb.Url : ""; }
+        }
+
+        internal bool RaceWebRunning
+        {
+            get { return _raceWeb != null && _raceWeb.Running; }
+        }
+
+        private void PublishRaceUi()
+        {
+            bool wsActive = _raceWeb != null && _raceWeb.Running && _raceWeb.ClientCount > 0;
+            bool cloudActive = _live != null && _live.Active;
+            if (!wsActive && !cloudActive) return;
+            long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (nowMs - _lastRaceUiPublishMs < RaceUiPublishIntervalMs) return;
+            _lastRaceUiPublishMs = nowMs;
+            try
+            {
+                var snap = LiveSnapshotBuilder.Build(_store);
+                ExportNumbers.SanitizeForJson(snap);
+                string json = _liveSerializer.Serialize(snap);
+                _lastLiveJson = json;
+                if (wsActive) _raceWeb.Publish(json);
+                // Cloud push throttled to ~2-3 Hz (lighter than the local WS cadence).
+                if (cloudActive && nowMs - _lastLivePushMs >= LivePublishIntervalMs)
+                {
+                    _lastLivePushMs = nowMs;
+                    _live.PushSnapshot(json);
+                }
+            }
+            catch (Exception ex)
+            {
+                global::SimHub.Logging.Current.Info(
+                    string.Format("[Overtake] Race UI publish skipped: {0}", ex.Message));
+            }
+        }
+
+        // ---- Live cloud broadcast (overtakef1) — driven by the settings panel ----
+
+        /// <summary>Apply token + base URL from settings to the broadcaster.</summary>
+        internal void ConfigureLive()
+        {
+            if (_live == null) _live = new LiveBroadcaster();
+            _live.Token = _settings.LiveBroadcastToken ?? "";
+            if (!string.IsNullOrWhiteSpace(_settings.LiveBroadcastBaseUrl))
+                _live.BaseUrl = _settings.LiveBroadcastBaseUrl.Trim();
+        }
+
+        public bool LiveActive { get { return _live != null && _live.Active; } }
+        public string LiveSessionId { get { return _live != null ? _live.LiveSessionId : null; } }
+        public string LiveLastError { get { return _live != null ? _live.LastError : null; } }
+
+        /// <summary>live-start mode=list — returns eligible leagues/grids/races (null on error).</summary>
+        public System.Collections.Generic.List<EligibleLeague> LiveListEligible()
+        {
+            ConfigureLive();
+            return _live.ListEligible();
+        }
+
+        /// <summary>Scheduled races of a grid (PostgREST read). Null on error.</summary>
+        public System.Collections.Generic.List<ScheduledRace> LiveListScheduledRaces(string gridId)
+        {
+            ConfigureLive();
+            return _live.ListScheduledRaces(gridId);
+        }
+
+        /// <summary>Create a scheduled race via the server RPC (option B). Returns raceId or null.</summary>
+        public string LiveCreateScheduledRace(string gridId, string track, string raceDateIso, string timeHHMM)
+        {
+            ConfigureLive();
+            return _live.CreateScheduledRace(gridId, track, raceDateIso, timeHHMM);
+        }
+
+        /// <summary>Open a live session on an EXISTING race (raceId required).</summary>
+        public bool LiveGoLive(string leagueId, string gridId, string raceId, string sessionType)
+        {
+            ConfigureLive();
+            bool ok = _live.GoLive(leagueId, gridId, raceId, sessionType);
+            if (ok && _store != null)
+            {
+                // Stamp the capture so the exported OTK carries the race binding.
+                _store.LiveRaceId = raceId;
+                _store.LiveLeagueId = leagueId;
+                _store.LiveGridId = gridId;
+                _store.LiveBroadcastSessionId = _live.LiveSessionId;
+            }
+            return ok;
+        }
+
+        /// <summary>Close the live session (sends ended=true with the last snapshot).</summary>
+        public void LiveEnd()
+        {
+            if (_live != null) _live.End(_lastLiveJson);
         }
 
         public void DataUpdate(PluginManager pluginManager, ref GameData data)
@@ -163,12 +323,31 @@ namespace Overtake.SimHub.Plugin
                             {
                                 _raceFinalClassificationReceived = true;
                                 _raceFcFirstMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                                // A real Final Classification = the race actually finished (checkered),
+                                // so any earlier red flag no longer blocks the export.
+                                _redFlagPending = false;
+                                global::SimHub.Logging.Current.Info("[Overtake] diag auto-End: FC (classificacao final) recebida");
                             }
                             break;
                         }
                     }
                 }
 
+                // RedFlag: the game emits SessionEnded/SessionStarted around a red-flag
+                // stoppage exactly like a real session boundary. Mark it pending so the
+                // 60s fallback export does NOT treat that SessionEnded as a finished race
+                // (that would export a partial, telemetry-only fragment mid-race and then
+                // split the resumed race into a second file). Cleared only when a real
+                // Final Classification arrives (checkered) or a new capture begins.
+                if (parsed.Event != null && parsed.Event.Code == "RDFL")
+                {
+                    if (!_redFlagPending)
+                    {
+                        _redFlagPending = true;
+                        global::SimHub.Logging.Current.Info(
+                            "[Overtake] Bandeira vermelha (RDFL) — export por fallback suspenso ate o fim real da corrida");
+                    }
+                }
                 if (parsed.Event != null && parsed.Event.Code == "SEND")
                 {
                     _sessionEnded = true;
@@ -176,6 +355,9 @@ namespace Overtake.SimHub.Plugin
                     {
                         _sessionEndDetected = true;
                         _raceSendAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        global::SimHub.Logging.Current.Info(string.Format(
+                            "[Overtake] diag auto-End: fim de sessao (SEND) — fcRecebida={0} liveAtivo={1}",
+                            _raceFinalClassificationReceived, (_live != null && _live.Active)));
 
                         // Arm export as soon as Race SEND arrives with FC data.
                         // In online multiplayer SSTA (next session) arrives within
@@ -206,7 +388,12 @@ namespace Overtake.SimHub.Plugin
                 && (nowMs - _raceSendAtMs) >= FC_EXPORT_DELAY_MS;
             bool fcStable = _sessionEndDetected && _raceFinalClassificationReceived
                 && _raceFcFirstMs > 0 && (nowMs - _raceFcFirstMs) >= FC_EXPORT_DELAY_MS;
-            bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000;
+            // Suppress the fallback while a red flag is pending and no real Final
+            // Classification has arrived: the SessionEnded came from a stoppage, the race
+            // will resume, so we must wait for the true finish (FC) or a new session.
+            bool fallbackElapsed = _raceSendAtMs > 0 && (nowMs - _raceSendAtMs) >= 60000
+                && !(_redFlagPending && !_raceFinalClassificationReceived);
+
             bool shouldExport = (armedReady || (_sessionEndDetected && (fcStable || fallbackElapsed)))
                 && _settings.AutoExportJson && _store.Sessions.Count > 0;
             if (shouldExport)
@@ -217,6 +404,23 @@ namespace Overtake.SimHub.Plugin
                 _raceFcFirstMs = 0;
                 _autoExportArmed = false;
                 bool exportOk = TryAutoExport();
+
+                // Auto-End: encerra a transmissão ao vivo NO MESMO momento em que o OTK é gerado
+                // (em vez de na bandeirada). Assim o "ao vivo" fecha alinhado com a disponibilidade
+                // dos dados. End() é idempotente (Active vira false → não repete).
+                if (_live != null && _live.Active)
+                {
+                    try
+                    {
+                        _live.End(_lastLiveJson);
+                        global::SimHub.Logging.Current.Info("[Overtake] Live auto-encerrado (OTK gerado)");
+                    }
+                    catch (Exception exEnd)
+                    {
+                        global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-End falhou: {0}", exEnd.Message));
+                    }
+                }
+
                 // Camada 2 — auto-rotate AFTER successful auto-export so the next event
                 // starts in a fresh capture even if the user never clicks "Nova sessão".
                 // Disabled if AutoCleanAfterExport=false in settings.
@@ -225,6 +429,20 @@ namespace Overtake.SimHub.Plugin
                     BeginNewCaptureSession();
                     global::SimHub.Logging.Current.Info(
                         "[Overtake] Capture auto-cleaned after export (AutoCleanAfterExport=on)");
+                }
+            }
+            else if (_sessionEndDetected && fallbackElapsed && _live != null && _live.Active)
+            {
+                // Segurança: corrida terminou mas o export não vai ocorrer (auto-export desligado
+                // ou sem sessão). Não deixa a transmissão pendurada.
+                try
+                {
+                    _live.End(_lastLiveJson);
+                    global::SimHub.Logging.Current.Info("[Overtake] Live auto-encerrado (fim de corrida, sem export)");
+                }
+                catch (Exception exEnd)
+                {
+                    global::SimHub.Logging.Current.Error(string.Format("[Overtake] Auto-End falhou: {0}", exEnd.Message));
                 }
             }
 
@@ -248,10 +466,16 @@ namespace Overtake.SimHub.Plugin
                 BeginNewCaptureSession();
                 _store.ClearAutoRotateRequest();
             }
+
+            // Rota B — push the live snapshot to connected broadcast UI clients.
+            // Throttled internally to ~6-7 Hz; no-op when no client is connected.
+            PublishRaceUi();
         }
 
         public void End(PluginManager pluginManager)
         {
+            try { if (_live != null && _live.Active) _live.End(_lastLiveJson); } catch { }
+            StopRaceWebServer();
             if (_receiver != null)
             {
                 _receiver.Stop();
@@ -390,6 +614,7 @@ namespace Overtake.SimHub.Plugin
             _sessionEnded = false;
             _raceFinalClassificationReceived = false;
             _autoExportArmed = false;
+            _redFlagPending = false;
             _raceSendAtMs = 0;
             _raceFcFirstMs = 0;
             _lastAutoExportMsg = "";
@@ -464,6 +689,24 @@ namespace Overtake.SimHub.Plugin
                     _settings.LastExportPath = path;
                     this.SaveCommonSettings("OvertakeSettings", _settings);
                     global::SimHub.Logging.Current.Info(string.Format("[Overtake] Auto-exported to {0}", path));
+                    // Auto-upload do OTK pos-live: se esta captura foi transmitida ao vivo, sobe o
+                    // resultado pro site (staging aguardando confirmacao do admin). Best-effort.
+                    if (_live != null && _store != null && !string.IsNullOrEmpty(_store.LiveBroadcastSessionId))
+                    {
+                        try
+                        {
+                            byte[] otkBytes = File.ReadAllBytes(path);
+                            bool up = _live.PostOtk(_store.LiveBroadcastSessionId, otkBytes);
+                            global::SimHub.Logging.Current.Info(string.Format(
+                                "[Overtake] Auto-upload do OTK pos-live: {0}",
+                                up ? "ok" : ("falhou: " + _live.LastError)));
+                        }
+                        catch (Exception exUp)
+                        {
+                            global::SimHub.Logging.Current.Error(string.Format(
+                                "[Overtake] Auto-upload do OTK falhou: {0}", exUp.Message));
+                        }
+                    }
                     return true;
                 }
                 return false;

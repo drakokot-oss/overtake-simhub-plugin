@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Overtake.SimHub.Plugin.Live;
 
 namespace Overtake.SimHub.Plugin.UI
 {
@@ -13,6 +15,7 @@ namespace Overtake.SimHub.Plugin.UI
         private readonly OvertakePlugin _plugin;
         private readonly OvertakeSettings _settings;
         private readonly DispatcherTimer _statusTimer;
+        private bool _wasLiveActive;   // detecta a transição ao vivo → encerrado p/ atualizar o rótulo
 
         private static readonly SolidColorBrush TealBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xC4, 0xB6));
         private static readonly SolidColorBrush GreenBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0xC4, 0xB6));
@@ -21,6 +24,8 @@ namespace Overtake.SimHub.Plugin.UI
         private static readonly SolidColorBrush BlueBrush = new SolidColorBrush(Color.FromRgb(0x21, 0x96, 0xF3));
         private static readonly SolidColorBrush DimBrush = new SolidColorBrush(Color.FromRgb(0x7B, 0x8C, 0xA3));
         private long _lastExportClickMs;
+        private List<EligibleLeague> _eligible;
+        private string _pendingSelectRaceId; // race to auto-select after a create/reload
 
         public SettingsControl()
         {
@@ -45,11 +50,61 @@ namespace Overtake.SimHub.Plugin.UI
                 ? DefaultOutputFolder() : _settings.OutputFolder;
             ChkAutoExport.IsChecked = _settings.AutoExportJson;
 
+            ChkRaceUi.IsChecked = _settings.RaceUiEnabled;
+            ChkRaceUiLan.IsChecked = _settings.RaceUiAllowLan;
+            TxtRaceUiPort.Text = (_settings.RaceUiPort > 0 ? _settings.RaceUiPort : 8088).ToString();
+            UpdateRaceUiUrl();
+
             LblVersion.Text = "v" + OvertakePlugin.PluginVersion;
+
+            // Live broadcast section
+            TxtLiveToken.Text = _settings.LiveBroadcastToken ?? "";
+            CmbSessionType.Items.Clear();
+            CmbSessionType.Items.Add(MakeItem("Corrida", "race"));
+            CmbSessionType.Items.Add(MakeItem("Classificacao", "qualy"));
+            CmbSessionType.Items.Add(MakeItem("Sprint", "sprint"));
+            CmbSessionType.SelectedIndex = 0;
+            UpdateLiveStatus();
+
+            SelectTab("status");
 
             UpdateStatusLabels();
             if (_statusTimer != null)
                 _statusTimer.Start();
+        }
+
+        // ── Navegacao por abas (alternancia de visibilidade) ──
+        private void BtnTab_Click(object sender, RoutedEventArgs e)
+        {
+            var b = sender as Button;
+            if (b != null && b.Tag != null)
+                SelectTab(b.Tag.ToString());
+        }
+
+        private void SelectTab(string tab)
+        {
+            PanelTabStatus.Visibility = tab == "status" ? Visibility.Visible : Visibility.Collapsed;
+            PanelTabLive.Visibility   = tab == "live"   ? Visibility.Visible : Visibility.Collapsed;
+            PanelTabConfig.Visibility = tab == "config" ? Visibility.Visible : Visibility.Collapsed;
+            PanelTabHelp.Visibility   = tab == "help"   ? Visibility.Visible : Visibility.Collapsed;
+            StyleTab(BtnTabStatus, tab == "status");
+            StyleTab(BtnTabLive,   tab == "live");
+            StyleTab(BtnTabConfig, tab == "config");
+            StyleTab(BtnTabHelp,   tab == "help");
+        }
+
+        private void StyleTab(Button b, bool active)
+        {
+            if (active)
+            {
+                b.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0xC4, 0xB6));
+                b.Foreground = new SolidColorBrush(Color.FromRgb(0x0A, 0x1A, 0x18));
+            }
+            else
+            {
+                b.Background = System.Windows.Media.Brushes.Transparent;
+                b.Foreground = new SolidColorBrush(Color.FromRgb(0x7B, 0x8C, 0xA3));
+            }
         }
 
         private void BtnApplyPort_Click(object sender, RoutedEventArgs e)
@@ -90,6 +145,53 @@ namespace Overtake.SimHub.Plugin.UI
             if (_settings == null) return;
             _settings.AutoExportJson = ChkAutoExport.IsChecked == true;
             SaveSettings();
+        }
+
+        private void ChkRaceUi_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_settings == null || _plugin == null) return;
+            _settings.RaceUiEnabled = ChkRaceUi.IsChecked == true;
+            _settings.RaceUiAllowLan = ChkRaceUiLan.IsChecked == true;
+            SaveSettings();
+            _plugin.StartRaceWebServer();
+            UpdateRaceUiUrl();
+        }
+
+        private void BtnApplyRaceUi_Click(object sender, RoutedEventArgs e)
+        {
+            int port;
+            if (int.TryParse(TxtRaceUiPort.Text, out port) && port > 0 && port <= 65535)
+            {
+                _settings.RaceUiPort = port;
+                SaveSettings();
+                _plugin.StartRaceWebServer();
+                UpdateRaceUiUrl();
+            }
+            else
+            {
+                MessageBox.Show("Informe uma porta valida (1-65535).",
+                    "Porta invalida", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void BtnOpenRaceUi_Click(object sender, RoutedEventArgs e)
+        {
+            string url = _plugin != null ? _plugin.RaceWebUrl : "";
+            if (string.IsNullOrEmpty(url))
+            {
+                MessageBox.Show("Ative a Race UI primeiro.",
+                    "Race UI", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch { /* browser not available */ }
+        }
+
+        private void UpdateRaceUiUrl()
+        {
+            if (LblRaceUiUrl == null || _plugin == null) return;
+            string url = _plugin.RaceWebUrl;
+            LblRaceUiUrl.Text = string.IsNullOrEmpty(url) ? "desativado" : url;
         }
 
         private void BtnNewSession_Click(object sender, RoutedEventArgs e)
@@ -152,6 +254,7 @@ namespace Overtake.SimHub.Plugin.UI
         private void StatusTimer_Tick(object sender, EventArgs e)
         {
             UpdateStatusLabels();
+            UpdateLiveStatus();
         }
 
         private void UpdateStatusLabels()
@@ -280,6 +383,8 @@ namespace Overtake.SimHub.Plugin.UI
                 LblExportResult.Text = autoExportMsg;
                 LblExportResult.Foreground = GreenBrush;
             }
+
+            UpdateRaceUiUrl();
 
             // Update notification — severity-driven, re-evaluated every tick so a
             // live UnsupportedFormat signal can escalate the banner mid-session.
@@ -462,6 +567,306 @@ namespace Overtake.SimHub.Plugin.UI
                     }
                 });
             });
+        }
+
+        // ---- Live cloud broadcast (overtakef1) ----
+
+        private static ComboBoxItem MakeItem(string text, string tag)
+        {
+            return new ComboBoxItem { Content = text, Tag = tag };
+        }
+
+        private static string SelectedTag(ComboBox cmb)
+        {
+            var it = cmb != null ? cmb.SelectedItem as ComboBoxItem : null;
+            return it != null && it.Tag != null ? it.Tag.ToString() : null;
+        }
+
+        private void BtnSaveLiveToken_Click(object sender, RoutedEventArgs e)
+        {
+            if (_settings == null || _plugin == null) return;
+            _settings.LiveBroadcastToken = (TxtLiveToken.Text ?? "").Trim();
+            SaveSettings();
+            _plugin.ConfigureLive();
+            LblLiveStatus.Text = "Token salvo.";
+            LblLiveStatus.Foreground = TealBrush;
+        }
+
+        private void BtnLiveConnect_Click(object sender, RoutedEventArgs e)
+        {
+            if (_plugin == null) return;
+            // Persist whatever is typed before listing.
+            _settings.LiveBroadcastToken = (TxtLiveToken.Text ?? "").Trim();
+            SaveSettings();
+            _plugin.ConfigureLive();
+            if (string.IsNullOrEmpty(_settings.LiveBroadcastToken))
+            {
+                LblLiveStatus.Text = "Cole o token primeiro.";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            BtnLiveConnect.IsEnabled = false;
+            LblLiveStatus.Text = "Conectando...";
+            LblLiveStatus.Foreground = DimBrush;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                List<EligibleLeague> list = _plugin.LiveListEligible();
+                string err = _plugin.LiveLastError;
+                Dispatcher.Invoke(() =>
+                {
+                    BtnLiveConnect.IsEnabled = true;
+                    if (list == null)
+                    {
+                        LblLiveStatus.Text = "Falha ao conectar: " + (err ?? "erro desconhecido");
+                        LblLiveStatus.Foreground = RedBrush;
+                        return;
+                    }
+                    _eligible = list;
+                    CmbLeague.Items.Clear();
+                    foreach (var lg in list)
+                        CmbLeague.Items.Add(MakeItem(lg.LeagueName ?? lg.LeagueId, lg.LeagueId));
+                    if (CmbLeague.Items.Count > 0) CmbLeague.SelectedIndex = 0;
+                    LblLiveStatus.Text = list.Count == 0
+                        ? "Conectado, mas nenhuma liga elegivel (precisa de papel broadcaster + live_enabled)."
+                        : "Conectado. " + list.Count + " liga(s) disponivel(is).";
+                    LblLiveStatus.Foreground = list.Count == 0 ? YellowBrush : GreenBrush;
+                });
+            });
+        }
+
+        private EligibleLeague FindLeague(string id)
+        {
+            if (_eligible == null || id == null) return null;
+            foreach (var lg in _eligible) if (lg.LeagueId == id) return lg;
+            return null;
+        }
+
+        private EligibleGrid FindGrid(EligibleLeague lg, string id)
+        {
+            if (lg == null || id == null) return null;
+            foreach (var g in lg.Grids) if (g.GridId == id) return g;
+            return null;
+        }
+
+        private void CmbLeague_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            CmbGrid.Items.Clear();
+            CmbRace.Items.Clear();
+            var lg = FindLeague(SelectedTag(CmbLeague));
+            if (lg == null) return;
+            foreach (var g in lg.Grids)
+                CmbGrid.Items.Add(MakeItem(g.GridName ?? g.GridId, g.GridId));
+            if (CmbGrid.Items.Count > 0) CmbGrid.SelectedIndex = 0;
+        }
+
+        private void CmbGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            LoadScheduledRaces(SelectedTag(CmbGrid));
+        }
+
+        // Fetch the grid's SCHEDULED races (PostgREST) and fill the dropdown.
+        private void LoadScheduledRaces(string gridId)
+        {
+            CmbRace.Items.Clear();
+            if (_plugin == null || string.IsNullOrEmpty(gridId)) return;
+            LblLiveStatus.Text = "Carregando corridas agendadas...";
+            LblLiveStatus.Foreground = DimBrush;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                var races = _plugin.LiveListScheduledRaces(gridId);
+                string err = _plugin.LiveLastError;
+                Dispatcher.Invoke(() =>
+                {
+                    if (SelectedTag(CmbGrid) != gridId) return; // grid changed while loading
+                    CmbRace.Items.Clear();
+                    if (races == null)
+                    {
+                        LblLiveStatus.Text = "Falha ao listar corridas: " + (err ?? "erro");
+                        LblLiveStatus.Foreground = RedBrush;
+                        return;
+                    }
+                    foreach (var r in races)
+                    {
+                        string label = string.IsNullOrEmpty(r.Name) ? "(sem nome)" : r.Name;
+                        if (!string.IsNullOrEmpty(r.RaceDate)) label += " - " + r.RaceDate;
+                        if (!string.IsNullOrEmpty(r.Track)) label += " - " + r.Track;
+                        CmbRace.Items.Add(MakeItem(label, r.Id));
+                    }
+                    if (!string.IsNullOrEmpty(_pendingSelectRaceId))
+                    {
+                        for (int i = 0; i < CmbRace.Items.Count; i++)
+                        {
+                            var it = CmbRace.Items[i] as ComboBoxItem;
+                            if (it != null && (it.Tag as string) == _pendingSelectRaceId) { CmbRace.SelectedIndex = i; break; }
+                        }
+                        _pendingSelectRaceId = null;
+                    }
+                    else if (CmbRace.Items.Count > 0) CmbRace.SelectedIndex = 0;
+                    LblLiveStatus.Text = races.Count == 0
+                        ? "Nenhuma corrida agendada neste grid. Use 'Criar nova corrida'."
+                        : races.Count + " corrida(s) agendada(s).";
+                    LblLiveStatus.Foreground = races.Count == 0 ? YellowBrush : DimBrush;
+                });
+            });
+        }
+
+        private void BtnRefreshRaces_Click(object sender, RoutedEventArgs e)
+        {
+            LoadScheduledRaces(SelectedTag(CmbGrid));
+        }
+
+        private void BtnToggleNewRace_Click(object sender, RoutedEventArgs e)
+        {
+            bool show = PanelNewRace.Visibility != Visibility.Visible;
+            PanelNewRace.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (show)
+            {
+                if (CmbNewTrack.Items.Count == 0)
+                {
+                    foreach (var t in LiveBroadcaster.CanonicalTracks) CmbNewTrack.Items.Add(t);
+                    CmbNewTrack.SelectedIndex = 0;
+                }
+                if (DpNewRaceDate.SelectedDate == null) DpNewRaceDate.SelectedDate = DateTime.Today;
+            }
+        }
+
+        private void BtnCreateRace_Click(object sender, RoutedEventArgs e)
+        {
+            if (_plugin == null) return;
+            string gridId = SelectedTag(CmbGrid);
+            if (string.IsNullOrEmpty(gridId))
+            {
+                LblLiveStatus.Text = "Selecione o grid (clique CONECTAR).";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            string track = CmbNewTrack.SelectedItem as string;
+            if (string.IsNullOrEmpty(track))
+            {
+                LblLiveStatus.Text = "Selecione a pista.";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            if (DpNewRaceDate.SelectedDate == null)
+            {
+                LblLiveStatus.Text = "Selecione a data.";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            string dateIso = DpNewRaceDate.SelectedDate.Value.ToString("yyyy-MM-dd");
+            string time = (TxtNewRaceTime.Text ?? "").Trim();
+            BtnCreateRace.IsEnabled = false;
+            LblLiveStatus.Text = "Criando corrida...";
+            LblLiveStatus.Foreground = DimBrush;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                string raceId = _plugin.LiveCreateScheduledRace(gridId, track, dateIso, time);
+                string err = _plugin.LiveLastError;
+                Dispatcher.Invoke(() =>
+                {
+                    BtnCreateRace.IsEnabled = true;
+                    if (string.IsNullOrEmpty(raceId))
+                    {
+                        LblLiveStatus.Text = "Falha ao criar corrida: " + (err ?? "erro");
+                        LblLiveStatus.Foreground = RedBrush;
+                        return;
+                    }
+                    PanelNewRace.Visibility = Visibility.Collapsed;
+                    _pendingSelectRaceId = raceId;
+                    LoadScheduledRaces(gridId); // reload + auto-select the new race
+                });
+            });
+        }
+
+        private void BtnGoLive_Click(object sender, RoutedEventArgs e)
+        {
+            if (_plugin == null) return;
+            string leagueId = SelectedTag(CmbLeague);
+            string gridId = SelectedTag(CmbGrid);
+            string raceId = SelectedTag(CmbRace);
+            if (string.IsNullOrEmpty(leagueId) || string.IsNullOrEmpty(gridId))
+            {
+                LblLiveStatus.Text = "Selecione liga e grid (clique CONECTAR).";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            if (string.IsNullOrEmpty(raceId))
+            {
+                LblLiveStatus.Text = "Selecione a corrida (ou crie uma nova).";
+                LblLiveStatus.Foreground = RedBrush;
+                return;
+            }
+            string sessionType = SelectedTag(CmbSessionType) ?? "race";
+            BtnGoLive.IsEnabled = false;
+            LblLiveStatus.Text = "Entrando ao vivo...";
+            LblLiveStatus.Foreground = DimBrush;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                bool ok = _plugin.LiveGoLive(leagueId, gridId, raceId, sessionType);
+                string err = _plugin.LiveLastError;
+                Dispatcher.Invoke(() =>
+                {
+                    if (ok)
+                    {
+                        LblLiveStatus.Text = "AO VIVO. Transmitindo para o portal.";
+                        LblLiveStatus.Foreground = GreenBrush;
+                        BtnEndLive.IsEnabled = true;
+                    }
+                    else
+                    {
+                        LblLiveStatus.Text = "Falha ao entrar ao vivo: " + (err ?? "erro");
+                        LblLiveStatus.Foreground = RedBrush;
+                        BtnGoLive.IsEnabled = true;
+                    }
+                });
+            });
+        }
+
+        private void BtnEndLive_Click(object sender, RoutedEventArgs e)
+        {
+            if (_plugin == null) return;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                _plugin.LiveEnd();
+                Dispatcher.Invoke(() =>
+                {
+                    LblLiveStatus.Text = "Transmissao encerrada.";
+                    LblLiveStatus.Foreground = TealBrush;
+                    BtnEndLive.IsEnabled = false;
+                    BtnGoLive.IsEnabled = true;
+                });
+            });
+        }
+
+        private void UpdateLiveStatus()
+        {
+            if (_plugin == null || LblLiveStatus == null) return;
+            bool active = _plugin.LiveActive;
+            BtnEndLive.IsEnabled = active;
+            BtnGoLive.IsEnabled = !active;
+            if (active)
+            {
+                string err = _plugin.LiveLastError;
+                if (!string.IsNullOrEmpty(err))
+                {
+                    LblLiveStatus.Text = "AO VIVO (ultimo aviso: " + err + ")";
+                    LblLiveStatus.Foreground = YellowBrush;
+                }
+                else
+                {
+                    LblLiveStatus.Text = "AO VIVO. Transmitindo para o portal.";
+                    LblLiveStatus.Foreground = GreenBrush;
+                }
+            }
+            else if (_wasLiveActive)
+            {
+                // Transição ao vivo → encerrado (manual OU auto-End). Antes, sem este else, o
+                // rótulo ficava preso em "AO VIVO" mesmo após encerrar. Só no tick da transição,
+                // para não sobrescrever mensagens transitórias (ex.: "Token salvo.").
+                LblLiveStatus.Text = "Transmissao encerrada.";
+                LblLiveStatus.Foreground = DimBrush;
+            }
+            _wasLiveActive = active;
         }
 
         private string ResolveOutputFolder()

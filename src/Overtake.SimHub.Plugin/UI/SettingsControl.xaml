@@ -12,13 +12,38 @@
         <SolidColorBrush x:Key="OvertakeCardBg" Color="#16213E" />
         <SolidColorBrush x:Key="OvertakeDim" Color="#7B8CA3" />
         <SolidColorBrush x:Key="OvertakeLight" Color="#E0E0E0" />
+
+        <!-- Botao de aba -->
+        <Style x:Key="TabButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#7B8CA3" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="10,9" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#1F2A44" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="20">
 
             <!-- Header / Branding -->
-            <Border Background="#16213E" CornerRadius="8" Padding="18,14" Margin="0,0,0,15">
+            <Border Background="#16213E" CornerRadius="8" Padding="18,14" Margin="0,0,0,12">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -28,7 +53,7 @@
                     <StackPanel Grid.Column="0">
                         <TextBlock Text="Overtake Telemetry" FontSize="20" FontWeight="Bold"
                                    Foreground="#2EC4B6" />
-                        <TextBlock Text="Capture F1 25 / F1 26 race data and export to Overtake Race Hub."
+                        <TextBlock Text="Captura dados de corrida do F1 25 / F1 26 e envia para o Overtake Race Hub."
                                    Foreground="#7B8CA3" FontSize="12" Margin="0,4,0,6" />
                         <TextBlock Foreground="#7B8CA3" FontSize="11">
                             <Hyperlink x:Name="LnkWebsite" Foreground="#2EC4B6"
@@ -36,7 +61,7 @@
                                        RequestNavigate="Hyperlink_RequestNavigate">
                                 racehub.overtakef1.com
                             </Hyperlink>
-                            <Run Text="  |  Upload your JSON and get instant results, standings and stats." />
+                            <Run Text="  |  Envie seu JSON e receba resultados, classificacao e estatisticas na hora." />
                         </TextBlock>
                     </StackPanel>
 
@@ -85,284 +110,434 @@
                 </Grid>
             </Border>
 
-            <!-- Capture Status -->
-            <styles:SHSection Title="Capture Status">
-                <StackPanel Margin="10">
-
-                    <Border x:Name="StatusBanner"
-                            Background="#1A1A2E" CornerRadius="6"
-                            Padding="15,12" Margin="0,0,0,10">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse x:Name="StatusDot" Width="14" Height="14"
-                                     Fill="#F44336" Margin="0,0,10,0"
-                                     VerticalAlignment="Center" />
-                            <TextBlock x:Name="LblStatusMain"
-                                       Text="Waiting for data..."
-                                       FontSize="15" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Border>
-
-                    <Grid Margin="0,5">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <StackPanel Grid.Column="0" Grid.Row="0" Margin="0,5">
-                            <TextBlock Text="TRACK" FontSize="10" Foreground="#2EC4B6"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="LblTrack" Text="&#x2014;" FontSize="14" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="1" Grid.Row="0" Margin="0,5">
-                            <TextBlock Text="SESSION" FontSize="10" Foreground="#2EC4B6"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="LblSession" Text="&#x2014;" FontSize="14" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="2" Grid.Row="0" Margin="0,5">
-                            <TextBlock Text="DRIVERS" FontSize="10" Foreground="#2EC4B6"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="LblDrivers" Text="0" FontSize="14" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="0" Grid.Row="1" Margin="0,5">
-                            <TextBlock Text="PACKETS" FontSize="10" Foreground="#2EC4B6"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="LblPackets" Text="0" FontSize="14" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="1" Grid.Row="1" Margin="0,5">
-                            <TextBlock Text="SESSIONS" FontSize="10" Foreground="#2EC4B6"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="LblSessions" Text="0" FontSize="14" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="2" Grid.Row="1" Margin="0,5">
-                            <TextBlock Text="LISTENER" FontSize="10" Foreground="#2EC4B6"
-                                       FontWeight="Bold" />
-                            <TextBlock x:Name="LblStatus" Text="&#x2014;" FontSize="14" />
-                        </StackPanel>
-                    </Grid>
-
-                    <TextBlock x:Name="LblHelpText"
-                               Text="The plugin captures data automatically when F1 25 or F1 26 is running."
-                               Foreground="#7B8CA3" FontSize="11" Margin="0,8,0,0"
-                               TextWrapping="Wrap" />
-
+            <!-- Barra de status (sempre visivel) -->
+            <Border x:Name="StatusBanner" Background="#16213E" CornerRadius="8"
+                    Padding="15,11" Margin="0,0,0,12" BorderBrush="#243049" BorderThickness="1">
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse x:Name="StatusDot" Width="13" Height="13"
+                             Fill="#F44336" Margin="0,0,11,0"
+                             VerticalAlignment="Center" />
+                    <TextBlock x:Name="LblStatusMain"
+                               Text="Aguardando dados..."
+                               FontSize="15" FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
                 </StackPanel>
-            </styles:SHSection>
+            </Border>
 
-            <!-- Export -->
-            <styles:SHSection Title="Export">
-                <StackPanel Margin="10">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button x:Name="BtnExport"
-                                Content="&#xE896;  EXPORT LEAGUE JSON"
-                                Padding="20,10"
-                                FontSize="13"
-                                FontWeight="SemiBold"
-                                Click="BtnExport_Click" />
-                        <Button x:Name="BtnOpenFolder"
-                                Content="OPEN FOLDER"
-                                Padding="15,10"
-                                Margin="10,0,0,0"
-                                Click="BtnOpenFolder_Click" />
+            <!-- Abas -->
+            <Border Background="#16213E" CornerRadius="8" Padding="4" Margin="0,0,0,14">
+                <UniformGrid Rows="1" Columns="4">
+                    <Button x:Name="BtnTabStatus" Content="Status" Style="{StaticResource TabButton}" Margin="2" Tag="status" Click="BtnTab_Click" />
+                    <Button x:Name="BtnTabLive" Content="Transmitir" Style="{StaticResource TabButton}" Margin="2" Tag="live" Click="BtnTab_Click" />
+                    <Button x:Name="BtnTabConfig" Content="Configuracao" Style="{StaticResource TabButton}" Margin="2" Tag="config" Click="BtnTab_Click" />
+                    <Button x:Name="BtnTabHelp" Content="Ajuda" Style="{StaticResource TabButton}" Margin="2" Tag="help" Click="BtnTab_Click" />
+                </UniformGrid>
+            </Border>
+
+            <!-- ================= ABA: STATUS ================= -->
+            <StackPanel x:Name="PanelTabStatus">
+
+                <styles:SHSection Title="Status da captura">
+                    <StackPanel Margin="10">
+                        <Grid Margin="0,5">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Column="0" Grid.Row="0" Margin="0,5">
+                                <TextBlock Text="PISTA" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblTrack" Text="&#x2014;" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Grid.Row="0" Margin="0,5">
+                                <TextBlock Text="SESSAO" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblSession" Text="&#x2014;" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Grid.Row="0" Margin="0,5">
+                                <TextBlock Text="PILOTOS" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblDrivers" Text="0" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="0" Grid.Row="1" Margin="0,5">
+                                <TextBlock Text="PACOTES" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblPackets" Text="0" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Grid.Row="1" Margin="0,5">
+                                <TextBlock Text="SESSOES" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblSessions" Text="0" FontSize="14" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Grid.Row="1" Margin="0,5">
+                                <TextBlock Text="LISTENER" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblStatus" Text="&#x2014;" FontSize="14" />
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock x:Name="LblHelpText"
+                                   Text="O plugin captura os dados automaticamente quando o F1 25 ou F1 26 esta rodando."
+                                   Foreground="#7B8CA3" FontSize="11" Margin="0,8,0,0"
+                                   TextWrapping="Wrap" />
                     </StackPanel>
+                </styles:SHSection>
 
-                    <TextBlock x:Name="LblExportResult" Text=""
-                               Margin="0,0,0,5" TextWrapping="Wrap" FontStyle="Italic" />
+                <styles:SHSection Title="Exportar">
+                    <StackPanel Margin="10">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button x:Name="BtnExport"
+                                    Content="&#xE896;  EXPORTAR JSON DA LIGA"
+                                    Padding="20,10"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    Click="BtnExport_Click" />
+                            <Button x:Name="BtnOpenFolder"
+                                    Content="ABRIR PASTA"
+                                    Padding="15,10"
+                                    Margin="10,0,0,0"
+                                    Click="BtnOpenFolder_Click" />
+                        </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,3">
-                        <TextBlock Text="Last export: " Foreground="#7B8CA3" />
-                        <TextBlock x:Name="LblLastExport" Text="none yet" Foreground="#7B8CA3" />
+                        <TextBlock x:Name="LblExportResult" Text=""
+                                   Margin="0,0,0,5" TextWrapping="Wrap" FontStyle="Italic" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,3">
+                            <TextBlock Text="Ultimo export: " Foreground="#7B8CA3" />
+                            <TextBlock x:Name="LblLastExport" Text="nenhum ainda" Foreground="#7B8CA3" />
+                        </StackPanel>
+
+                        <CheckBox x:Name="ChkAutoExport"
+                                  Content="Exportar JSON automaticamente ao terminar a sessao"
+                                  Margin="0,8,0,0"
+                                  Checked="ChkAutoExport_Changed"
+                                  Unchecked="ChkAutoExport_Changed" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="BtnNewSession"
+                                    Content="NOVA SESSAO (limpar captura)"
+                                    Padding="16,8"
+                                    FontSize="12"
+                                    Click="BtnNewSession_Click" />
+                        </StackPanel>
+                        <TextBlock Foreground="#7B8CA3" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap">
+                            <Run FontWeight="SemiBold" Foreground="#FFD54F">Apos exportar</Run>
+                            <Run>e antes da proxima corrida ou lobby, clique em Nova Sessao para apagar telemetria em memoria. O UDP continua ativo; evita misturar duas corridas no mesmo ficheiro.</Run>
+                        </TextBlock>
+
+                        <TextBlock Foreground="#7B8CA3" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap">
+                            <Run>Envie seu JSON exportado em</Run>
+                            <Hyperlink Foreground="#2EC4B6"
+                                       NavigateUri="https://racehub.overtakef1.com/"
+                                       RequestNavigate="Hyperlink_RequestNavigate">
+                                racehub.overtakef1.com
+                            </Hyperlink>
+                            <Run>para receber resultados, classificacao e estatisticas na hora.</Run>
+                        </TextBlock>
                     </StackPanel>
+                </styles:SHSection>
 
-                    <CheckBox x:Name="ChkAutoExport"
-                              Content="Auto-export JSON when session ends"
-                              Margin="0,8,0,0"
-                              Checked="ChkAutoExport_Changed"
-                              Unchecked="ChkAutoExport_Changed" />
+            </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button x:Name="BtnNewSession"
-                                Content="NOVA SESSAO (limpar captura)"
-                                Padding="16,8"
-                                FontSize="12"
-                                Click="BtnNewSession_Click" />
-                    </StackPanel>
-                    <TextBlock Foreground="#7B8CA3" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap">
-                        <Run FontWeight="SemiBold" Foreground="#FFD54F">Apos exportar</Run>
-                        <Run>e antes da proxima corrida ou lobby, clique em Nova Sessao para apagar telemetria em memoria. O UDP continua ativo; evita misturar duas corridas no mesmo ficheiro.</Run>
-                    </TextBlock>
-
-                    <TextBlock Foreground="#7B8CA3" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap">
-                        <Run>Upload your exported JSON at</Run>
-                        <Hyperlink Foreground="#2EC4B6"
-                                   NavigateUri="https://racehub.overtakef1.com/"
-                                   RequestNavigate="Hyperlink_RequestNavigate">
-                            racehub.overtakef1.com
-                        </Hyperlink>
-                        <Run>to get instant race results, standings and driver stats.</Run>
-                    </TextBlock>
-                </StackPanel>
-            </styles:SHSection>
-
-            <!-- Settings -->
-            <styles:SHSection Title="Settings">
-                <StackPanel Margin="10">
-
-                    <TextBlock Text="UDP Port" FontWeight="Bold" Margin="0,0,0,3" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBox x:Name="TxtPort"
-                                 Width="80"
-                                 VerticalContentAlignment="Center"
-                                 Margin="0,0,10,0" />
-                        <Button x:Name="BtnApplyPort"
-                                Content="APPLY"
-                                Padding="15,5"
-                                Click="BtnApplyPort_Click" />
-                        <TextBlock Text="Must match the game's telemetry port (default: 20778)"
-                                   Foreground="#7B8CA3" FontSize="11"
-                                   VerticalAlignment="Center" Margin="10,0,0,0" />
-                    </StackPanel>
-
-                    <TextBlock Text="Output Folder" FontWeight="Bold" Margin="0,5,0,3" />
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                        <TextBox x:Name="TxtOutputFolder"
-                                 Width="350"
-                                 VerticalContentAlignment="Center"
-                                 IsReadOnly="True"
-                                 Margin="0,0,10,0" />
-                        <Button x:Name="BtnBrowse"
-                                Content="BROWSE..."
-                                Padding="15,5"
-                                Click="BtnBrowse_Click" />
-                    </StackPanel>
-
-                </StackPanel>
-            </styles:SHSection>
-
-            <!-- Setup Guide - PC -->
-            <styles:SHSection Title="Setup Guide (PC)">
-                <StackPanel Margin="10">
-                    <TextBlock TextWrapping="Wrap" Foreground="#CCC" FontSize="12">
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 1 - F1 25 Game Settings:</Run>
-                        <LineBreak />
-                        <Run>Settings > Telemetry > UDP Telemetry = On</Run>
-                        <LineBreak />
-                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = 127.0.0.1  |  UDP Port = 20778  |  Format = 2025 (F1 25) / 2026 (F1 26)</Run>
-                        <LineBreak /><LineBreak />
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 2 - SimHub Game Config (IMPORTANT):</Run>
-                        <LineBreak />
-                        <Run>Go to SimHub Home > Codemasters F1 25 > click "Game config..."</Run>
-                        <LineBreak />
-                        <Run FontWeight="Bold" Foreground="#FFD54F">Set UDP Port to 20777</Run>
-                        <LineBreak />
-                        <Run Foreground="#7B8CA3">(SimHub auto-detects 20778 from the game. You MUST change it back to 20777.)</Run>
-                        <LineBreak /><LineBreak />
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">How it works:</Run>
-                        <LineBreak />
-                        <Run>Game (20778)  &#x2192;  Overtake Plugin  &#x2192;  relay  &#x2192;  SimHub (20777)</Run>
-                        <LineBreak />
-                        <Run Foreground="#7B8CA3">The plugin receives telemetry, processes it, and relays every packet</Run>
-                        <LineBreak />
-                        <Run Foreground="#7B8CA3">to SimHub so your dashboards keep working normally.</Run>
-                    </TextBlock>
-                </StackPanel>
-            </styles:SHSection>
-
-            <!-- Setup Guide - Console -->
-            <styles:SHSection Title="Setup Guide (Console - PS5 / Xbox)">
-                <StackPanel Margin="10">
-                    <TextBlock TextWrapping="Wrap" Foreground="#CCC" FontSize="12">
-                        <Run Foreground="#7B8CA3">F1 25 / F1 26 on PlayStation and Xbox can send telemetry to a PC on the same network.</Run>
-                        <LineBreak /><LineBreak />
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 1 - Find your PC's IP address:</Run>
-                        <LineBreak />
-                        <Run>On your PC, open CMD and type:  </Run>
-                        <Run FontWeight="Bold" Foreground="#FFD54F">ipconfig</Run>
-                        <LineBreak />
-                        <Run>Look for "IPv4 Address" (e.g. 192.168.1.100)</Run>
-                        <LineBreak /><LineBreak />
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 2 - F1 25 Console Settings:</Run>
-                        <LineBreak />
-                        <Run>Settings > Telemetry > UDP Telemetry = On</Run>
-                        <LineBreak />
-                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = your PC's IP (e.g. 192.168.1.100)</Run>
-                        <LineBreak />
-                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP Port = 20778  |  Format = 2025 (F1 25) / 2026 (F1 26)</Run>
-                        <LineBreak /><LineBreak />
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">STEP 3 - SimHub (same as PC Step 2):</Run>
-                        <LineBreak />
-                        <Run>Home > Codemasters F1 25 > Game config > </Run>
-                        <Run FontWeight="Bold" Foreground="#FFD54F">UDP Port = 20777</Run>
-                        <LineBreak /><LineBreak />
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">Requirements:</Run>
-                        <LineBreak />
-                        <Run Foreground="#7B8CA3">- Console and PC must be on the same local network (Wi-Fi or Ethernet)</Run>
-                        <LineBreak />
-                        <Run Foreground="#7B8CA3">- Windows Firewall must allow incoming UDP on port 20778</Run>
-                        <LineBreak />
-                        <Run Foreground="#7B8CA3">- SimHub must be running on the PC during the session</Run>
-                    </TextBlock>
-                </StackPanel>
-            </styles:SHSection>
-
-            <!-- About -->
-            <styles:SHSection Title="About">
-                <StackPanel Margin="10">
-                    <TextBlock Foreground="#7B8CA3" FontSize="12" TextWrapping="Wrap">
-                        <Run FontWeight="Bold" Foreground="#2EC4B6">Overtake Race Hub</Run>
-                        <Run> &#x2014; The ultimate F1 25 league management platform.</Run>
-                        <LineBreak />
-                        <Run>Automatic standings, driver stats, incident reports and more.</Run>
-                    </TextBlock>
-
-                    <TextBlock Margin="0,10,0,0" FontSize="11">
-                        <Hyperlink Foreground="#2EC4B6"
-                                   NavigateUri="https://racehub.overtakef1.com/"
-                                   RequestNavigate="Hyperlink_RequestNavigate">
-                            racehub.overtakef1.com
-                        </Hyperlink>
-                        <Run Foreground="#3D4F6B">  |  </Run>
-                        <Hyperlink Foreground="#2EC4B6"
-                                   NavigateUri="https://racehub.overtakef1.com/downloads"
-                                   RequestNavigate="Hyperlink_RequestNavigate">
-                            Downloads
-                        </Hyperlink>
-                        <Run Foreground="#3D4F6B">  |  </Run>
-                        <Hyperlink Foreground="#2EC4B6"
-                                   NavigateUri="https://racehub.overtakef1.com/guide"
-                                   RequestNavigate="Hyperlink_RequestNavigate">
-                            Guide
-                        </Hyperlink>
-                    </TextBlock>
-
-                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10" Margin="0,12,0,0">
-                        <StackPanel>
-                            <TextBlock FontWeight="Bold" Foreground="#2EC4B6" FontSize="11"
-                                       Text="&#x1F512;  Privacy &amp; Bandwidth" Margin="0,0,0,6" />
-                            <TextBlock Foreground="#7B8CA3" FontSize="11" TextWrapping="Wrap">
-                                <Run FontWeight="Bold" Foreground="#E0E0E0">This plugin works 100% offline.</Run>
-                                <Run> All telemetry is received locally from the game via UDP (localhost or LAN) and saved as a file on your PC. No race data is ever sent to the internet.</Run>
+            <!-- ================= ABA: TRANSMITIR ================= -->
+            <StackPanel x:Name="PanelTabLive" Visibility="Collapsed">
+                <styles:SHSection Title="Transmissao ao vivo (overtakef1)">
+                    <StackPanel Margin="10">
+                        <Border Background="#2A2210" CornerRadius="6" Padding="12,10" Margin="0,0,0,12" BorderBrush="#5C4A10" BorderThickness="1">
+                            <TextBlock TextWrapping="Wrap" FontSize="11">
+                                <Run FontWeight="Bold" Foreground="#FFD54F">&#x2605;  Exclusivo de ligas Elite ou Founder.</Run>
+                                <LineBreak />
+                                <Run Foreground="#B9A66A">A geracao do token e a transmissao ao vivo estao disponiveis apenas para admins de ligas Elite/Founder.</Run>
                             </TextBlock>
-                            <TextBlock Foreground="#7B8CA3" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0">
-                                <Run FontWeight="Bold" Foreground="#E0E0E0">Internet usage: near zero.</Run>
-                                <Run> The only network request is a single check (~200 bytes) when SimHub starts, to notify you of new plugin versions. This can be ignored safely.</Run>
-                            </TextBlock>
-                            <TextBlock Foreground="#3D4F6B" FontSize="10" Margin="0,8,0,0" TextWrapping="Wrap"
-                                       Text="Game &#x2192; UDP (local) &#x2192; Plugin &#x2192; JSON file (local disk). No data leaves your computer." />
+                        </Border>
+
+                        <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,10">
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">Leve a corrida ao vivo para o portal overtakef1.</Run>
+                            <Run>Gere o token em Perfil &gt; Transmissao / SimHub no site, cole abaixo, conecte, escolha a liga/grid/corrida e clique IR AO AR. Nao afeta o arquivo .otk.</Run>
+                        </TextBlock>
+
+                        <TextBlock Text="1 &#xB7; Token de transmissao" FontWeight="Bold" Foreground="#2EC4B6" Margin="0,0,0,4" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBox x:Name="TxtLiveToken"
+                                     Width="320"
+                                     VerticalContentAlignment="Center"
+                                     Margin="0,0,10,0" />
+                            <Button x:Name="BtnSaveLiveToken"
+                                    Content="SALVAR"
+                                    Padding="15,5"
+                                    Click="BtnSaveLiveToken_Click" />
+                            <Button x:Name="BtnLiveConnect"
+                                    Content="CONECTAR"
+                                    Padding="15,5"
+                                    Margin="10,0,0,0"
+                                    Click="BtnLiveConnect_Click" />
                         </StackPanel>
-                    </Border>
-                </StackPanel>
-            </styles:SHSection>
+
+                        <TextBlock Text="2 &#xB7; Onde transmitir" FontWeight="Bold" Foreground="#2EC4B6" Margin="0,12,0,4" />
+                        <TextBlock Text="Liga" FontWeight="Bold" Margin="0,0,0,3" />
+                        <ComboBox x:Name="CmbLeague" Margin="0,0,0,8"
+                                  SelectionChanged="CmbLeague_SelectionChanged" />
+
+                        <TextBlock Text="Grid / temporada" FontWeight="Bold" Margin="0,0,0,3" />
+                        <ComboBox x:Name="CmbGrid" Margin="0,0,0,8"
+                                  SelectionChanged="CmbGrid_SelectionChanged" />
+
+                        <StackPanel x:Name="PanelExistingRace">
+                            <TextBlock Text="Corrida agendada" FontWeight="Bold" Margin="0,0,0,3" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <ComboBox x:Name="CmbRace" Width="320" Margin="0,0,10,0" />
+                                <Button x:Name="BtnRefreshRaces" Content="ATUALIZAR" Padding="12,5"
+                                        Click="BtnRefreshRaces_Click" />
+                            </StackPanel>
+                            <Button x:Name="BtnToggleNewRace" Content="Criar nova corrida..."
+                                    Padding="12,5" HorizontalAlignment="Left" Margin="0,0,0,8"
+                                    Click="BtnToggleNewRace_Click" />
+                        </StackPanel>
+
+                        <StackPanel x:Name="PanelNewRace" Visibility="Collapsed" Margin="0,0,0,8">
+                            <TextBlock Text="Pista (lista oficial)" FontWeight="Bold" Margin="0,0,0,3" />
+                            <ComboBox x:Name="CmbNewTrack" Margin="0,0,0,8" />
+                            <TextBlock Text="Data" FontWeight="Bold" Margin="0,0,0,3" />
+                            <DatePicker x:Name="DpNewRaceDate" Margin="0,0,0,8" HorizontalAlignment="Left" />
+                            <TextBlock Text="Hora (HH:MM)" FontWeight="Bold" Margin="0,0,0,3" />
+                            <TextBox x:Name="TxtNewRaceTime" Width="80" Text="20:00"
+                                     VerticalContentAlignment="Center" HorizontalAlignment="Left" Margin="0,0,0,8" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="BtnCreateRace" Content="CRIAR CORRIDA" Padding="14,5"
+                                        Click="BtnCreateRace_Click" />
+                                <Button x:Name="BtnCancelNewRace" Content="Cancelar" Padding="12,5"
+                                        Margin="10,0,0,0" Click="BtnToggleNewRace_Click" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <TextBlock Text="Tipo de sessao" FontWeight="Bold" Margin="0,0,0,3" />
+                        <ComboBox x:Name="CmbSessionType" Margin="0,0,0,12" />
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <Button x:Name="BtnGoLive"
+                                    Content="&#x1F4E1;  IR AO AR"
+                                    Padding="22,9"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Click="BtnGoLive_Click" />
+                            <Button x:Name="BtnEndLive"
+                                    Content="ENCERRAR"
+                                    Padding="18,9"
+                                    Margin="10,0,0,0"
+                                    IsEnabled="False"
+                                    Click="BtnEndLive_Click" />
+                        </StackPanel>
+
+                        <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="STATUS" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblLiveStatus" Text="ocioso"
+                                           FontSize="14" FontWeight="SemiBold" Margin="0,2,0,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </styles:SHSection>
+            </StackPanel>
+
+            <!-- ================= ABA: CONFIGURACAO ================= -->
+            <StackPanel x:Name="PanelTabConfig" Visibility="Collapsed">
+
+                <styles:SHSection Title="Conexao do jogo">
+                    <StackPanel Margin="10">
+                        <TextBlock Text="Porta UDP" FontWeight="Bold" Margin="0,0,0,3" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBox x:Name="TxtPort"
+                                     Width="80"
+                                     VerticalContentAlignment="Center"
+                                     Margin="0,0,10,0" />
+                            <Button x:Name="BtnApplyPort"
+                                    Content="APLICAR"
+                                    Padding="15,5"
+                                    Click="BtnApplyPort_Click" />
+                            <TextBlock Text="Deve bater com a porta de telemetria do jogo (padrao: 20778)"
+                                       Foreground="#7B8CA3" FontSize="11"
+                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                        </StackPanel>
+
+                        <TextBlock Text="Pasta de saida" FontWeight="Bold" Margin="0,5,0,3" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                            <TextBox x:Name="TxtOutputFolder"
+                                     Width="350"
+                                     VerticalContentAlignment="Center"
+                                     IsReadOnly="True"
+                                     Margin="0,0,10,0" />
+                            <Button x:Name="BtnBrowse"
+                                    Content="PROCURAR..."
+                                    Padding="15,5"
+                                    Click="BtnBrowse_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </styles:SHSection>
+
+                <styles:SHSection Title="Race UI (web) &#x2014; opcional">
+                    <StackPanel Margin="10">
+                        <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">Overlay da corrida em tempo real (OBS).</Run>
+                            <Run>Pagina local que mostra a corrida ao vivo (classificacao, pneus, ERS, combustivel, danos, punicoes). Independente da transmissao para o portal.</Run>
+                        </TextBlock>
+
+                        <CheckBox x:Name="ChkRaceUi"
+                                  Content="Ativar Race UI (servidor web local)"
+                                  Margin="0,0,0,8"
+                                  Checked="ChkRaceUi_Changed"
+                                  Unchecked="ChkRaceUi_Changed" />
+
+                        <TextBlock Text="Porta" FontWeight="Bold" Margin="0,0,0,3" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBox x:Name="TxtRaceUiPort"
+                                     Width="80"
+                                     VerticalContentAlignment="Center"
+                                     Margin="0,0,10,0" />
+                            <Button x:Name="BtnApplyRaceUi"
+                                    Content="APLICAR"
+                                    Padding="15,5"
+                                    Click="BtnApplyRaceUi_Click" />
+                            <TextBlock Text="Padrao: 8088"
+                                       Foreground="#7B8CA3" FontSize="11"
+                                       VerticalAlignment="Center" Margin="10,0,0,0" />
+                        </StackPanel>
+
+                        <CheckBox x:Name="ChkRaceUiLan"
+                                  Content="Permitir acesso na rede local (LAN / segundo PC / celular)"
+                                  Margin="0,0,0,10"
+                                  Checked="ChkRaceUi_Changed"
+                                  Unchecked="ChkRaceUi_Changed" />
+
+                        <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10">
+                            <StackPanel>
+                                <TextBlock Text="ENDERECO" FontSize="10" Foreground="#2EC4B6" FontWeight="Bold" />
+                                <TextBlock x:Name="LblRaceUiUrl" Text="desativado"
+                                           FontSize="15" FontWeight="SemiBold" Margin="0,2,0,8" />
+                                <Button x:Name="BtnOpenRaceUi"
+                                        Content="ABRIR NO NAVEGADOR"
+                                        Padding="15,6"
+                                        HorizontalAlignment="Left"
+                                        Click="BtnOpenRaceUi_Click" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </styles:SHSection>
+
+            </StackPanel>
+
+            <!-- ================= ABA: AJUDA ================= -->
+            <StackPanel x:Name="PanelTabHelp" Visibility="Collapsed">
+
+                <styles:SHSection Title="Guia de configuracao (PC)">
+                    <StackPanel Margin="10">
+                        <TextBlock TextWrapping="Wrap" Foreground="#CCC" FontSize="12">
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 1 - Configuracao no jogo (F1 25/26):</Run>
+                            <LineBreak />
+                            <Run>Ajustes > Telemetria > Telemetria UDP = Ligado</Run>
+                            <LineBreak />
+                            <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = 127.0.0.1  |  Porta UDP = 20778  |  Formato = 2025 (F1 25) / 2026 (F1 26)</Run>
+                            <LineBreak /><LineBreak />
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 2 - Config do jogo no SimHub (IMPORTANTE):</Run>
+                            <LineBreak />
+                            <Run>SimHub Home > Codemasters F1 25 > "Game config..."</Run>
+                            <LineBreak />
+                            <Run FontWeight="Bold" Foreground="#FFD54F">Defina a Porta UDP = 20777</Run>
+                            <LineBreak />
+                            <Run Foreground="#7B8CA3">(O SimHub detecta 20778 do jogo. Voce PRECISA mudar de volta para 20777.)</Run>
+                            <LineBreak /><LineBreak />
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">Como funciona:</Run>
+                            <LineBreak />
+                            <Run>Jogo (20778)  &#x2192;  Plugin Overtake  &#x2192;  repasse  &#x2192;  SimHub (20777)</Run>
+                            <LineBreak />
+                            <Run Foreground="#7B8CA3">O plugin recebe a telemetria, processa e repassa cada pacote ao SimHub, para seus dashboards continuarem funcionando.</Run>
+                        </TextBlock>
+                    </StackPanel>
+                </styles:SHSection>
+
+                <styles:SHSection Title="Guia (Console - PS5 / Xbox)">
+                    <StackPanel Margin="10">
+                        <TextBlock TextWrapping="Wrap" Foreground="#CCC" FontSize="12">
+                            <Run Foreground="#7B8CA3">F1 25 / F1 26 no PlayStation e Xbox podem enviar telemetria para um PC na mesma rede.</Run>
+                            <LineBreak /><LineBreak />
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 1 - Descubra o IP do seu PC:</Run>
+                            <LineBreak />
+                            <Run>No PC, abra o CMD e digite:  </Run>
+                            <Run FontWeight="Bold" Foreground="#FFD54F">ipconfig</Run>
+                            <LineBreak />
+                            <Run>Procure por "Endereco IPv4" (ex.: 192.168.1.100)</Run>
+                            <LineBreak /><LineBreak />
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 2 - Config no console:</Run>
+                            <LineBreak />
+                            <Run>Ajustes > Telemetria > Telemetria UDP = Ligado</Run>
+                            <LineBreak />
+                            <Run FontWeight="Bold" Foreground="#FFD54F">UDP IP = o IP do seu PC (ex.: 192.168.1.100)</Run>
+                            <LineBreak />
+                            <Run FontWeight="Bold" Foreground="#FFD54F">Porta UDP = 20778  |  Formato = 2025 (F1 25) / 2026 (F1 26)</Run>
+                            <LineBreak /><LineBreak />
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 3 - SimHub (igual ao Passo 2 do PC):</Run>
+                            <LineBreak />
+                            <Run>Home > Codemasters F1 25 > Game config > </Run>
+                            <Run FontWeight="Bold" Foreground="#FFD54F">Porta UDP = 20777</Run>
+                            <LineBreak /><LineBreak />
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">Requisitos:</Run>
+                            <LineBreak />
+                            <Run Foreground="#7B8CA3">- Console e PC na mesma rede local (Wi-Fi ou cabo)</Run>
+                            <LineBreak />
+                            <Run Foreground="#7B8CA3">- Firewall do Windows deve permitir UDP na porta 20778</Run>
+                            <LineBreak />
+                            <Run Foreground="#7B8CA3">- SimHub rodando no PC durante a sessao</Run>
+                        </TextBlock>
+                    </StackPanel>
+                </styles:SHSection>
+
+                <styles:SHSection Title="Sobre">
+                    <StackPanel Margin="10">
+                        <TextBlock Foreground="#7B8CA3" FontSize="12" TextWrapping="Wrap">
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">Overtake Race Hub</Run>
+                            <Run> &#x2014; A plataforma completa de gestao de ligas de F1.</Run>
+                            <LineBreak />
+                            <Run>Classificacao automatica, estatisticas, relatorios de incidentes e mais.</Run>
+                        </TextBlock>
+
+                        <TextBlock Margin="0,10,0,0" FontSize="11">
+                            <Hyperlink Foreground="#2EC4B6"
+                                       NavigateUri="https://racehub.overtakef1.com/"
+                                       RequestNavigate="Hyperlink_RequestNavigate">
+                                racehub.overtakef1.com
+                            </Hyperlink>
+                            <Run Foreground="#3D4F6B">  |  </Run>
+                            <Hyperlink Foreground="#2EC4B6"
+                                       NavigateUri="https://racehub.overtakef1.com/downloads"
+                                       RequestNavigate="Hyperlink_RequestNavigate">
+                                Downloads
+                            </Hyperlink>
+                            <Run Foreground="#3D4F6B">  |  </Run>
+                            <Hyperlink Foreground="#2EC4B6"
+                                       NavigateUri="https://racehub.overtakef1.com/guide"
+                                       RequestNavigate="Hyperlink_RequestNavigate">
+                                Guia
+                            </Hyperlink>
+                        </TextBlock>
+
+                        <Border Background="#1A1A2E" CornerRadius="6" Padding="12,10" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock FontWeight="Bold" Foreground="#2EC4B6" FontSize="11"
+                                           Text="&#x1F512;  Privacidade e banda" Margin="0,0,0,6" />
+                                <TextBlock Foreground="#7B8CA3" FontSize="11" TextWrapping="Wrap">
+                                    <Run FontWeight="Bold" Foreground="#E0E0E0">O plugin funciona 100% offline.</Run>
+                                    <Run> Toda a telemetria e recebida localmente do jogo via UDP (localhost ou LAN) e salva como arquivo no seu PC. Nenhum dado de corrida vai para a internet pelo export.</Run>
+                                </TextBlock>
+                                <TextBlock Foreground="#7B8CA3" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0">
+                                    <Run FontWeight="Bold" Foreground="#E0E0E0">Uso de internet: quase zero.</Run>
+                                    <Run> A unica requisicao e uma verificacao (~200 bytes) ao abrir o SimHub, para avisar de novas versoes. (A transmissao ao vivo, quando ativada, envia os dados ao portal.)</Run>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </styles:SHSection>
+
+            </StackPanel>
 
         </StackPanel>
     </ScrollViewer>

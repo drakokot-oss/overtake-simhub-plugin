@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Overtake - Race Control</title>
+<style>
+  :root {
+    --bg:#0a0d12; --bg-2:#11161f; --panel:#151b26; --panel-2:#1b2230; --line:#232c3b;
+    --txt:#e7edf5; --txt-dim:#8a97aa; --txt-faint:#5c6678;
+    --accent:#ff4d2e; --accent-2:#ffb020; --good:#2ed47a; --bad:#ff5470; --purple:#b15bff;
+    --soft:#ff3b3b; --medium:#ffd12e; --hard:#eef0f2; --inter:#43b02a; --wet:#2f86ff;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; }
+  body {
+    background: radial-gradient(1200px 600px at 70% -10%, #16202e 0%, var(--bg) 55%);
+    color:var(--txt); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+  }
+  .wrap { max-width:1680px; margin:0 auto; padding:14px 18px 40px; }
+  .appbar { display:flex; align-items:center; gap:18px; padding:10px 16px; margin-bottom:14px;
+    background:linear-gradient(90deg,var(--panel) 0%,var(--bg-2) 100%); border:1px solid var(--line); border-radius:14px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:.5px; }
+  .brand .logo { width:30px; height:30px; border-radius:8px; background:conic-gradient(from 200deg,var(--accent),var(--accent-2));
+    display:grid; place-items:center; color:#1a1003; font-weight:900; font-size:16px; box-shadow:0 0 18px rgba(255,77,46,.35); }
+  .brand .logo-img { width:34px; height:34px; border-radius:8px; object-fit:contain; }
+  .brand small { display:block; color:var(--txt-faint); font-weight:600; font-size:10px; letter-spacing:2px; }
+  .tabs { display:flex; gap:6px; margin-left:6px; }
+  .tab { border:1px solid transparent; background:transparent; color:var(--txt-dim); padding:8px 14px; border-radius:10px; cursor:pointer; font-weight:600; font-size:13px; }
+  .tab:hover { color:var(--txt); background:var(--panel-2); }
+  .tab.active { color:#fff; background:var(--panel-2); border-color:var(--line); }
+  .spacer { flex:1; }
+  .right { display:flex; align-items:center; gap:10px; }
+  .live { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:var(--accent); padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:var(--bg-2); }
+  .live.off { color:var(--txt-faint); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); animation:pulse 1.6s infinite; }
+  .live.off .dot { background:var(--txt-faint); animation:none; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(255,77,46,.55);} 70%{box-shadow:0 0 0 9px rgba(255,77,46,0);} 100%{box-shadow:0 0 0 0 rgba(255,77,46,0);} }
+  .autobox { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--txt-dim); border:1px solid var(--line); padding:6px 10px; border-radius:9px; background:var(--panel-2); cursor:pointer; user-select:none; }
+  .autobox input { accent-color:var(--accent); }
+  .sessionbar { display:flex; flex-wrap:wrap; background:var(--panel); border:1px solid var(--line); border-radius:14px; overflow:hidden; margin-bottom:14px; }
+  .sb-item { padding:11px 18px; border-right:1px solid var(--line); }
+  .sb-item .k { font-size:10px; letter-spacing:1.5px; color:var(--txt-faint); text-transform:uppercase; }
+  .sb-item .v { font-size:16px; font-weight:800; margin-top:2px; }
+  .flag-grn { color:var(--good); } .flag-sc { color:var(--accent-2); }
+  .grid { display:grid; grid-template-columns:1fr 360px; gap:14px; align-items:start; }
+  @media (max-width:1200px){ .grid { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; }
+  .panel h3 { margin:0; padding:12px 16px; font-size:12px; letter-spacing:1.5px; text-transform:uppercase; color:var(--txt-dim); border-bottom:1px solid var(--line); }
+  table.lb { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  table.lb thead th { position:sticky; top:0; background:var(--bg-2); color:var(--txt-faint); font-size:10px; letter-spacing:1px; text-transform:uppercase; text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  table.lb tbody td { padding:8px; border-bottom:1px solid rgba(35,44,59,.55); font-size:13px; white-space:nowrap; }
+  table.lb tbody tr { cursor:pointer; transition:background .15s; }
+  table.lb tbody tr:hover { background:var(--panel-2); }
+  .pos { font-weight:800; width:26px; text-align:center; }
+  .drv { display:flex; align-items:center; gap:9px; }
+  .teambar { width:4px; height:22px; border-radius:3px; flex:0 0 auto; background:var(--txt-faint); }
+  .drv .name { font-weight:700; }
+  .team { color:var(--txt-dim); font-size:12px; }
+  .mono { font-variant-numeric:tabular-nums; }
+  .lead { color:var(--accent-2); font-weight:800; }
+  .fastest { color:var(--purple) !important; font-weight:800; }
+  .compound { display:inline-flex; align-items:center; gap:6px; }
+  .tyre { width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:10px; font-weight:900; border:2px solid; }
+  .tyre.S{border-color:var(--soft);color:var(--soft);} .tyre.M{border-color:var(--medium);color:var(--medium);}
+  .tyre.H{border-color:var(--hard);color:var(--hard);} .tyre.I{border-color:var(--inter);color:var(--inter);} .tyre.W{border-color:var(--wet);color:var(--wet);}
+  .tyre.U{border-color:var(--txt-faint);color:var(--txt-faint);}
+  .age { color:var(--txt-faint); font-size:11px; }
+  .wearbar { width:58px; height:7px; border-radius:4px; background:#2a3342; overflow:hidden; display:inline-block; vertical-align:middle; }
+  .wearbar > i { display:block; height:100%; border-radius:4px; }
+  .ersbar { width:64px; height:7px; border-radius:4px; background:#2a3342; overflow:hidden; display:inline-block; vertical-align:middle; }
+  .ersbar > i { display:block; height:100%; background:linear-gradient(90deg,#2f86ff,#43b02a); border-radius:4px; }
+  .pen { color:var(--bad); font-weight:700; font-size:12px; }
+  .badge { font-size:10px; font-weight:800; padding:2px 6px; border-radius:6px; background:var(--panel-2); color:var(--txt-dim); border:1px solid var(--line); }
+  .badge.pit { color:var(--accent-2); border-color:rgba(255,176,32,.4); }
+  .badge.out { color:var(--bad); border-color:rgba(255,84,112,.4); }
+  .spot { padding:12px 14px; display:grid; gap:10px; }
+  .spotcard { background:var(--panel-2); border:1px solid var(--line); border-radius:11px; padding:10px 12px; display:flex; align-items:center; gap:10px; }
+  .spotcard .ic { width:30px; height:30px; border-radius:8px; display:grid; place-items:center; font-size:14px; flex:0 0 auto; }
+  .spotcard .k { font-size:10px; letter-spacing:1.2px; text-transform:uppercase; color:var(--txt-faint); }
+  .spotcard .v { font-weight:800; font-size:14px; margin-top:1px; }
+  .spotcard .sub { color:var(--txt-dim); font-size:12px; }
+  .feed { max-height:360px; overflow:auto; padding:6px 8px; }
+  .ev { display:flex; gap:10px; padding:9px 8px; border-bottom:1px solid rgba(35,44,59,.5); }
+  .ev .t { color:var(--txt-faint); font-size:11px; min-width:42px; }
+  .ev .ico { width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-size:12px; flex:0 0 auto; }
+  .ev .msg { font-size:12.5px; line-height:1.35; }
+  .ico.ovt{background:rgba(46,212,122,.15);color:var(--good);} .ico.pen{background:rgba(255,84,112,.15);color:var(--bad);}
+  .ico.pit{background:rgba(255,176,32,.15);color:var(--accent-2);} .ico.fl{background:rgba(177,91,255,.15);color:var(--purple);}
+  .ico.sc{background:rgba(255,176,32,.18);color:var(--accent-2);} .ico.rtmt{background:rgba(140,151,170,.15);color:var(--txt-dim);} .ico.dmg{background:rgba(255,176,32,.16);color:var(--accent-2);}
+  .drawer-mask { position:fixed; inset:0; background:rgba(4,7,11,.6); opacity:0; pointer-events:none; transition:opacity .2s; z-index:40; }
+  .drawer-mask.open { opacity:1; pointer-events:auto; }
+  .drawer { position:fixed; top:0; right:0; height:100%; width:440px; max-width:92vw; z-index:50; background:var(--bg-2); border-left:1px solid var(--line); box-shadow:-20px 0 50px rgba(0,0,0,.5); transform:translateX(100%); transition:transform .25s ease; overflow:auto; }
+  .drawer.open { transform:none; }
+  .dh { padding:16px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  .dh .big { font-size:20px; font-weight:900; }
+  .dh .close { margin-left:auto; }
+  .btn { border:1px solid var(--line); background:var(--panel-2); color:var(--txt); padding:7px 12px; border-radius:9px; cursor:pointer; font-weight:600; font-size:12px; }
+  .btn:hover { border-color:var(--accent); }
+  .dbody { padding:14px 16px; display:grid; gap:14px; }
+  .kv { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .kv .cell { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 10px; }
+  .kv .cell .k { font-size:9.5px; letter-spacing:1px; color:var(--txt-faint); text-transform:uppercase; }
+  .kv .cell .v { font-weight:800; font-size:15px; margin-top:2px; }
+  .section-t { font-size:11px; letter-spacing:1.4px; text-transform:uppercase; color:var(--txt-dim); margin:2px 0; }
+  .tyres4 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .corner { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .corner .lab { font-size:10px; color:var(--txt-faint); }
+  .corner .pct { font-weight:800; font-size:16px; }
+  .laps { max-height:280px; overflow:auto; border:1px solid var(--line); border-radius:10px; }
+  table.laptable { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  table.laptable th { position:sticky; top:0; background:var(--bg-2); color:var(--txt-faint); font-size:9.5px; letter-spacing:1px; text-transform:uppercase; text-align:right; padding:7px 10px; border-bottom:1px solid var(--line); }
+  table.laptable th:first-child { text-align:center; }
+  table.laptable td { padding:6px 10px; border-bottom:1px solid rgba(35,44,59,.5); font-size:12.5px; text-align:right; }
+  table.laptable td:first-child { text-align:center; color:var(--txt-faint); font-weight:700; }
+  .delta-up { color:var(--good); } .delta-down { color:var(--bad); }
+  .overlaywrap { display:flex; flex-direction:column; gap:14px; padding:14px 0; }
+  .ov-subtabs { display:flex; flex-wrap:wrap; gap:6px; }
+  .ov-subtabs button { background:var(--panel); border:1px solid var(--line); color:var(--txt-dim); border-radius:8px; padding:7px 12px; font-size:12px; font-weight:700; cursor:pointer; }
+  .ov-subtabs button.active { background:rgba(255,77,46,.18); border-color:rgba(255,77,46,.45); color:var(--accent-2); }
+  .ov-frame-wrap { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; min-height:420px; }
+  .ov-frame-wrap iframe { width:100%; height:480px; border:0; display:block; background:transparent; }
+  .overlay { width:440px; background:rgba(10,13,18,.86); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.5); }
+  .ovhead { display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,77,46,.12); border-bottom:1px solid var(--line); font-size:12px; font-weight:800; }
+  .ovrow { display:grid; grid-template-columns:24px 4px 1fr 70px 30px; gap:8px; align-items:center; padding:7px 12px; border-bottom:1px solid rgba(35,44,59,.5); }
+  .ovrow:last-child { border-bottom:none; }
+  .ovrow .p { font-weight:800; text-align:center; }
+  .ovrow .nm { font-weight:700; font-size:13px; }
+  .ovrow .it { text-align:right; color:var(--txt-dim); font-variant-numeric:tabular-nums; font-size:12px; }
+  .pb { color:var(--good); font-weight:700; }
+  tr.elim td { background:rgba(255,84,112,.07); }
+  tr.cut td { border-top:2px dashed rgba(255,84,112,.55); }
+  .qlegend { display:flex; gap:14px; align-items:center; color:var(--txt-faint); font-size:11px; padding:4px 16px 10px; flex-wrap:wrap; }
+  /* F1 sector colours */
+  .sct { font-variant-numeric:tabular-nums; }
+  .sct.best { color:var(--purple); font-weight:800; }   /* session best */
+  .sct.pb   { color:var(--good); font-weight:700; }      /* personal best */
+  .sct.norm { color:var(--accent-2); }                   /* set, not improved */
+  .sct.none { color:var(--txt-faint); }
+  .sct.run  { animation:secpulse 1.1s infinite; }        /* sector in progress */
+  .sct.cancel { color:var(--bad); font-weight:700; text-decoration:line-through; } /* lap invalidated */
+  .sct.cancel.run { text-decoration:none; animation:secpulse 1.1s infinite; }
+  /* qualy status pills */
+  .qstat.hot   { color:#0a0f16; background:var(--good); padding:2px 8px; border-radius:999px; font-weight:700; }
+  .qstat.out   { color:var(--accent-2); }
+  .qstat.box   { color:var(--txt-dim); }
+  .qstat.cancel{ color:var(--bad); font-weight:700; }
+  @keyframes secpulse { 0%,100%{opacity:1;} 50%{opacity:.45;} }
+  /* forecast strip */
+  .forecast { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:10px 14px; margin-bottom:14px; }
+  .forecast .fc-head { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .forecast .fc-t { font-size:10px; letter-spacing:1.4px; text-transform:uppercase; color:var(--txt-faint); margin-right:4px; }
+  .fc-toggle { background:var(--panel-2); border:1px solid var(--line); color:var(--txt-dim); border-radius:8px; padding:5px 11px; font-size:11px; cursor:pointer; white-space:nowrap; }
+  .fc-toggle:hover { color:var(--txt); border-color:var(--txt-faint); }
+  .fcchart-wrap { margin-top:10px; }
+  .fcplot { position:relative; padding:0 34px; }
+  .fcchart { width:100%; height:150px; display:block; }
+  .fcax { position:absolute; font-size:9px; color:var(--txt-faint); pointer-events:none; }
+  .fcax.tl { left:2px; top:0; } .fcax.bl { left:6px; bottom:2px; }
+  .fcax.tr { right:2px; top:0; } .fcax.br { right:4px; bottom:2px; }
+  .fcax.x0 { left:34px; bottom:-13px; } .fcax.xN { right:34px; bottom:-13px; }
+  .fcleg { display:flex; gap:16px; flex-wrap:wrap; margin-top:16px; font-size:10.5px; color:var(--txt-dim); }
+  .fcleg span { display:inline-flex; align-items:center; gap:6px; }
+  .fcleg i { width:14px; height:3px; border-radius:2px; display:inline-block; }
+  .fcleg .fcx { margin-left:auto; color:var(--txt-faint); }
+  .fc { display:flex; align-items:center; gap:7px; background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:6px 10px; }
+  .fc .ic { font-size:14px; }
+  .fc .when { font-size:11px; color:var(--txt-dim); }
+  .fc .rain { font-size:12px; font-weight:700; }
+  .fc .rain.dry { color:var(--good); } .fc .rain.mid { color:var(--accent-2); } .fc .rain.wet { color:var(--wet); }
+  /* position gain/loss chip */
+  .delta-pos { font-size:10px; font-weight:800; padding:1px 4px; border-radius:5px; margin-left:5px; vertical-align:middle; }
+  .delta-pos.up { color:var(--good); background:rgba(46,212,122,.14); }
+  .delta-pos.down { color:var(--bad); background:rgba(255,84,112,.14); }
+  .delta-pos.eq { color:var(--txt-faint); background:transparent; }
+  /* hover popover */
+  .pop { position:relative; cursor:help; border-bottom:1px dotted var(--txt-faint); }
+  .pop .pop-body { display:none; position:absolute; z-index:60; left:0; top:130%; min-width:180px; background:var(--bg-2); border:1px solid var(--line); border-radius:9px; padding:9px 11px; box-shadow:0 12px 30px rgba(0,0,0,.5); font-size:11.5px; line-height:1.5; color:var(--txt); white-space:normal; }
+  .pop:hover .pop-body { display:block; }
+  .pop .pop-body .ph { font-size:9.5px; letter-spacing:1px; text-transform:uppercase; color:var(--txt-faint); margin-bottom:3px; }
+  /* track map */
+  .tmwrap { display:grid; grid-template-columns:1fr 360px; gap:14px; align-items:start; }
+  @media (max-width:1200px){ .tmwrap { grid-template-columns:1fr; } }
+  .tmcanvas-box { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:10px; }
+  #trackCanvas { width:100%; height:62vh; display:block; border-radius:10px; background:radial-gradient(700px 400px at 50% 40%, #121925, #0c1118); cursor:pointer; }
+  /* tyre stint sequence */
+  .tyre.past { opacity:.5; transform:scale(.85); }
+  .stintsep { color:var(--txt-faint); font-size:10px; margin:0 1px; }
+  /* ERS bar + mode stack */
+  .erswrap { display:flex; flex-direction:column; gap:2px; min-width:110px; }
+  .ersline { display:flex; align-items:center; gap:6px; }
+  .ersmode { font-size:10px; color:var(--txt-dim); letter-spacing:.3px; }
+  .tmtools { display:flex; align-items:center; gap:10px; padding:0 4px 10px; }
+  .tmtools select { background:var(--panel-2); color:var(--txt); border:1px solid var(--line); border-radius:9px; padding:7px 10px; font-size:13px; font-weight:600; }
+  .hide { display:none !important; }
+  .empty { padding:40px 16px; text-align:center; color:var(--txt-faint); font-size:14px; }
+  .footnote { color:var(--txt-faint); font-size:11px; margin-top:16px; line-height:1.5; }
+  /* track map v2: smaller map, bigger pilot panel with car diagram */
+  .tmwrap.tmv2 { display:block; }                 /* map on top, pilot info below (full width) */
+  .tmv2 .tmcanvas-box { margin-bottom:14px; }
+  .tmv2 #trackCanvas { height:42vh; }
+  /* pilot info laid out across the full page width */
+  .tmgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
+  @media(max-width:820px){ .tmgrid { grid-template-columns:1fr; } }
+  .tmcard { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .tmcard.wide { grid-column:1 / -1; }
+  .tmcard > .section-t:first-child { margin-top:0; }
+  .cardiag { display:grid; grid-template-columns:1fr auto 1fr; grid-template-rows:auto auto auto; gap:10px 12px; align-items:center; margin:4px 0 2px; }
+  .cardiag .carcol { grid-column:2; grid-row:1 / span 3; display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .tcard { background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:8px 10px; }
+  .tcard .pos { font-size:9.5px; letter-spacing:1px; text-transform:uppercase; color:var(--txt-faint); margin-bottom:5px; }
+  .tcard .trow { display:flex; gap:14px; align-items:flex-end; }
+  .tcard .met .big { font-size:20px; font-weight:800; line-height:1; }
+  .tcard .met .cap { font-size:9px; letter-spacing:.5px; text-transform:uppercase; color:var(--txt-faint); margin-top:3px; }
+  .tcard .sub { display:flex; gap:9px; margin-top:6px; font-size:10.5px; color:var(--txt-dim); }
+  .tcard .sub b { color:var(--txt); }
+  .tcard.fl { grid-column:1; grid-row:1 } .tcard.fr { grid-column:3; grid-row:1 }
+  .tcard.rl { grid-column:1; grid-row:3 } .tcard.rr { grid-column:3; grid-row:3 }
+  .tcard .wb { height:5px; border-radius:3px; background:#0c1118; margin-top:6px; overflow:hidden; }
+  .tcard .wb i { display:block; height:100%; }
+  .eng { display:inline-flex; align-items:center; gap:7px; background:var(--panel-2); border:1px solid var(--line); border-radius:999px; padding:5px 11px; }
+  .eng .lab { color:var(--txt-faint); font-size:9.5px; letter-spacing:1px; text-transform:uppercase; }
+  .eng b { font-size:14px; font-weight:800; }
+  .tlegend { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin:10px 0 2px; font-size:10.5px; color:var(--txt-dim); }
+  .tlegend span { display:inline-flex; align-items:center; gap:5px; }
+  .tlegend i { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .qstat { font-size:11px; color:var(--txt-dim); }
+  /* car damage card */
+  .dmggrid { display:grid; grid-template-columns:1fr 1fr; gap:10px 18px; }
+  .dmgh { font-size:9.5px; letter-spacing:1px; text-transform:uppercase; color:var(--txt-faint); margin-bottom:6px; }
+  .dmgrow { display:grid; grid-template-columns:64px 1fr 38px; align-items:center; gap:8px; margin-bottom:5px; }
+  .dmgrow .dl { font-size:10.5px; color:var(--txt-dim); }
+  .dmgrow .db { height:6px; border-radius:3px; background:#0c1118; overflow:hidden; }
+  .dmgrow .db i { display:block; height:100%; }
+  .dmgrow .dv { font-size:11px; font-weight:700; text-align:right; }
+  /* telemetry charts: speed / throttle / brake / gear, current vs previous lap */
+  .charts { display:flex; flex-direction:column; gap:12px; }
+  .chartbox { background:var(--panel-2); border:1px solid var(--line); border-radius:10px; padding:8px 10px; position:relative; }
+  .chart-t { font-size:10px; letter-spacing:.5px; text-transform:uppercase; color:var(--txt-dim); margin-bottom:4px; display:flex; justify-content:space-between; }
+  .chart-wrap { position:relative; display:flex; gap:6px; }
+  .chart-yax { display:flex; flex-direction:column; justify-content:space-between; font-size:9px; color:var(--txt-faint); text-align:right; width:26px; padding:2px 0; }
+  .chart-plot { position:relative; flex:1; }
+  .chart { width:100%; height:104px; display:block; }
+  .chart-xax { display:flex; justify-content:space-between; font-size:9px; color:var(--txt-faint); margin-top:2px; }
+  .chart-guide { position:absolute; top:0; bottom:0; width:1px; background:rgba(231,237,245,.35); display:none; pointer-events:none; }
+  .chart-dot { position:absolute; width:8px; height:8px; border-radius:50%; border:2px solid var(--bg-2); transform:translate(-50%,-50%); display:none; pointer-events:none; box-shadow:0 0 6px rgba(0,0,0,.6); }
+  .chart-tip { position:absolute; z-index:30; background:var(--bg-2); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:11px; color:var(--txt); pointer-events:none; display:none; white-space:nowrap; box-shadow:0 10px 26px rgba(0,0,0,.55); min-width:96px; }
+  .chart-tip .tip-d { font-size:9.5px; letter-spacing:.5px; text-transform:uppercase; color:var(--txt-faint); margin-bottom:3px; }
+  .chart-tip .tip-cur { font-size:17px; font-weight:800; line-height:1; }
+  .chart-tip .tip-dl { font-size:10.5px; font-weight:700; margin-left:7px; }
+  .chart-tip .tip-prev { font-size:10.5px; color:#7b8ca3; margin-top:4px; }
+  .chart-tip .up { color:var(--good); } .chart-tip .dn { color:var(--bad); }
+  .chart-empty { font-size:11px; color:var(--txt-faint); padding:12px 0; text-align:center; }
+  .chart-legend { display:flex; gap:16px; justify-content:center; margin-top:8px; font-size:10.5px; color:var(--txt-dim); }
+  .chart-legend span { display:inline-flex; align-items:center; gap:6px; }
+  .chart-legend i { width:14px; height:3px; border-radius:2px; display:inline-block; }
+  /* footer legend */
+  .legend { margin-top:14px; }
+  .legbody { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px 22px; padding:14px 16px 16px; }
+  .legcol .legh { font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--txt-faint); margin-bottom:7px; }
+  .legrow { display:flex; align-items:flex-start; gap:7px; font-size:11.5px; color:var(--txt-dim); line-height:1.45; margin-bottom:5px; }
+  .legrow b { color:var(--txt); font-weight:700; }
+  .legrow .lg { flex:none; width:12px; height:12px; border-radius:3px; margin-top:2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="appbar">
+    <div class="brand">
+      <img class="logo-img" src="logo.png" alt="Overtake" onerror="this.style.display='none';document.getElementById('logoFallback').style.display='grid';" />
+      <div class="logo" id="logoFallback" style="display:none">O</div>
+      <div>OVERTAKE<small>RACE CONTROL</small></div>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-view="broadcast">Transmissao</button>
+      <button class="tab" data-view="qualy">Classificacao</button>
+      <button class="tab" data-view="trackmap">Track Map</button>
+      <!-- Overlay tab hidden for now: focus on Transmissao / Classificacao / Track Map.
+           The overlay view + /overlays page stay in place for a later pass. -->
+      <button class="tab hide" data-view="overlay">Overlay</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="right">
+      <label class="autobox" title="Troca entre Corrida e Classificacao conforme a sessao do jogo">
+        <input type="checkbox" id="autoChk" checked /> Auto Quali/Corrida
+      </label>
+      <span class="live off" id="liveBadge"><span class="dot"></span> <span id="liveTxt">Conectando...</span></span>
+    </div>
+  </div>
+
+  <div class="sessionbar" id="sessionbar"></div>
+  <div class="forecast hide" id="forecast"></div>
+
+  <!-- SESSION FINALIZED (race ended + grace window elapsed) -->
+  <div class="panel hide" id="finalMsg" style="padding:54px 22px;text-align:center">
+    <div style="font-size:24px;font-weight:900;margin-bottom:10px">Sessao finalizada</div>
+    <div style="color:var(--txt-dim);max-width:600px;margin:0 auto;line-height:1.6">
+      A corrida terminou. Os dados completos de cada piloto ficam disponiveis no
+      <b>Portal do Piloto</b>. Esta tela volta a exibir dados ao vivo quando uma nova sessao comecar.
+    </div>
+  </div>
+
+  <!-- BROADCAST (race) -->
+  <div class="grid" id="view-broadcast">
+    <div class="panel">
+      <h3>Classificacao da corrida</h3>
+      <div style="overflow:auto; max-height:74vh">
+        <table class="lb">
+          <thead><tr>
+            <th>P</th><th>Piloto</th><th>Pneu</th><th>Int</th><th>Gap</th>
+            <th>Ultima</th><th>Melhor</th><th>ERS</th><th>Comb.</th><th>Danos</th><th>Pits</th><th>Avisos</th><th>Pen (s)</th><th>Status</th>
+          </tr></thead>
+          <tbody id="raceBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div style="display:grid; gap:14px; align-content:start">
+      <div class="panel">
+        <h3>Destaques</h3>
+        <div class="spot" id="highlights"></div>
+      </div>
+      <div class="panel">
+        <h3>Eventos ao vivo</h3>
+        <div class="feed" id="feed"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- QUALY -->
+  <div class="grid hide" id="view-qualy">
+    <div class="panel">
+      <h3 id="qualyTitle">Classificacao (setores)</h3>
+      <div class="qlegend">
+        <span><b style="color:var(--purple)">Roxo</b> = melhor da sessao</span>
+        <span><b style="color:var(--good)">Verde</b> = melhor pessoal</span>
+        <span><b style="color:var(--accent-2)">Amarelo</b> = setor sem melhora</span>
+        <span><b style="color:var(--bad)">Vermelho</b> = zona de eliminacao</span>
+        <span>Setores atualizam ao vivo a cada setor concluido</span>
+      </div>
+      <div style="overflow:auto; max-height:70vh">
+        <table class="lb">
+          <thead><tr>
+            <th>P</th><th>Piloto</th><th>Melhor</th><th>S1</th><th>S2</th><th>S3</th><th>Gap pole</th><th>Int</th><th>Pneu</th><th>ERS</th><th>Status</th>
+          </tr></thead>
+          <tbody id="qualyBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Melhores setores da sessao</h3>
+      <div class="dbody" id="qualyBest"></div>
+    </div>
+  </div>
+
+  <!-- OVERLAY -->
+  <div class="overlaywrap hide" id="view-overlay">
+    <div class="ov-subtabs" id="ovSubtabs"></div>
+    <div class="ov-frame-wrap">
+      <iframe id="ovFrame" title="Overlay preview"></iframe>
+    </div>
+    <div class="panel">
+      <h3>URLs para OBS (fundo transparente)</h3>
+      <div class="dbody">
+        <div style="color:var(--txt-dim);font-size:12px;margin-bottom:8px">Adicione cada URL como "Fonte de Navegador" no OBS. Largura/altura conforme o overlay.</div>
+        <div id="overlayLinks" class="kv"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRACK MAP -->
+  <div class="tmwrap tmv2 hide" id="view-trackmap">
+    <div class="tmcanvas-box">
+      <div class="tmtools">
+        <span class="fc-t">Mapa da pista (ao vivo)</span>
+        <span class="spacer" style="flex:1"></span>
+        <label class="autobox" style="cursor:default"><span id="tmInfo">--</span></label>
+      </div>
+      <canvas id="trackCanvas"></canvas>
+    </div>
+    <div class="panel">
+      <h3>Piloto selecionado</h3>
+      <div class="tmtools" style="padding:12px 14px 0">
+        <select id="tmSelect"></select>
+      </div>
+      <div class="dbody" id="tmDetail"><div class="empty">Selecione um piloto.</div></div>
+    </div>
+  </div>
+
+
+  <div class="legend panel" id="legend">
+    <h3>Legenda</h3>
+    <div class="legbody">
+      <div class="legcol">
+        <div class="legh">Avisos</div>
+        <div class="legrow"><b>Corte de curva</b><span>Ultrapassou os limites da pista (track limits).</span></div>
+        <div class="legrow"><b>Outro aviso</b><span>Advertencia contabilizada pelo jogo sem o tipo detalhado &mdash; normalmente bloqueio, bandeira azul/amarela ignorada ou contato leve. 3 avisos de track limits = punicao de tempo.</span></div>
+      </div>
+      <div class="legcol">
+        <div class="legh">Setores &amp; voltas</div>
+        <div class="legrow"><i class="lg" style="background:var(--purple,#b06cff)"></i><span><b>Roxo</b> = melhor tempo da sessao</span></div>
+        <div class="legrow"><i class="lg" style="background:var(--good)"></i><span><b>Verde</b> = melhor tempo pessoal</span></div>
+        <div class="legrow"><i class="lg" style="background:#5b6678"></i><span><b>Branco/cinza</b> = tempo normal</span></div>
+      </div>
+      <div class="legcol">
+        <div class="legh">Pneus</div>
+        <div class="legrow"><span><b>S</b> macio &middot; <b>M</b> medio &middot; <b>H</b> duro &middot; <b>I</b> intermediario &middot; <b>W</b> chuva</span></div>
+        <div class="legh" style="margin-top:8px">Status do carro</div>
+        <div class="legrow"><span>Em pista &middot; Box (pit) &middot; Abandonou &middot; Desqualificado &middot; Finalizado</span></div>
+      </div>
+      <div class="legcol">
+        <div class="legh">Graficos de telemetria</div>
+        <div class="legrow"><i class="lg" style="background:var(--accent-2)"></i><i class="lg" style="background:var(--good)"></i><i class="lg" style="background:var(--bad)"></i><i class="lg" style="background:#4dd0e1"></i><span>Velocidade &middot; Acelerador &middot; Freio &middot; Marcha</span></div>
+        <div class="legrow"><i class="lg" style="background:#7b8ca3"></i><span>Linha cinza = volta anterior &middot; linha forte = volta atual</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footnote" id="foot">Overtake Telemetry - build de teste. A pagina conecta sozinha ao SimHub e atualiza em tempo real.</div>
+</div>
+
+<div class="drawer-mask" id="mask"></div>
+<div class="drawer" id="drawer"><div id="drawerInner"></div></div>
+
+<script>
+(function(){
+  "use strict";
+  var state = null;
+  var lastRichSnap = null;   // last snapshot with real data — kept to preserve the final result
+  var carMap = {};
+  var curView = "broadcast";
+  var autoFollow = true;
+  var openDrawerCar = null;
+  var stale = false;
+  var staleSince = 0;        // ms timestamp when the session went stale
+  var finalized = false;     // race finished + grace window elapsed
+  var tmCar = null;          // selected driver in Track Map
+  var trackPts = {};         // lapDist bucket -> {x,z} accumulated track outline
+  // Per-track outline cache (localStorage): once a lap is captured the circuit shows
+  // INSTANTLY next time, instead of redrawing as cars pass.
+  var tmTrackKey = null, tmLastSave = 0;
+  function tmKey(){ var s=(state&&state.session)||{}; return 'otk_tm_'+(s.game||'')+'_'+(s.trackName||''); }
+  function tmLoadCache(){
+    try{ var raw=localStorage.getItem(tmKey()); if(!raw) return;
+      var a=JSON.parse(raw); trackPts={};
+      a.forEach(function(e){ trackPts[e[0]]={x:e[1],z:e[2],n:1}; });
+    }catch(e){}
+  }
+  function tmSaveCache(){
+    try{ var a=[]; for(var k in trackPts){ if(trackPts.hasOwnProperty(k)) a.push([Number(k), Math.round(trackPts[k].x*10)/10, Math.round(trackPts[k].z*10)/10]); }
+      if(a.length>40) localStorage.setItem(tmKey(), JSON.stringify(a));
+    }catch(e){}
+  }
+  // ---- Qualy result preservation ----
+  // The live snapshot only ever reflects the CURRENT session, so once the race
+  // starts the qualifying result is gone. We snapshot the grid while a quali/
+  // shootout session is live and keep showing it on the Classificacao tab during
+  // the race (per-track, persisted to localStorage so a reload mid-race keeps it).
+  var qualySnap = null, qLastSave = 0;
+  function qualifyingSession(s){ var id=s&&s.sessionTypeId; return id>=5 && id<=14; } // Q1-3 + (short/one-shot) + shootout
+  function qKey(s){ s=s||{}; return 'otk_qualy_'+(s.game||'')+'_'+(s.trackName||''); }
+  function slimDriver(d){ var o={}; for(var k in d){ if(d.hasOwnProperty(k) && k!=="trace" && k!=="laps" && k!=="penalties" && k!=="warningsDetail" && k!=="damage") o[k]=d[k]; } return o; }
+  function captureQualy(){
+    if(!state || !state.session || !qualifyingSession(state.session)) return;
+    var ss=state.session;
+    // Keep the in-memory copy fresh every tick; persist to disk at most every 5s.
+    qualySnap={ session:{game:ss.game,trackName:ss.trackName,sessionTypeId:ss.sessionTypeId,sessionTypeName:ss.sessionTypeName}, grid:(state.grid||[]).map(slimDriver), tsMs:state.tsMs };
+    var now=(state.tsMs||0);
+    if(now-qLastSave>5000){ qLastSave=now; try{ localStorage.setItem(qKey(ss), JSON.stringify(qualySnap)); }catch(e){} }
+  }
+  function qualySnapFor(s){
+    s=s||{};
+    if(qualySnap && qualySnap.session && qualySnap.session.game===s.game && qualySnap.session.trackName===s.trackName) return qualySnap;
+    try{ var raw=localStorage.getItem(qKey(s)); if(raw){ var c=JSON.parse(raw); if(c&&c.grid&&c.grid.length){ qualySnap=c; return c; } } }catch(e){}
+    return null;
+  }
+  var tmHits = [];           // last-rendered car screen positions for click hit-testing
+  var tmLastRender = 0;      // throttle canvas redraws (ms)
+  var tmCanvasW = 0, tmCanvasH = 0;
+  var tmSelectSig = "";      // skip rebuilding <select> unless grid composition changed
+  var curOvView = "tower";   // active overlay sub-tab
+  var RACE_GRACE_MS = 10*60*1000; // keep race data 10 min after it ends
+  var raceEndedAt = 0;       // ms timestamp the race was detected as finished
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  function teamColor(name){
+    if(!name) return "var(--txt-faint)";
+    var n = name.toLowerCase();
+    if(n.indexOf("mercedes")>=0) return "#00d7b6";
+    if(n.indexOf("ferrari")>=0) return "#e8002d";
+    if(n.indexOf("red bull")>=0||n==="redbull") return "#3671c6";
+    if(n.indexOf("mclaren")>=0) return "#ff8000";
+    if(n.indexOf("williams")>=0) return "#1868db";
+    if(n.indexOf("aston")>=0) return "#229971";
+    if(n.indexOf("alpine")>=0) return "#00a1e8";
+    if(n.indexOf("haas")>=0) return "#b6babd";
+    if(n.indexOf("sauber")>=0||n.indexOf("kick")>=0) return "#52e252";
+    if(n.indexOf("rb")>=0||n.indexOf("racing bulls")>=0||n.indexOf("alphatauri")>=0) return "#6692ff";
+    if(n.indexOf("cadillac")>=0) return "#c9a227";
+    if(n.indexOf("myteam")>=0) return "#b15bff";
+    return "var(--txt-faint)";
+  }
+
+  function msLap(ms){
+    if(!ms||ms<=0) return "--:--.---";
+    var m=Math.floor(ms/60000), s=((ms%60000)/1000);
+    return m+":"+(s<10?"0":"")+s.toFixed(3);
+  }
+  function msSector(ms){
+    if(!ms||ms<=0) return "--.---";
+    return (ms/1000).toFixed(3);
+  }
+  function msGap(ms){
+    if(!ms||ms<=0) return "+0.000";
+    if(ms>=60000){ var m=Math.floor(ms/60000); return "+"+m+":"+(((ms%60000)/1000).toFixed(3)); }
+    return "+"+(ms/1000).toFixed(3);
+  }
+  function esc(s){ return (""+(s==null?"":s)).replace(/[&<>]/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;"})[c];}); }
+
+  function setLive(connected){
+    var b=$("liveBadge"), t=$("liveTxt");
+    if(!connected){ b.classList.add("off"); t.textContent = "Reconectando..."; return; }
+    if(stale){ b.classList.add("off"); t.textContent = "Sessao encerrada - aguardando proxima"; return; }
+    b.classList.remove("off");
+    t.textContent = "AO VIVO" + (state&&state.grid?(" - "+state.grid.length+" carros"):"");
+  }
+
+  // ---- WebSocket ----
+  var ws=null, retry=0;
+  function connect(){
+    try {
+      ws = new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/");
+    } catch(e){ scheduleReconnect(); return; }
+    ws.onopen = function(){ retry=0; setLive(true); };
+    ws.onclose = function(){ setLive(false); scheduleReconnect(); };
+    ws.onerror = function(){ try{ws.close();}catch(e){} };
+    ws.onmessage = function(ev){
+      var s;
+      try { s=JSON.parse(ev.data); } catch(e){ return; }
+      if(!s) return;
+      if(s.ok){ state=s; stale=false; onState(); }
+      else {
+        // Session ended / capture cleared: KEEP showing the last good data
+        // until a new session actually starts. Only show "waiting" if we
+        // never received anything this run.
+        setLive(true);
+        if(!state){ $("raceBody").innerHTML='<tr><td colspan="14" class="empty">Aguardando dados da sessao no jogo...</td></tr>'; }
+        else { stale=true; setLive(true); }
+      }
+    };
+  }
+  function scheduleReconnect(){
+    retry=Math.min(retry+1,10);
+    setTimeout(connect, 500+retry*400);
+  }
+
+  // A post-session snapshot often arrives "degraded": the game resets to a lobby/
+  // menu so the track becomes Unknown and per-car telemetry is wiped. Detect that
+  // so we can keep showing the last good frame (the final result) instead.
+  function isDegraded(st){
+    if(!st || !st.session) return false;
+    var tn=(st.session.trackName||"").trim();
+    return !tn || /unknown|desconhec/i.test(tn);
+  }
+  function onState(){
+    if(!state || !state.ok){ setLive(true); $("raceBody").innerHTML='<tr><td colspan="14" class="empty">Aguardando dados da sessao no jogo...</td></tr>'; return; }
+    setLive(true);
+    // Preserve the final result: freeze on the last good frame when the incoming
+    // snapshot is degraded; refresh the frozen copy whenever real data flows.
+    var frozen=false;
+    if(isDegraded(state)){ if(lastRichSnap){ state=lastRichSnap; frozen=true; } }
+    else { lastRichSnap=state; }
+    carMap={};
+    (state.grid||[]).forEach(function(d){ carMap[d.carIdx]=d; });
+
+    // Race finished + 10 min grace -> finalized screen. Qualy never finalizes
+    // (its data persists on screen until a new session starts).
+    maybeFinalize();
+    if(applyFinalized()) return;
+
+    // auto-switch race/qualy
+    if(autoFollow && state.session){
+      var want = state.session.mode==="qualy" ? "qualy" : "broadcast";
+      if((curView==="broadcast"||curView==="qualy") && curView!==want) activateView(want, true);
+    }
+    captureQualy();
+    renderSessionBar();
+    renderForecast();
+    renderRace();
+    renderQualy();
+    renderFeed();
+    renderHighlights();
+    updateTmSelect();
+    if(curView==="trackmap") renderTrackMap(false);
+    if(curView==="overlay") syncOverlayFrame();
+    if(tmCar!=null && carMap[tmCar]) $("tmDetail").innerHTML = trackMapDetailHtml(carMap[tmCar]);
+    if(openDrawerCar!=null && carMap[openDrawerCar]) renderDrawer(carMap[openDrawerCar]);
+    // Frozen final frame (session reset to lobby): relabel the badge so it's clear
+    // the data on screen is the preserved result, not a live feed.
+    if(frozen){ var fb=$("liveBadge"), ft=$("liveTxt"); if(fb) fb.classList.add("off"); if(ft) ft.textContent="Resultado final"; }
+  }
+
+  function maybeFinalize(){
+    if(!state || !state.session){ return; }
+    if(state.session.mode==="race"){
+      var leaderDone = state.grid && state.grid[0] && state.grid[0].status==="Finalizado";
+      var ev = (state.events||[]).some(function(e){ return e.code==="SEND"||e.code==="CHQF"||e.code==="RCWN"; });
+      if(leaderDone || ev){ if(raceEndedAt===0) raceEndedAt=Date.now(); }
+      else raceEndedAt=0;
+    } else {
+      raceEndedAt=0; // qualy/practice: persist, never finalize
+    }
+    finalized = raceEndedAt>0 && (Date.now()-raceEndedAt) > RACE_GRACE_MS;
+  }
+  function applyFinalized(){
+    var views=["broadcast","qualy","trackmap","overlay"];
+    // We never blank the screen anymore: the final standings + telemetry stay on
+    // display (frozen last good frame). When the race is over we only relabel the
+    // live badge as "Resultado final" so it's clear the data is no longer live.
+    $("finalMsg").classList.add("hide");
+    views.forEach(function(v){ var el=$("view-"+v); if(el){ if(v===curView) el.classList.remove("hide"); else el.classList.add("hide"); } });
+    if(finalized){ var b=$("liveBadge"), t=$("liveTxt"); if(b) b.classList.add("off"); if(t) t.textContent="Resultado final"; }
+    return false;
+  }
+
+  function weatherIcon(w){
+    // 0 clear,1 light cloud,2 overcast,3 light rain,4 heavy rain,5 storm
+    if(w>=5) return "\u26C8";       // storm
+    if(w>=3) return "\uD83C\uDF27"; // rain
+    if(w===2) return "\u2601";      // overcast
+    if(w===1) return "\u26C5";      // partly
+    return "\u2600";                // clear
+  }
+  // Forecast line chart: track temp + air temp (left axis, 0-60C) and rain %
+  // (right axis, 0-100%) over the forecast horizon in minutes. Mirrors the
+  // in-game "Rain Prediction" graph.
+  function forecastChartHtml(fc){
+    if(fc.length<2) return "";
+    var maxMin=0; fc.forEach(function(f){ if((f.offsetMin||0)>maxMin) maxMin=f.offsetMin||0; });
+    if(maxMin<=0) return "";
+    var W=620,H=150;
+    function X(m){ return (m/maxMin)*W; }
+    function YT(t){ return (1-Math.max(0,Math.min(t,60))/60)*H; }
+    function YR(r){ return (1-Math.max(0,Math.min(r,100))/100)*H; }
+    function pts(key,Y){ return fc.map(function(f){ var v=f[key]; return v==null?null:X(f.offsetMin||0).toFixed(1)+","+Y(v).toFixed(1); }).filter(Boolean).join(" "); }
+    function pl(key,Y,color,w){ var p=pts(key,Y); return p?'<polyline points="'+p+'" fill="none" stroke="'+color+'" stroke-width="'+w+'" vector-effect="non-scaling-stroke"/>':""; }
+    var rainP=pts("rainPct",YR);
+    var rainArea = rainP ? '<polygon points="0,'+H+' '+rainP+' '+W+','+H+'" fill="#4aa3ff" opacity="0.10"/>' : "";
+    var grid="";
+    [0,0.5,1].forEach(function(g){ var y=(g*H).toFixed(0); grid+='<line x1="0" y1="'+y+'" x2="'+W+'" y2="'+y+'" stroke="var(--line)" stroke-width="1" vector-effect="non-scaling-stroke"/>'; });
+    var COL={track:"#ff9f1a", air:"#ffe34d", rain:"#4aa3ff"};
+    var svg='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" class="fcchart">'+grid+rainArea+
+      pl("trackTempC",YT,COL.track,1.6)+pl("airTempC",YT,COL.air,1.6)+pl("rainPct",YR,COL.rain,1.8)+'</svg>';
+    // Axis labels as HTML overlays so they never distort with the stretched SVG.
+    var ax='<span class="fcax tl">60&deg;</span><span class="fcax bl">0&deg;</span>'+
+           '<span class="fcax tr">100%</span><span class="fcax br">0%</span>'+
+           '<span class="fcax x0">0</span><span class="fcax xN">'+maxMin+' min</span>';
+    return '<div class="fcchart-wrap"><div class="fcplot">'+svg+ax+'</div>'+
+      '<div class="fcleg">'+
+        '<span><i style="background:'+COL.track+'"></i>Temp. pista</span>'+
+        '<span><i style="background:'+COL.air+'"></i>Temp. ar</span>'+
+        '<span><i style="background:'+COL.rain+'"></i>Chuva %</span>'+
+        '<span class="fcx">tempo</span>'+
+      '</div></div>';
+  }
+  var fcOpen = (localStorage.getItem('otk_fc_open')==='1'); // chart collapsed by default (cleaner)
+  function renderForecast(){
+    var fc=(state.session&&state.session.forecast)||[];
+    var el=$("forecast");
+    if(!fc.length){ el.classList.add("hide"); el.innerHTML=""; return; }
+    el.classList.remove("hide");
+    var icons = fc.map(function(f){
+      var rp = f.rainPct!=null?f.rainPct:0;
+      var rcls = rp>=50?"wet":(rp>=15?"mid":"dry");
+      var when = (f.offsetMin>0)?("+"+f.offsetMin+"min"):"agora";
+      return '<div class="fc"><span class="ic">'+weatherIcon(f.weather||0)+'</span>'+
+        '<span class="when">'+when+'</span>'+
+        '<span class="rain '+rcls+'">'+rp+'%</span></div>';
+    }).join("");
+    var canChart = fc.length>=2;
+    var toggle = canChart ? '<button class="fc-toggle" id="fcToggle" type="button" aria-expanded="'+(fcOpen?'true':'false')+'">'+(fcOpen?'Ocultar grafico ▲':'Ver grafico ▼')+'</button>' : '';
+    var html='<div class="fc-head"><span class="fc-t">Previsao</span>'+icons+'<span class="spacer" style="flex:1"></span>'+toggle+'</div>';
+    if(canChart && fcOpen) html += forecastChartHtml(fc);
+    el.innerHTML=html;
+    var btn=$("fcToggle");
+    if(btn) btn.addEventListener("click",function(){ fcOpen=!fcOpen; try{localStorage.setItem('otk_fc_open',fcOpen?'1':'0');}catch(e){} renderForecast(); });
+  }
+
+  function renderSessionBar(){
+    var s=state.session||{};
+    var items=[];
+    items.push(["Pista", esc(s.trackName||"-")]);
+    items.push(["Sessao", esc(s.sessionTypeName||"-")]);
+    if(s.mode==="race"){
+      var lap = (s.currentLap||0)+(s.totalLaps?(" / "+s.totalLaps):"");
+      items.push(["Volta", lap]);
+    } else if(s.timeLeftSec){
+      var mm=Math.floor(s.timeLeftSec/60), ss=s.timeLeftSec%60;
+      items.push(["Tempo", mm+":"+(ss<10?"0":"")+ss]);
+    }
+    if(s.trackTempC!=null) items.push(["Pista C", s.trackTempC+"&deg;"]);
+    if(s.airTempC!=null) items.push(["Ar C", s.airTempC+"&deg;"]);
+    if(s.rainNextPct!=null) items.push(["Chuva prev.", s.rainNextPct+"%"]);
+    var scTxt = s.safetyCar>0 ? '<span class="flag-sc">SAFETY CAR</span>' : '<span class="flag-grn">Verde</span>';
+    items.push(["Bandeira", scTxt]);
+    items.push(["Jogo", esc((s.game||"").replace("_"," "))]);
+    $("sessionbar").innerHTML = items.map(function(it){
+      return '<div class="sb-item"><div class="k">'+it[0]+'</div><div class="v">'+it[1]+'</div></div>';
+    }).join("");
+  }
+
+  function stintLabel(d){
+    var st=(d.stints&&d.stints.length)?d.stints:[d.compound||"?"];
+    return st.join(" \u203a ")+" \u00b7 "+(d.tyreAge||0)+"v";
+  }
+  function tyreBadge(c,extra){
+    var cls=("SMHIW".indexOf(c)>=0)?c:"U";
+    var lbl=(c&&c!=="U")?c:"?";
+    return '<span class="tyre '+cls+(extra||"")+'">'+lbl+'</span>';
+  }
+  function tyreCell(d){
+    // Show every compound used this session (stints); last one is the current tyre.
+    var st = (d.stints&&d.stints.length)?d.stints:[d.compound||"U"];
+    var html = st.map(function(c,i){
+      return tyreBadge(c, (i===st.length-1)?"":" past");
+    }).join('<span class="stintsep">\u203a</span>');
+    return '<span class="compound">'+html+'<span class="age">'+(d.tyreAge||0)+'v</span></span>';
+  }
+  function wearCell(d){
+    // Tied to the MOST worn tyre (worst corner), not the average.
+    var tw=d.tyreWear||{};
+    var w = (tw.max!=null) ? tw.max : Math.max(tw.fl||0,tw.fr||0,tw.rl||0,tw.rr||0);
+    var col = w>70?"var(--bad)":(w>40?"var(--accent-2)":"var(--good)");
+    return '<span class="wearbar" title="Pneu mais gasto: '+(w||0)+'%"><i style="width:'+Math.min(100,w)+'%;background:'+col+'"></i></span>';
+  }
+  function ersColor(e){
+    // 0-15 vermelho forte, 15-25 laranja, 25-60 amarelado, >60 verde/azul.
+    if(e<=15) return "linear-gradient(90deg,#e60000,#ff2b2b)";
+    if(e<=25) return "linear-gradient(90deg,#ff6a1a,#ff8c1a)";
+    if(e<=60) return "linear-gradient(90deg,#ffb020,#ffe34d)";
+    return "linear-gradient(90deg,#2ed47a,#2f86ff)";
+  }
+  function ersCell(d){
+    var e=d.ersPct||0;
+    var mode=d.ersMode||"-";
+    return '<div class="erswrap">'+
+      '<div class="ersline"><span class="ersbar"><i style="width:'+Math.min(100,e)+'%;background:'+ersColor(e)+'"></i></span> <span class="age">'+e+'%</span></div>'+
+      '<div class="ersmode">'+esc(mode)+'</div></div>';
+  }
+  function dmgCell(d){
+    var worst=(d.damage&&d.damage.worst)||0;
+    var col = worst>40?"var(--bad)":(worst>10?"var(--accent-2)":"var(--good)");
+    return '<span class="wearbar"><i style="width:'+Math.min(100,worst)+'%;background:'+col+'"></i></span>';
+  }
+  function statusBadge(d){
+    if(d.status==="Pit"||d.status==="No pit") return '<span class="badge pit">'+esc(d.status)+'</span>';
+    if(d.status==="Abandonou"||d.status==="DSQ"||d.status==="Retirado") return '<span class="badge out">'+esc(d.status)+'</span>';
+    return '<span class="badge">'+esc(d.status||"-")+'</span>';
+  }
+
+  function fastestLapCar(){
+    var best=0, idx=null;
+    (state.grid||[]).forEach(function(d){ if(d.bestLapMs>0 && (best===0||d.bestLapMs<best)){best=d.bestLapMs; idx=d.carIdx;} });
+    return idx;
+  }
+
+  function posDeltaChip(d){
+    if(!d.grid || !d.pos || d.grid<=0 || d.pos<=0) return "";
+    var gain = d.grid - d.pos;
+    if(gain>0) return '<span class="delta-pos up" title="Largou P'+d.grid+'">+'+gain+'</span>';
+    if(gain<0) return '<span class="delta-pos down" title="Largou P'+d.grid+'">'+gain+'</span>';
+    return '<span class="delta-pos eq" title="Largou P'+d.grid+'">=</span>';
+  }
+  function fuelCell(d){
+    // Laps remaining emphasised; weight (kg) shown small underneath.
+    var laps = (d.fuelLaps!=null)? d.fuelLaps : null;
+    var big = (laps!=null)? ('<b>'+laps+'</b> <span class="age">voltas</span>') : '<span class="age">-</span>';
+    var kg = (d.fuelKg!=null)? ('<div class="age">'+d.fuelKg+' kg</div>') : '';
+    return big+kg;
+  }
+  function warnCell(d){
+    var total = d.warnings||0, cc = d.cornerCutWarnings||0, other = Math.max(0, total-cc);
+    if(total<=0) return '<span class="age">0</span>';
+    return '<span class="pop"><span style="color:var(--accent-2);font-weight:700">'+total+'</span>'+
+      '<span class="pop-body"><div class="ph">Avisos</div>'+
+      'Corte de curva: <b>'+cc+'</b><br>Outros: <b>'+other+'</b></span></span>';
+  }
+  function penCell(d){
+    var sec = d.penaltiesSec||0;
+    var list = d.penalties||[];
+    if(sec<=0 && !list.length) return '<span class="age">-</span>';
+    var head = sec>0 ? '<span class="pen">+'+sec+'s</span>' : '<span class="pen">'+list.length+'x</span>';
+    if(!list.length) return head;
+    var body = list.map(function(p){ return '&bull; '+esc(p.desc||"")+(p.lap?(' (V'+p.lap+')'):''); }).join("<br>");
+    return '<span class="pop">'+head+'<span class="pop-body"><div class="ph">Punicoes</div>'+body+'</span></span>';
+  }
+
+  function renderRace(){
+    var g=state.grid||[];
+    var flCar=fastestLapCar();
+    if(!g.length){ $("raceBody").innerHTML='<tr><td colspan="14" class="empty">Sem carros na sessao.</td></tr>'; return; }
+    $("raceBody").innerHTML = g.map(function(d,i){
+      var lead = i===0;
+      var fl = d.carIdx===flCar;
+      return '<tr data-car="'+d.carIdx+'">'+
+        '<td class="pos">'+(d.pos||"-")+'</td>'+
+        '<td><div class="drv"><span class="teambar" style="background:'+teamColor(d.team)+'"></span>'+
+          '<div><div class="name">'+esc(d.tag)+posDeltaChip(d)+'</div><div class="team">'+esc(d.team||"")+'</div></div></div></td>'+
+        '<td>'+tyreCell(d)+' '+wearCell(d)+'</td>'+
+        '<td class="mono">'+(lead?'<span class="lead">Lider</span>':msGap(d.intervalMs))+'</td>'+
+        '<td class="mono">'+(lead?'<span class="lead">Lider</span>':msGap(d.gapMs))+'</td>'+
+        '<td class="mono">'+msLap(d.lastLapMs)+'</td>'+
+        '<td class="mono '+(fl?"fastest":"")+'">'+msLap(d.bestLapMs)+'</td>'+
+        '<td>'+ersCell(d)+'</td>'+
+        '<td class="mono">'+fuelCell(d)+'</td>'+
+        '<td>'+dmgCell(d)+'</td>'+
+        '<td class="mono">'+(d.stops||0)+'</td>'+
+        '<td>'+warnCell(d)+'</td>'+
+        '<td>'+penCell(d)+'</td>'+
+        '<td>'+statusBadge(d)+'</td>'+
+      '</tr>';
+    }).join("");
+    bindRows("raceBody");
+  }
+
+  // Picks the value to show for a sector: live split this lap, else last lap's.
+  function sectorVal(d,i){
+    var live = i===1?d.liveS1:(i===2?d.liveS2:0);
+    var last = i===1?d.lastS1:(i===2?d.lastS2:d.lastS3);
+    if(live>0) return live;
+    return last||0;
+  }
+  function renderQualy(){
+    var live=state.session||{};
+    // During a race (or practice), show the PRESERVED qualy result instead of the
+    // live best-laps board, if we have one for this track.
+    var snap = !qualifyingSession(live) ? qualySnapFor(live) : null;
+    var g=((snap?snap.grid:state.grid)||[]).slice();
+    // session-best per sector (purple) + personal-best reference (green)
+    var bS1=0,bS2=0,bS3=0, pole=0;
+    g.forEach(function(d){
+      [1,2,3].forEach(function(i){
+        var v=sectorVal(d,i);
+        if(v>0){ if(i===1&&(bS1===0||v<bS1))bS1=v; if(i===2&&(bS2===0||v<bS2))bS2=v; if(i===3&&(bS3===0||v<bS3))bS3=v; }
+      });
+      if(d.bestLapMs>0&&(pole===0||d.bestLapMs<pole))pole=d.bestLapMs;
+    });
+    g.sort(function(a,b){
+      var a1=a.bestLapMs>0?a.bestLapMs:9e9, b1=b.bestLapMs>0?b.bestLapMs:9e9;
+      return a1-b1;
+    });
+    var s=snap?snap.session:live;
+    var cut = s.sessionTypeId===5?15:(s.sessionTypeId===6?10:0);
+    $("qualyTitle").textContent = "Classificacao - "+(s.sessionTypeName||"setores")+(snap?" (resultado do qualy)":"");
+
+    function sc(d,i,sb){
+      var v=sectorVal(d,i);
+      var pb = i===1?d.pbS1:(i===2?d.pbS2:d.pbS3);
+      var liveThis = ((i===1?d.liveS1:(i===2?d.liveS2:0))>0); // split set THIS lap
+      var running = (d.sector===i) && ((i===1?d.liveS1:(i===2?d.liveS2:0))<=0);
+      var idle = d.pitStatus===1 || d.driverStatus===0 || /box|garagem|pit/i.test(d.status||"") || /box|garagem/i.test(d.lapState||"");
+      if(idle) running=false;
+      var cls="sct ";
+      if(running) cls+= d.lapInvalid?"cancel run":"none run";
+      else if(v<=0) cls+="none";
+      else if(d.lapInvalid && liveThis) cls+="cancel"; // this-lap split on an invalidated lap
+      else if(sb>0&&v<=sb) cls+="best";
+      else if(pb>0&&v<=pb) cls+="pb";
+      else cls+="norm";
+      var txt = running?(d.lapInvalid?"cancelada":"em pista"):(v>0?msSector(v):"--.---");
+      return '<td class="'+cls+'">'+txt+'</td>';
+    }
+    // Lap context + validity (out lap / flying lap / cancelled), shown in Status.
+    function qStatus(d){
+      var st=d.status||"";
+      if(/Retirado|Abandonou|DSQ|Finalizado|classificado/i.test(st)) return '<span class="qstat">'+esc(st)+'</span>';
+      // Cancelled lap: flag whenever the lap is invalid and the driver is on a timed lap.
+      // driverStatus 2=in lap, 3=out lap are excluded; a missing driverStatus (older/partial
+      // snapshot) still flags it, so the Status pill agrees with the red struck-through sectors.
+      if(d.lapInvalid && d.driverStatus!==2 && d.driverStatus!==3) return '<span class="qstat cancel">Volta cancelada</span>';
+      var ls=d.lapState||st||"-", cls="qstat";
+      if(ls==="Em volta") cls+=" hot";
+      else if(/sa.?da|entrada/i.test(ls)) cls+=" out";
+      else if(ls==="Box"||ls==="Garagem") cls+=" box";
+      return '<span class="'+cls+'">'+esc(ls)+'</span>';
+    }
+
+    if(!g.length){ $("qualyBody").innerHTML='<tr><td colspan="11" class="empty">Sem voltas registradas.</td></tr>'; }
+    else $("qualyBody").innerHTML = g.map(function(d,i){
+      var pos=i+1;
+      var cls = (cut>0 && pos>cut)?"elim":"";
+      if(cut>0 && pos===cut+1) cls+=" cut";
+      var gap = (pole>0&&d.bestLapMs>0&&i>0)?msGap(d.bestLapMs-pole):(i===0?'<span class="lead">POLE</span>':"--");
+      var int = (i>0&&g[i-1].bestLapMs>0&&d.bestLapMs>0)?msGap(d.bestLapMs-g[i-1].bestLapMs):"--";
+      return '<tr class="'+cls+'" data-car="'+d.carIdx+'">'+
+        '<td class="pos">'+pos+'</td>'+
+        '<td><div class="drv"><span class="teambar" style="background:'+teamColor(d.team)+'"></span>'+
+          '<div><div class="name">'+esc(d.tag)+'</div><div class="team">'+esc(d.team||"")+'</div></div></div></td>'+
+        '<td class="mono '+(d.bestLapMs>0&&d.bestLapMs===pole?"fastest":"")+'">'+msLap(d.bestLapMs)+'</td>'+
+        sc(d,1,bS1)+sc(d,2,bS2)+sc(d,3,bS3)+
+        '<td class="mono">'+gap+'</td>'+
+        '<td class="mono">'+int+'</td>'+
+        '<td>'+tyreCell(d)+'</td>'+
+        '<td>'+ersCell(d)+'</td>'+
+        '<td>'+qStatus(d)+'</td>'+
+      '</tr>';
+    }).join("");
+    bindRows("qualyBody");
+
+    var ideal = (bS1+bS2+bS3);
+    $("qualyBest").innerHTML =
+      '<div class="kv">'+
+        '<div class="cell"><div class="k">Melhor S1</div><div class="v">'+msSector(bS1)+'</div></div>'+
+        '<div class="cell"><div class="k">Melhor S2</div><div class="v">'+msSector(bS2)+'</div></div>'+
+        '<div class="cell"><div class="k">Melhor S3</div><div class="v">'+msSector(bS3)+'</div></div>'+
+      '</div>'+
+      '<div class="kv"><div class="cell" style="grid-column:span 3"><div class="k">Volta ideal da sessao</div><div class="v fastest">'+msLap(ideal)+'</div></div></div>'+
+      '<div class="kv"><div class="cell" style="grid-column:span 3"><div class="k">Pole atual</div><div class="v">'+msLap(pole)+'</div></div></div>';
+  }
+
+  function renderOverlay(){ /* legacy mini-tower removed; overlays live in /overlays + Overlay tab */ }
+
+  // ---- Track Map ----
+  function tmSelectSignature(g){
+    return g.map(function(d){ return d.carIdx+":"+(d.tag||""); }).join("|");
+  }
+  function updateTmSelect(){
+    var sel=$("tmSelect"); if(!sel) return;
+    var g=state.grid||[];
+    var sig=tmSelectSignature(g);
+    if(sig===tmSelectSig) return; // avoid rebuilding dropdown every tick (breaks clicks)
+    tmSelectSig=sig;
+    var opts='<option value="">-- escolha um piloto --</option>'+g.map(function(d){
+      return '<option value="'+d.carIdx+'">P'+(d.pos||"-")+' '+esc(d.tag)+'</option>';
+    }).join("");
+    sel.innerHTML=opts;
+    if(tmCar!=null) sel.value=String(tmCar);
+  }
+  function accumulateTrack(){
+    var g=state.grid||[];
+    g.forEach(function(d){
+      if(d.x==null||d.z==null||d.lapDist==null) return;
+      if(d.pitStatus) return;                          // skip pit-lane points (off the racing line)
+      if(Math.abs(d.x)<1 && Math.abs(d.z)<1) return;   // skip world origin (uninitialised position)
+      var bucket=Math.round(d.lapDist/12);             // ~12 m resolution closed loop
+      if(bucket<0) return;
+      var p=trackPts[bucket];
+      if(!p) trackPts[bucket]={x:d.x,z:d.z,n:1};
+      else { p.x=(p.x*p.n+d.x)/(p.n+1); p.z=(p.z*p.n+d.z)/(p.n+1); p.n++; } // average dampens jitter/outliers
+    });
+  }
+  function renderTrackMap(force){
+    var cv=$("trackCanvas"); if(!cv) return;
+    var now=Date.now();
+    if(!force && (now-tmLastRender)<250) return; // max ~4 fps unless forced (click/resize/tab)
+    tmLastRender=now;
+    // Track changed? reset and load the cached outline so the map is instant.
+    var key=tmKey();
+    if(key!==tmTrackKey){ tmTrackKey=key; trackPts={}; tmLoadCache(); }
+    accumulateTrack();
+    if(now-tmLastSave>4000){ tmLastSave=now; tmSaveCache(); }
+    var g=state.grid||[];
+    var dpr=window.devicePixelRatio||1;
+    var w=cv.clientWidth, h=cv.clientHeight;
+    if(w<=0||h<=0) return;
+    // Only reset backing store when CSS size changes (avoids flicker / lost clicks).
+    if(w!==tmCanvasW || h!==tmCanvasH){
+      tmCanvasW=w; tmCanvasH=h;
+      cv.width=Math.floor(w*dpr); cv.height=Math.floor(h*dpr);
+    }
+    var ctx=cv.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,w,h);
+
+    // bounding box from the accumulated outline + current (non-origin) cars
+    var pts=[]; for(var k in trackPts){ if(trackPts.hasOwnProperty(k)) pts.push(trackPts[k]); }
+    g.forEach(function(d){ if(d.x!=null&&d.z!=null && !(Math.abs(d.x)<1&&Math.abs(d.z)<1)) pts.push({x:d.x,z:d.z}); });
+    var hasPos = pts.length>0;
+    $("tmInfo").textContent = hasPos ? (Object.keys(trackPts).length+" pts") : "sem posicao (Motion UDP)";
+    if(!hasPos){
+      ctx.fillStyle="#5c6678"; ctx.font="14px sans-serif"; ctx.textAlign="center";
+      ctx.fillText("Aguardando posicoes (pacote Motion do jogo)...", w/2, h/2);
+      return;
+    }
+    var minX=1e9,maxX=-1e9,minZ=1e9,maxZ=-1e9;
+    pts.forEach(function(p){ if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x; if(p.z<minZ)minZ=p.z; if(p.z>maxZ)maxZ=p.z; });
+    var pad=30, spanX=Math.max(1,maxX-minX), spanZ=Math.max(1,maxZ-minZ);
+    var scale=Math.min((w-2*pad)/spanX,(h-2*pad)/spanZ);
+    var ox=(w-spanX*scale)/2, oz=(h-spanZ*scale)/2;
+    function px(p){ return {x:ox+(p.x-minX)*scale, y:oz+(p.z-minZ)*scale}; }
+
+    // Track outline: connect buckets in lap-distance order, but BREAK the line on
+    // implausibly long segments (a single bad/pit/outlier point would otherwise draw
+    // two long spikes across the map — the "crossing lines" bug). Close the loop only
+    // when start and end buckets are actually adjacent (start/finish line).
+    var keys=Object.keys(trackPts).map(Number).sort(function(a,b){return a-b;});
+    if(keys.length>12){
+      var op=keys.map(function(kk){ return px(trackPts[kk]); });
+      var segs=[];
+      for(var si=1;si<op.length;si++){ var ax=op[si].x-op[si-1].x, ay=op[si].y-op[si-1].y; segs.push(Math.sqrt(ax*ax+ay*ay)); }
+      var ss=segs.slice().sort(function(a,b){return a-b;});
+      var med=ss.length?ss[Math.floor(ss.length/2)]:1;
+      var maxSeg=Math.max(med*5, 28);
+      ctx.beginPath(); ctx.moveTo(op[0].x, op[0].y);
+      for(var oi=1;oi<op.length;oi++){
+        var bx=op[oi].x-op[oi-1].x, by=op[oi].y-op[oi-1].y, dist=Math.sqrt(bx*bx+by*by);
+        if(dist>maxSeg) ctx.moveTo(op[oi].x, op[oi].y); else ctx.lineTo(op[oi].x, op[oi].y);
+      }
+      var a0=op[0], b0=op[op.length-1], cx2=a0.x-b0.x, cy2=a0.y-b0.y;
+      if(Math.sqrt(cx2*cx2+cy2*cy2)<=maxSeg) ctx.lineTo(a0.x, a0.y);
+      ctx.strokeStyle="rgba(123,140,163,.4)"; ctx.lineWidth=9; ctx.lineJoin="round"; ctx.lineCap="round"; ctx.stroke();
+      ctx.strokeStyle="rgba(231,237,245,.12)"; ctx.lineWidth=2; ctx.stroke();
+    }
+    // cars
+    tmHits=[];
+    g.forEach(function(d){
+      if(d.x==null||d.z==null) return;
+      var q=px(d), sel=(tmCar!=null&&d.carIdx===tmCar);
+      tmHits.push({idx:d.carIdx, x:q.x, y:q.y, r: sel?12:10});
+      ctx.beginPath(); ctx.arc(q.x,q.y, sel?9:7, 0, Math.PI*2);
+      ctx.fillStyle=teamColorHex(d.team); ctx.fill();
+      if(sel){ ctx.lineWidth=3; ctx.strokeStyle="#fff"; ctx.stroke(); }
+      ctx.fillStyle="#0a0d12"; ctx.font="bold 9px sans-serif"; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(String(d.pos||""), q.x, q.y);
+      if(sel){
+        ctx.fillStyle="#fff"; ctx.font="bold 11px sans-serif"; ctx.textBaseline="bottom";
+        ctx.fillText(d.tag, q.x, q.y-11);
+      }
+    });
+  }
+  function teamColorHex(name){
+    var c=teamColor(name);
+    return (c.indexOf("var(")===0)?"#7b8ca3":c;
+  }
+
+  function renderHighlights(){
+    var g=state.grid||[];
+    var el=$("highlights");
+    if(!g.length){ el.innerHTML='<div class="empty">Sem dados ainda.</div>'; return; }
+    var cards=[];
+
+    // Volta mais rapida
+    var fl=null;
+    g.forEach(function(d){ if(d.bestLapMs>0 && (!fl||d.bestLapMs<fl.bestLapMs)) fl=d; });
+    if(fl) cards.push(card("rgba(177,91,255,.16)","var(--purple)","FL","Volta mais rapida", fl.tag, msLap(fl.bestLapMs)));
+
+    // Lider
+    if(g[0]) cards.push(card("rgba(255,176,32,.16)","var(--accent-2)","1","Lider", g[0].tag, (g[0].team||"")));
+
+    // Maior ganho de posicoes (grid -> pos)
+    var mover=null, bestGain=0;
+    g.forEach(function(d){ if(d.grid>0 && d.pos>0){ var gain=d.grid-d.pos; if(gain>bestGain){bestGain=gain; mover=d;} } });
+    if(mover && bestGain>0) cards.push(card("rgba(46,212,122,.15)","var(--good)","+"+bestGain,"Quem mais ganhou", mover.tag, "Largou P"+mover.grid+" -> P"+mover.pos));
+
+    // Mais paradas
+    var pit=null;
+    g.forEach(function(d){ if((d.stops||0)>0 && (!pit || d.stops>pit.stops)) pit=d; });
+    if(pit && pit.stops>0) cards.push(card("rgba(255,176,32,.15)","var(--accent-2)","P","Mais paradas", pit.tag, pit.stops+" pit stop(s)"));
+
+    // Maior penalidade
+    var pen=null;
+    g.forEach(function(d){ if((d.penaltiesSec||0)>0 && (!pen || d.penaltiesSec>pen.penaltiesSec)) pen=d; });
+    if(pen && pen.penaltiesSec>0) cards.push(card("rgba(255,84,112,.15)","var(--bad)","!","Maior punicao", pen.tag, "+"+pen.penaltiesSec+"s de penalidade"));
+
+    // Principais brigas (corrida): pares de posicao com intervalo < 1.0s
+    if((state.session||{}).mode==="race"){
+      var battles=[];
+      for(var bi=1;bi<g.length;bi++){
+        var cur=g[bi];
+        if(cur.intervalMs>0 && cur.intervalMs<1000 && cur.status!=="Abandonou"){
+          battles.push({a:g[bi-1], b:cur, gap:cur.intervalMs});
+        }
+      }
+      // Top 3 ordenadas pela posicao mais relevante (mais a frente no grid primeiro).
+      battles.sort(function(x,y){ return x.a.pos-y.a.pos; });
+      battles.slice(0,3).forEach(function(bt){
+        cards.push(card("rgba(255,77,46,.16)","var(--accent)","VS","Briga pela P"+bt.b.pos,
+          bt.a.tag+" vs "+bt.b.tag, "+"+(bt.gap/1000).toFixed(3)+"s"));
+      });
+    }
+
+    el.innerHTML = cards.join("") || '<div class="empty">Sem destaques no momento.</div>';
+  }
+  function card(bg,fg,icon,k,v,sub){
+    return '<div class="spotcard"><div class="ic" style="background:'+bg+';color:'+fg+'">'+esc(icon)+'</div>'+
+      '<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><div class="sub">'+esc(sub)+'</div></div></div>';
+  }
+
+  function renderFeed(){
+    var evs=state.events||[];
+    if(!evs.length){ $("feed").innerHTML='<div class="empty">Sem eventos ainda.</div>'; return; }
+    $("feed").innerHTML = evs.map(function(e){ return feedRow(e); }).join("");
+  }
+  function nm(idx){ var d=carMap[idx]; return d?d.tag:("Car"+idx); }
+  function clock(ms){ if(!ms) return ""; var d=new Date(ms); return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2); }
+  function feedRow(e){
+    var code=e.code, data=e.data||{}, ic="rtmt", msg=code;
+    if(code==="OVTK"){ ic="ovt"; msg="<b>"+esc(nm(data.overtakerIdx))+"</b> ultrapassou "+esc(nm(data.overtakenIdx)); }
+    else if(code==="PENA"){ ic="pen"; var pd=data.desc?(esc(data.desc)):("punicao"+(data.timeSec?(" (+"+data.timeSec+"s)"):"")); msg="<b>"+esc(nm(data.vehicleIdx))+"</b> &mdash; "+pd; }
+    else if(code==="DTSV"||code==="SGSV"){ ic="pen"; msg=(code==="DTSV"?"Drive-through":"Stop-go")+" cumprido: <b>"+esc(nm(data.vehicleIdx))+"</b>"; }
+    else if(code==="COLL"){ ic="dmg"; msg="Colisao: <b>"+esc(nm(data.vehicle1Idx))+"</b> x <b>"+esc(nm(data.vehicle2Idx))+"</b>"; }
+    else if(code==="RTMT"){ ic="rtmt"; msg="<b>"+esc(nm(data.vehicleIdx))+"</b> abandonou"; }
+    else if(code==="FTLP"){ ic="fl"; msg="Volta mais rapida: <b>"+esc(nm(data.vehicleIdx))+"</b>"+(data.lapTimeSec?(" "+data.lapTimeSec.toFixed(3)+"s"):""); }
+    else if(code==="SCAR"){ ic="sc"; msg="Safety Car"; }
+    else if(code==="SEND"){ ic="rtmt"; msg="Fim da sessao"; }
+    else if(code==="SSTA"){ ic="rtmt"; msg="Inicio da sessao"; }
+    else if(code==="DRSE"){ ic="ovt"; msg="DRS habilitado"; }
+    else if(code==="DRSD"){ ic="rtmt"; msg="DRS desabilitado"; }
+    else { ic="rtmt"; msg=code; }
+    return '<div class="ev"><div class="t">'+clock(e.tsMs)+'</div><div class="ico '+ic+'">!</div><div class="msg">'+msg+'</div></div>';
+  }
+
+  // ---- driver drawer ----
+  function bindRows(bodyId){
+    // Event delegation: bind ONCE to the <tbody> (which persists across the per-tick
+    // innerHTML re-renders). We listen on MOUSEDOWN, not click: the per-tick render
+    // replaces the rows, and a real "click" only fires if mousedown AND mouseup land
+    // on the same (still-attached) node. When a row was swapped out between press and
+    // release, the click was silently dropped — hence "needs 3-4 tries". mousedown
+    // fires immediately on press, before any re-render can interfere.
+    var body=$(bodyId);
+    if(!body || body.getAttribute("data-bound")==="1") return;
+    body.setAttribute("data-bound","1");
+    function pick(e){
+      var r=e.target.closest ? e.target.closest("tr[data-car]") : null;
+      if(!r) return;
+      var idx=parseInt(r.getAttribute("data-car"),10);
+      if(carMap[idx]){ openDrawerCar=idx; renderDrawer(carMap[idx]); openDrawer(); }
+    }
+    body.addEventListener("mousedown",pick);
+    // Keyboard / accessibility fallback (Enter/Space on a focused row).
+    body.addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" ") pick(e); });
+  }
+  function pitPredBlock(d){
+    var s=state.session||{};
+    if(s.mode!=="race" || d.pitRejoinPos==null) return "";
+    var loss=d.pitLossSec||22;
+    return '<div class="section-t">Estrategia (estimativa)</div>'+
+      '<div class="kv"><div class="cell" style="grid-column:span 3">'+
+        '<div class="k">Se parar nesta volta</div>'+
+        '<div class="v">Retornaria ~P'+d.pitRejoinPos+' <span class="age">(perde ~'+loss+'s no pit)</span></div>'+
+      '</div></div>';
+  }
+  function penListBlock(d){
+    var list=d.penalties||[];
+    if(!list.length) return "";
+    return '<div class="section-t">Punicoes aplicadas</div>'+
+      '<div class="laps" style="max-height:none"><table class="laptable">'+
+      '<thead><tr><th style="text-align:left">Punicao</th><th>Volta</th><th>Tempo</th></tr></thead><tbody>'+
+      list.map(function(p){
+        var ts=(p.timeSec>0)?("+"+p.timeSec+"s"):"-";
+        return '<tr><td style="text-align:left">'+esc(p.desc||"")+'</td><td>'+(p.lap||"-")+'</td><td>'+ts+'</td></tr>';
+      }).join("")+
+      '</tbody></table></div>';
+  }
+  function warnListBlock(d){
+    var list=d.warningsDetail||[];
+    var cc=d.cornerCutWarnings||0, total=d.warnings||0, other=Math.max(0,total-cc);
+    if(!list.length && total<=0) return "";
+    var rows="";
+    if(list.length){
+      rows=list.map(function(w){
+        return '<tr><td style="text-align:left">'+esc(w.desc||"Aviso")+'</td><td>'+(w.lap||"-")+'</td></tr>';
+      }).join("");
+    } else if(total>0){
+      // Fallback when game only reports aggregate counts (no PENA warning events yet).
+      for(var i=0;i<cc;i++) rows+='<tr><td style="text-align:left">Corte de curva</td><td>-</td></tr>';
+      for(var j=0;j<other;j++) rows+='<tr><td style="text-align:left">Outro aviso</td><td>-</td></tr>';
+    }
+    var summary = total>0 ? (' <span class="age">('+total+' total)</span>') : '';
+    return '<div class="section-t">Avisos detalhados'+summary+'</div>'+
+      '<div class="laps" style="max-height:none"><table class="laptable">'+
+      '<thead><tr><th style="text-align:left">Aviso</th><th>Volta</th></tr></thead><tbody>'+
+      rows+
+      '</tbody></table></div>';
+  }
+  function driverDetailHtml(d){
+    var tw=d.tyreWear||{}, dm=d.damage||{};
+    var warnOther=Math.max(0,(d.warnings||0)-(d.cornerCutWarnings||0));
+    return ''+
+        '<div class="kv">'+
+          '<div class="cell"><div class="k">Melhor volta</div><div class="v">'+msLap(d.bestLapMs)+'</div></div>'+
+          '<div class="cell"><div class="k">Ultima</div><div class="v">'+msLap(d.lastLapMs)+'</div></div>'+
+          '<div class="cell"><div class="k">Volta atual</div><div class="v">'+msLap(d.curLapMs)+'</div></div>'+
+        '</div>'+
+        '<div class="kv">'+
+          '<div class="cell"><div class="k">Posicao</div><div class="v">P'+(d.pos||"-")+'</div></div>'+
+          '<div class="cell"><div class="k">Grid</div><div class="v">P'+(d.grid||"-")+'</div></div>'+
+          '<div class="cell"><div class="k">Pneu</div><div class="v">'+stintLabel(d)+'</div></div>'+
+        '</div>'+
+        pitPredBlock(d)+
+        '<div class="section-t">ERS / Combustivel</div>'+
+        '<div class="kv">'+
+          '<div class="cell"><div class="k">Bateria</div><div class="v">'+(d.ersPct||0)+'%</div></div>'+
+          '<div class="cell"><div class="k">Modo ERS</div><div class="v" style="font-size:13px">'+esc(d.ersMode||"-")+'</div></div>'+
+          '<div class="cell"><div class="k">Paradas</div><div class="v">'+(d.stops||0)+'</div></div>'+
+        '</div>'+
+        '<div class="kv">'+
+          '<div class="cell"><div class="k">Combustivel</div><div class="v">'+(d.fuelLaps!=null?('<b>'+d.fuelLaps+'</b> voltas'):"-")+'</div></div>'+
+          '<div class="cell" style="grid-column:span 2"><div class="k">No tanque</div><div class="v">'+(d.fuelKg!=null?d.fuelKg+" kg":"-")+'</div></div>'+
+        '</div>'+
+        '<div class="section-t">Desgaste dos pneus</div>'+
+        '<div class="tyres4">'+
+          corner("DD",tw.fr)+corner("DE",tw.fl)+corner("TD",tw.rr)+corner("TE",tw.rl)+
+        '</div>'+
+        '<div class="section-t">Danos</div>'+
+        '<div class="tyres4">'+
+          corner("Asa diant. E",dm.wingFL)+corner("Asa diant. D",dm.wingFR)+
+          corner("Asa traseira",dm.wingRear)+corner("Pior",dm.worst)+
+        '</div>'+
+        '<div class="section-t">Punicoes e avisos (resumo)</div>'+
+        '<div class="kv">'+
+          '<div class="cell"><div class="k">Penalidade (s)</div><div class="v">+'+(d.penaltiesSec||0)+'s</div></div>'+
+          '<div class="cell"><div class="k">Avisos corte</div><div class="v">'+(d.cornerCutWarnings||0)+'</div></div>'+
+          '<div class="cell"><div class="k">Outros avisos</div><div class="v">'+warnOther+'</div></div>'+
+        '</div>'+
+        warnListBlock(d)+
+        penListBlock(d)+
+        '<div class="section-t">Ultimas voltas</div>'+
+        lapsTable(d.laps);
+  }
+  function renderDrawer(d){
+    $("drawerInner").innerHTML =
+      '<div class="dh"><span class="teambar" style="height:34px;width:6px;background:'+teamColor(d.team)+'"></span>'+
+        '<div><div class="big">'+esc(d.tag)+'</div><div class="team">'+esc(d.team||"")+' &middot; P'+(d.pos||"-")+'</div></div>'+
+        '<button class="btn close" id="closeDrawer">Fechar</button></div>'+
+      '<div class="dbody">'+driverDetailHtml(d)+'</div>';
+    var cd=$("closeDrawer"); if(cd) cd.addEventListener("click",closeDrawer);
+  }
+  function lapsTable(laps){
+    if(!laps || !laps.length) return '<div class="empty">Nenhuma volta completa ainda.</div>';
+    // Only the last 5 laps (already capped by the plugin); no inner scroll.
+    var best=0;
+    laps.forEach(function(l){ if(l.ms>0 && (best===0||l.ms<best)) best=l.ms; });
+    var rows = laps.map(function(l,i){
+      var prev = i>0 ? laps[i-1].ms : 0;
+      var delta = (prev>0 && l.ms>0) ? (l.ms-prev) : null;
+      var deltaTxt = "-";
+      if(delta!==null){
+        var sign = delta>0 ? "+" : "-";
+        var cls = delta>0 ? "delta-down" : (delta<0 ? "delta-up" : "");
+        deltaTxt = '<span class="'+cls+'">'+sign+(Math.abs(delta)/1000).toFixed(3)+'</span>';
+      }
+      var isBest = l.ms===best && l.ms>0;
+      return '<tr>'+
+        '<td>'+l.n+'</td>'+
+        '<td class="'+(isBest?"fastest":"")+'">'+msLap(l.ms)+'</td>'+
+        '<td>'+deltaTxt+'</td>'+
+        '<td>'+msSector(l.s1)+'</td>'+
+        '<td>'+msSector(l.s2)+'</td>'+
+        '<td>'+msSector(l.s3)+'</td>'+
+      '</tr>';
+    }).reverse().join("");
+    return '<div class="laps" style="max-height:none"><table class="laptable">'+
+      '<thead><tr><th>V</th><th>Tempo</th><th>Delta</th><th>S1</th><th>S2</th><th>S3</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div>';
+  }
+  function corner(lab,pct){
+    pct = pct||0;
+    var col = pct>70?"var(--bad)":(pct>40?"var(--accent-2)":"var(--good)");
+    return '<div class="corner"><div class="lab">'+lab+'</div><div class="pct" style="color:'+col+'">'+pct+'%</div></div>';
+  }
+  // ---- Track Map: car diagram with tyre/brake/engine temps + per-tyre wear ----
+  function tColor(t){ if(t==null) return 'var(--txt-faint)'; if(t<80) return 'var(--wet)'; if(t<=105) return 'var(--good)'; if(t<=115) return 'var(--accent-2)'; return 'var(--bad)'; }
+  function wColor(w){ w=w||0; return w>70?'var(--bad)':(w>40?'var(--accent-2)':'var(--good)'); }
+  function tCardHtml(cls,lab,corner,d){
+    var surf=d.tyreTempsSurface?d.tyreTempsSurface[corner]:null;
+    var inner=d.tyreTempsInner?d.tyreTempsInner[corner]:null;
+    var brake=d.brakeTemps?d.brakeTemps[corner]:null;
+    var wear=(d.tyreWear&&d.tyreWear[corner]!=null)?Math.round(d.tyreWear[corner]):0;
+    return '<div class="tcard '+cls+'"><div class="pos">'+lab+'</div>'+
+      '<div class="trow">'+
+        '<div class="met"><div class="big" style="color:'+tColor(surf)+'">'+(surf!=null?surf+'°':'--')+'</div><div class="cap">superficie</div></div>'+
+        '<div class="met"><div class="big" style="color:'+wColor(wear)+'">'+wear+'%</div><div class="cap">desgaste</div></div>'+
+      '</div>'+
+      '<div class="sub"><span>interna <b>'+(inner!=null?inner+'°':'--')+'</b></span><span>freio <b>'+(brake!=null?brake+'°':'--')+'</b></span></div>'+
+      '<div class="wb"><i style="width:'+Math.min(100,wear)+'%;background:'+wColor(wear)+'"></i></div></div>';
+  }
+  function carDiagramHtml(d){
+    var ts=d.tyreTempsSurface, hasT=ts!=null;
+    function wf(c){ return hasT?tColor(ts[c]):'var(--line)'; }
+    var eng=(hasT&&d.engineTemp!=null)?d.engineTemp:null;
+    var svg='<svg width="78" height="150" viewBox="0 0 78 150" xmlns="http://www.w3.org/2000/svg" aria-label="Carro">'+
+      '<rect x="18" y="2" width="42" height="8" rx="3" fill="#2a3344"/>'+
+      '<path d="M39 7 L33 36 L45 36 Z" fill="#39435a"/>'+
+      '<rect x="31" y="34" width="16" height="78" rx="6" fill="#39435a"/>'+
+      '<path d="M27 62 q-11 6 -9 32 l15 2 z" fill="#2a3344"/>'+
+      '<path d="M51 62 q11 6 9 32 l-15 2 z" fill="#2a3344"/>'+
+      '<circle cx="39" cy="66" r="6.5" fill="#1b2230" stroke="#4a5670" stroke-width="2"/>'+
+      '<rect x="20" y="134" width="38" height="10" rx="3" fill="#2a3344"/>'+
+      '<rect x="4" y="22" width="14" height="28" rx="4" fill="'+wf('fl')+'"/>'+
+      '<rect x="60" y="22" width="14" height="28" rx="4" fill="'+wf('fr')+'"/>'+
+      '<rect x="4" y="104" width="14" height="28" rx="4" fill="'+wf('rl')+'"/>'+
+      '<rect x="60" y="104" width="14" height="28" rx="4" fill="'+wf('rr')+'"/>'+
+    '</svg>';
+    return '<div class="cardiag">'+
+      tCardHtml('fl','Diant. Esq.','fl',d)+tCardHtml('fr','Diant. Dir.','fr',d)+
+      '<div class="carcol">'+svg+'<div class="eng"><span class="lab">Motor</span><b style="color:'+(eng!=null?tColor(eng):'var(--txt-faint)')+'">'+(eng!=null?eng+'°':'--')+'</b></div></div>'+
+      tCardHtml('rl','Tras. Esq.','rl',d)+tCardHtml('rr','Tras. Dir.','rr',d)+
+    '</div>'+
+    '<div class="tlegend"><span><i style="background:var(--wet)"></i>frio</span><span><i style="background:var(--good)"></i>ideal</span><span><i style="background:var(--accent-2)"></i>quente</span><span><i style="background:var(--bad)"></i>superaq.</span></div>'+
+    (hasT?'':'<div class="empty" style="padding:8px 6px;font-size:11px">Temperaturas aguardando o pacote Car Telemetry do jogo.</div>');
+  }
+  // Speed/Throttle/Brake/Gear line charts: current lap (colour) vs previous lap (grey),
+  // with y-axis scale, x-axis distance and a hover tooltip (see bindChartHover).
+  function miniChart(title, trace, fi, yMax, unit, color){
+    var cur=(trace&&trace.cur)||[], prev=(trace&&trace.prev)||[];
+    var head='<div class="chartbox" data-fi="'+fi+'" data-ymax="'+yMax+'" data-unit="'+unit+'" data-color="'+color+'">'+
+      '<div class="chart-t"><span>'+title+'</span></div>';
+    if(!cur.length && !prev.length)
+      return head+'<div class="chart-empty">sem dados de telemetria</div></div>';
+    var maxD=1;
+    if(cur.length) maxD=Math.max(maxD, cur[cur.length-1][0]);
+    if(prev.length) maxD=Math.max(maxD, prev[prev.length-1][0]);
+    function poly(arr,stroke,sw,op){
+      if(!arr.length) return "";
+      var pts=arr.map(function(p){
+        var x=(p[0]/maxD)*300;
+        var y=100-(Math.max(0,Math.min(p[fi],yMax))/yMax)*100;
+        return x.toFixed(1)+","+y.toFixed(1);
+      }).join(" ");
+      return '<polyline points="'+pts+'" fill="none" stroke="'+stroke+'" stroke-width="'+sw+'" opacity="'+op+'" vector-effect="non-scaling-stroke"/>';
+    }
+    var mid=(yMax%2===0)?(yMax/2):Math.round(yMax/2);
+    return head+
+      '<div class="chart-wrap">'+
+        '<div class="chart-yax"><span>'+yMax+'</span><span>'+mid+'</span><span>0</span></div>'+
+        '<div class="chart-plot">'+
+          '<svg viewBox="0 0 300 100" preserveAspectRatio="none" class="chart">'+
+            poly(prev,"#7b8ca3",1,0.55)+poly(cur,color,1.6,1)+
+          '</svg><div class="chart-guide"></div><div class="chart-dot" style="background:'+color+'"></div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="chart-xax"><span>0</span><span>'+Math.round(maxD)+' m</span></div>'+
+      '<div class="chart-tip"></div></div>';
+  }
+  function chartsHtml(d){
+    return '<div class="section-t">Telemetria - volta atual vs anterior</div>'+
+      '<div class="charts">'+
+        miniChart("Velocidade", d.trace, 1, 360, "km/h", "var(--accent-2)")+
+        miniChart("Acelerador", d.trace, 2, 100, "%", "var(--good)")+
+        miniChart("Freio", d.trace, 3, 100, "%", "var(--bad)")+
+        miniChart("Marcha", d.trace, 4, 8, "", "#4dd0e1")+
+      '</div>'+
+      '<div class="chart-legend"><span>linha forte = volta atual</span><span><i style="background:#7b8ca3"></i>volta anterior</span></div>';
+  }
+  function hideChartTips(host){ var t=host.querySelectorAll(".chart-guide,.chart-tip,.chart-dot"); for(var i=0;i<t.length;i++) t[i].style.display="none"; }
+  function bindChartHover(){
+    var host=$("tmDetail"); if(!host || host.getAttribute("data-chov")==="1") return;
+    host.setAttribute("data-chov","1");
+    function nearest(a,dist){ if(!a.length)return null; var b=a[0],bd=1e12; for(var i=0;i<a.length;i++){var dd=Math.abs(a[i][0]-dist); if(dd<bd){bd=dd;b=a[i];}} return b; }
+    host.addEventListener("mousemove",function(e){
+      var plot=e.target.closest?e.target.closest(".chart-plot"):null;
+      var box=plot?plot.closest(".chartbox"):null;
+      if(!plot||!box||tmCar==null||!carMap[tmCar]||!carMap[tmCar].trace){ hideChartTips(host); return; }
+      var tr=carMap[tmCar].trace, cur=tr.cur||[], prev=tr.prev||[];
+      var maxD=1; if(cur.length)maxD=Math.max(maxD,cur[cur.length-1][0]); if(prev.length)maxD=Math.max(maxD,prev[prev.length-1][0]);
+      var rect=plot.getBoundingClientRect();
+      var fx=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width)), dist=fx*maxD;
+      // Hide every tooltip first; draw a synced guide line across ALL charts at this distance.
+      hideChartTips(host);
+      var boxes=host.querySelectorAll(".chartbox");
+      for(var bi=0; bi<boxes.length; bi++){
+        var g=boxes[bi].querySelector(".chart-guide");
+        if(g){ g.style.display="block"; g.style.left=(fx*100)+"%"; }
+      }
+      var fi=parseInt(box.getAttribute("data-fi"),10), unit=box.getAttribute("data-unit")||"", col=box.getAttribute("data-color")||"var(--txt)", yMax=parseFloat(box.getAttribute("data-ymax"))||1;
+      var c=nearest(cur,dist), p=nearest(prev,dist), u=unit?(" "+unit):"";
+      // Marker dot on the current-lap line at the hovered point.
+      var dot=plot.querySelector(".chart-dot");
+      if(dot && c){ dot.style.display="block"; dot.style.left=(fx*100)+"%"; dot.style.top=((1-Math.max(0,Math.min(c[fi],yMax))/yMax)*100)+"%"; }
+      var tip=box.querySelector(".chart-tip");
+      if(tip){
+        var dl="";
+        if(c && p){ var dv=c[fi]-p[fi]; if(dv!==0) dl='<span class="tip-dl '+(dv>0?"up":"dn")+'">'+(dv>0?"+":"")+dv+'</span>'; }
+        tip.innerHTML='<div class="tip-d">'+Math.round(dist)+' m</div>'+
+          '<div><span class="tip-cur" style="color:'+col+'">'+(c?c[fi]+u:"-")+'</span>'+dl+'</div>'+
+          (p?'<div class="tip-prev">ant '+p[fi]+u+'</div>':'');
+        tip.style.display="block";
+        var tx=Math.max(0,Math.min(plot.offsetWidth-tip.offsetWidth, fx*rect.width-tip.offsetWidth/2));
+        tip.style.left=(plot.offsetLeft+tx)+"px"; tip.style.top=(plot.offsetTop-4)+"px";
+      }
+    });
+    host.addEventListener("mouseleave",function(){ hideChartTips(host); });
+  }
+  function dmgColor(v){ v=v||0; return v>=50?'var(--bad)':(v>=15?'var(--accent-2)':'var(--good)'); }
+  function dmgRow(label,v){ v=Math.round(v||0); return '<div class="dmgrow"><span class="dl">'+label+'</span><span class="db"><i style="width:'+Math.min(100,v)+'%;background:'+dmgColor(v)+'"></i></span><span class="dv" style="color:'+dmgColor(v)+'">'+v+'%</span></div>'; }
+  function damageCardHtml(d){
+    var dm=d.damage||{};
+    return '<div class="section-t">Danos no carro</div>'+
+      '<div class="dmggrid">'+
+        '<div class="dmgcol"><div class="dmgh">Asa</div>'+
+          dmgRow('Diant. Esq.',dm.wingFL)+dmgRow('Diant. Dir.',dm.wingFR)+dmgRow('Traseira',dm.wingRear)+
+        '</div>'+
+        '<div class="dmgcol"><div class="dmgh">Pneus</div>'+
+          dmgRow('Diant. Esq.',dm.tyreFL)+dmgRow('Diant. Dir.',dm.tyreFR)+dmgRow('Tras. Esq.',dm.tyreRL)+dmgRow('Tras. Dir.',dm.tyreRR)+
+        '</div>'+
+      '</div>';
+  }
+  function trackMapDetailHtml(d){
+    bindChartHover();
+    var warn=warnListBlock(d), pen=penListBlock(d);
+    // Narrow "status" cards after the diagram + ERS pair: always damage, plus
+    // warnings/penalties when present. If the running total is odd, the last card
+    // spans full width so the grid never ends with a lonely half-empty cell.
+    var status=[damageCardHtml(d)];
+    if(warn) status.push(warn);
+    if(pen) status.push(pen);
+    var lastWide=((2+status.length)%2===1);
+    var statusHtml=status.map(function(html,i){
+      return '<div class="tmcard'+(lastWide&&i===status.length-1?' wide':'')+'">'+html+'</div>';
+    }).join("");
+    return '<div class="tmgrid">'+
+      '<div class="tmcard"><div class="section-t">Pneus / temperaturas</div>'+carDiagramHtml(d)+'</div>'+
+      '<div class="tmcard">'+
+        '<div class="section-t">ERS / Combustivel</div>'+
+        '<div class="kv">'+
+          '<div class="cell"><div class="k">Bateria</div><div class="v">'+(d.ersPct||0)+'% <span class="age" style="font-size:11px">'+esc(d.ersMode||"")+'</span></div></div>'+
+          '<div class="cell"><div class="k">Combustivel</div><div class="v">'+(d.fuelLaps!=null?('<b>'+d.fuelLaps+'</b> v'):"-")+'</div></div>'+
+          '<div class="cell"><div class="k">Pneu</div><div class="v">'+stintLabel(d)+'</div></div>'+
+        '</div>'+pitPredBlock(d)+
+      '</div>'+
+      statusHtml+
+      '<div class="tmcard wide">'+chartsHtml(d)+'</div>'+
+      '<div class="tmcard wide"><div class="section-t">Ultimas voltas</div>'+lapsTable(d.laps)+'</div>'+
+    '</div>';
+  }
+  function openDrawer(){ $("drawer").classList.add("open"); $("mask").classList.add("open"); }
+  function closeDrawer(){ $("drawer").classList.remove("open"); $("mask").classList.remove("open"); openDrawerCar=null; }
+  $("mask").addEventListener("click",closeDrawer);
+
+  // ---- tabs ----
+  function activateView(view, fromAuto){
+    curView=view;
+    if(view==="trackmap"){ setTimeout(function(){ renderTrackMap(true); }, 30); }
+    if(view==="overlay") syncOverlayFrame();
+    ["broadcast","qualy","trackmap","overlay"].forEach(function(v){
+      var el=$("view-"+v); if(el){ if(v===view) el.classList.remove("hide"); else el.classList.add("hide"); }
+    });
+    var tabs=$("tabs").querySelectorAll(".tab");
+    tabs.forEach(function(t){ t.classList.toggle("active", t.getAttribute("data-view")===view); });
+  }
+  $("tabs").querySelectorAll(".tab").forEach(function(t){
+    t.addEventListener("click",function(){
+      activateView(t.getAttribute("data-view"));
+    });
+  });
+  $("autoChk").addEventListener("change",function(){ autoFollow=this.checked; if(autoFollow&&state) onState(); });
+
+  var tmSel=$("tmSelect");
+  if(tmSel) tmSel.addEventListener("change",function(){
+    var v=this.value;
+    if(v===""){ tmCar=null; $("tmDetail").innerHTML='<div class="empty">Selecione um piloto.</div>'; renderTrackMap(true); }
+    else selectTmCar(parseInt(v,10));
+  });
+  function pickTmCar(mx,my){
+    var bestD=1e9, best=null;
+    tmHits.forEach(function(h){
+      var r=h.r||12, dx=h.x-mx, dy=h.y-my, dd=dx*dx+dy*dy;
+      if(dd < r*r && dd<bestD){ bestD=dd; best=h; }
+    });
+    return best;
+  }
+  function selectTmCar(idx){
+    tmCar=idx;
+    var sel=$("tmSelect"); if(sel) sel.value=String(tmCar);
+    if(carMap[tmCar]) $("tmDetail").innerHTML=trackMapDetailHtml(carMap[tmCar]);
+    else $("tmDetail").innerHTML='<div class="empty">Selecione um piloto.</div>';
+    renderTrackMap(true);
+  }
+  var tmCanvas=$("trackCanvas");
+  if(tmCanvas){
+    tmCanvas.addEventListener("mousedown",function(ev){
+      ev.preventDefault();
+      var rect=this.getBoundingClientRect();
+      var best=pickTmCar(ev.clientX-rect.left, ev.clientY-rect.top);
+      if(best) selectTmCar(best.idx);
+    });
+  }
+  window.addEventListener("resize",function(){ if(curView==="trackmap") renderTrackMap(true); });
+  // Finalize check keeps running even if packets stop arriving (game closed).
+  setInterval(function(){ if(state){ maybeFinalize(); applyFinalized(); } }, 15000);
+
+  var OVERLAY_VIEWS=[
+    ["tower","Timing Tower"],["lower","Faixa inferior"],["battle","Briga H2H"],
+    ["driver","Card piloto"],["weather","Clima"],["gaps","Grafico gaps"]
+  ];
+  function overlayBase(){
+    return (location.origin && location.origin!=="null") ? location.origin : (location.protocol+"//"+location.host);
+  }
+  function overlayUrl(view){ return overlayBase()+"/overlays?view="+view; }
+  function syncOverlayFrame(){
+    var fr=$("ovFrame"); if(!fr) return;
+    var want=overlayUrl(curOvView);
+    if(fr.getAttribute("data-src")!==want){ fr.setAttribute("data-src",want); fr.src=want; }
+  }
+  (function initOverlayTab(){
+    var tabs=$("ovSubtabs"); if(!tabs) return;
+    tabs.innerHTML=OVERLAY_VIEWS.map(function(o){
+      return '<button type="button" data-ov="'+o[0]+'">'+o[1]+'</button>';
+    }).join("");
+    tabs.querySelectorAll("button").forEach(function(b){
+      b.addEventListener("click",function(){
+        curOvView=b.getAttribute("data-ov");
+        tabs.querySelectorAll("button").forEach(function(x){ x.classList.toggle("active", x===b); });
+        syncOverlayFrame();
+      });
+    });
+    var first=tabs.querySelector("button"); if(first){ first.classList.add("active"); }
+    var el=$("overlayLinks");
+    if(el) el.innerHTML=OVERLAY_VIEWS.map(function(o){
+      var url=overlayUrl(o[0]);
+      return '<div class="cell"><div class="k">'+o[1]+'</div>'+
+        '<div class="v" style="font-size:12px"><a href="'+url+'" target="_blank" style="color:var(--accent-2);text-decoration:none">'+url+'</a></div></div>';
+    }).join("");
+  })();
+
+  activateView("broadcast");
+  connect();
+})();
+</script>
+</body>
+</html>
