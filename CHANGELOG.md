@@ -28,8 +28,7 @@ suporte F1 26). Sem quebra de formato do `.otk` (segue schema league-1.x).
   critico de atualizacao obrigatoria.
 
 ### Note
-- Recomendacao para ligas: **UDP Format = 2025** no jogo (mais testado; evita caso raro de
-  troca de nomes em salas My Team no formato 2026).
+- Recomendacao para ligas: **UDP Format = 2026** no F1 26 (formato nativo do jogo); **2025** no F1 25.
 
 ## [1.1.47] - 2026-06-25
 
