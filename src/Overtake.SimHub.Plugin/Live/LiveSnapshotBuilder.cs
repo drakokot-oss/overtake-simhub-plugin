@@ -688,21 +688,20 @@ namespace Overtake.SimHub.Plugin.Live
         {
             // Content first (parity with .otk export): the F1 26 "2026 Season Pack"
             // runs on the 2025 wire format, so packetFormat alone reports F1_25 even
-            // when the content is 2026. Detect via team ids (220-230) or Madring (42).
+            // when the content is 2026. Detect via team ids (220-230), Madring (42),
+            // or grid size >20 (v2.0.1 — F1 26 = 22 cars / 11 teams; F1 25 caps at 20).
             bool content2026 = false;
             if (sess.TrackId.HasValue && sess.TrackId.Value == Packets.GameInfo.F1_26TrackIdMadring)
                 content2026 = true;
-            if (!content2026)
+            int realCars = 0;
+            foreach (var te in sess.TeamByCarIdx.Values)
             {
-                foreach (var te in sess.TeamByCarIdx.Values)
-                {
-                    if (te != null && Packets.GameInfo.IsF1_26TeamId(te.TeamId))
-                    {
-                        content2026 = true;
-                        break;
-                    }
-                }
+                if (te == null || te.TeamId == 255) continue; // 255 = empty/invalid slot
+                realCars++;
+                if (Packets.GameInfo.IsF1_26TeamId(te.TeamId))
+                    content2026 = true;
             }
+            if (realCars > 20) content2026 = true;
             if (content2026) return "F1_26";
             if (sess.LastPacketFormat != 0)
                 return Packets.GameInfo.GameNameFromPacketFormat(sess.LastPacketFormat);

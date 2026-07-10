@@ -1060,19 +1060,25 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // the body parses cleanly); in a 2026-format capture the bodies are
             // garbage, but packetFormat itself is read correctly, so the format
             // path still flips the label to F1_26.
+            //
+            // v2.0.1 — Third signal: GRID SIZE. The F1 26 grid is 22 cars (11
+            // constructors, Audi + Cadillac added); F1 25 tops out at 20 (10
+            // constructors). So >20 real cars (TeamId != 255) in a single session
+            // is 2026 content even if the 220-230 team ids happened not to parse.
             bool contentPack2026 = false;
             foreach (var s in store.Sessions.Values)
             {
                 if (s.TrackId.HasValue && s.TrackId.Value == Packets.GameInfo.F1_26TrackIdMadring)
                     contentPack2026 = true;
+                int realCars = 0;
                 foreach (var te in s.TeamByCarIdx.Values)
                 {
-                    if (te != null && Packets.GameInfo.IsF1_26TeamId(te.TeamId))
-                    {
+                    if (te == null || te.TeamId == 255) continue; // 255 = empty/invalid slot
+                    realCars++;
+                    if (Packets.GameInfo.IsF1_26TeamId(te.TeamId))
                         contentPack2026 = true;
-                        break;
-                    }
                 }
+                if (realCars > 20) contentPack2026 = true; // 11-team (F1 26) grid
                 if (contentPack2026) break;
             }
 
