@@ -2,6 +2,23 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.0.1] - NAO LANCADO (aguarda o proximo update maior)
+
+> Codigo ja mergeado em `main` (AssemblyInfo 2.0.1.0), **sem release** — nao vale um
+> update forcado pra algo pequeno; entra junto no proximo update maior. Enquanto isso,
+> a MESMA deteccao roda no **front** (portal `f1-race-hub`, `src/lib/game-version.ts`
+> `detectGameVersion`), que le os mesmos sinais crus do `.otk` (teamId 220-230, track 42)
+> + a ancora de data (03/06/2026 = lancamento do DLC). Ou seja, ja resolvido no import
+> sem depender desta versao.
+
+### Added
+- **3o sinal de conteudo F1 26 — tamanho do grid.** O F1 26 tem 22 carros (11 construtores,
+  Audi+Cadillac); o F1 25 tem 20. `>20` carros reais (`TeamId != 255`) numa sessao forca
+  `contentPack2026 = true`, mesmo quando os team ids 220-230 nao parseiam (captura em wire
+  format 2026 com bodies ilegiveis). Aplicado no `LeagueFinalizer.cs` (.otk) e
+  `LiveSnapshotBuilder.cs` (ao vivo), ao lado dos sinais ja existentes (team id 220-230,
+  Madring track 42) da v1.1.39.
+
 ## [2.0.0] - 2026-07-08
 
 Primeira versao publica da geracao "ao vivo + F1 26". Consolida tudo de 1.1.47 a 1.1.56.
