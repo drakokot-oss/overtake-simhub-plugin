@@ -518,20 +518,18 @@ function TagsContainValue($tags, [string]$val) {
 # Dictionary), then start a new session and inspect what GetSessionKey carried over.
 # Isolates the carry-over GATE (Fix A) without depending on Participants byte layout.
 
-# Scenario A — leaving a qualy PART (type 5) must NOT carry a named carIdx tag (F1 26 remap).
+# Scenario A — leaving a qualy PART (type 5): named carIdx tag must NOT carry (F1 26 remap),
+# but a GENERIC placeholder still carries (so early packets in the next part keep resolving).
+# Fresh store with exactly prev(Q1)+new(Q3) so GetSessionKey's prevSess is unambiguous.
 $storeQ = [System.Activator]::CreateInstance($storeType)
 DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 5 7) 1001))  # Q1, track 7
 $q1 = GetSession $storeQ "1001"
 (Get-Field $q1 "TagsByCarIdx")[14] = "Quintino"   # named tag learned in Q1 at carIdx 14
+(Get-Field $q1 "TagsByCarIdx")[9] = "Car_9"        # generic placeholder
 DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 7 7) 2002))  # Q3, same track, new UID
 $q3 = GetSession $storeQ "2002"
 Assert "Q3 did NOT inherit named tag from a qualy part (carIdx remap gate)" (-not (TagsContainValue (Get-Field $q3 "TagsByCarIdx") "Quintino"))
-
-# Scenario A2 — GENERIC placeholders still carry (so early packets keep resolving).
-(Get-Field $q1 "TagsByCarIdx")[9] = "Car_9"
-DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 7 7) 2003))
-$q3b = GetSession $storeQ "2003"
-Assert "generic placeholder still carries out of a qualy part" (TagsContainValue (Get-Field $q3b "TagsByCarIdx") "Car_9")
+Assert "generic placeholder still carries out of a qualy part" (TagsContainValue (Get-Field $q3 "TagsByCarIdx") "Car_9")
 
 # Scenario B (regression control) — leaving a NON-qualy session (Practice type 1) STILL
 # carries named tags (behavior unchanged for everything except qualy parts).
