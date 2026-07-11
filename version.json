@@ -1,8 +1,8 @@
 {
-    "version":  "2.0.0",
+    "version":  "2.0.2",
     "minSupportedVersion":  "1.1.47",
-    "released":  "2026-07-08",
+    "released":  "2026-07-11",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.0.0/Overtake.SimHub.Plugin-v2.0.0-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.0 — nova geracao\r\n\r\nUma grande atualizacao: interface redesenhada, transmissao ao vivo e suporte ao F1 26.\r\n\r\n### Novidades\r\n- **Nova interface em abas** (Status - Transmitir - Config - Ajuda), em Portugues, Ingles e Espanhol.\r\n- **Transmissao ao vivo** direto para o portal overtakef1.com — seu grid acompanha a corrida em tempo real (exclusivo de ligas Elite/Founder).\r\n- **Envio automatico do resultado (.otk)** ao fim da corrida — o organizador so aprova com 1 clique.\r\n- **Suporte ao F1 26**: Sprint, My Team, uso de bateria (ERS) e configuracoes de sala corrigidos.\r\n- Bandeira vermelha: agora gera um unico arquivo por corrida (antes saiam dois).\r\n\r\n### Recomendacao para ligas\r\nNo F1 26, use \"UDP Format = 2026\" (formato nativo do jogo). No F1 25, use 2025.\r\n\r\n### Importante\r\nVersoes abaixo da 1.1.47 podem gerar arquivos corrompidos no F1 26 (nomes e equipes embaralhados). Atualize antes da proxima corrida."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.0.2/Overtake.SimHub.Plugin-v2.0.2-Setup.exe",
+    "releaseNotes":  "## Overtake Telemetry 2.0.2 — correcoes do F1 26\r\n\r\nCorrecoes de deteccao do F1 26, focadas no qualy de 3 partes.\r\n\r\n### Correcoes\r\n- **Qualy de 3 partes (Q1/Q2/Q3):** o F1 26 remapeia o carro entre as partes, o que podia duplicar um piloto no resultado (ex.: a pole aparecia duas vezes, uma como \"Car_9\") e embaralhar tempos de volta. Agora cada parte reconstroi a identidade dos carros do zero, sem herdar o mapa da parte anterior.\r\n- **Deteccao de F1 26 por tamanho de grid:** grid com mais de 20 carros (22 = 11 equipes) e reconhecido como F1 26 mesmo quando os IDs de equipe nao sao lidos.\r\n\r\n### Observacao\r\nApenas o F1 26 e afetado; o F1 25 nao muda. Nao ha mudanca no formato do .otk. Atualizacao recomendada para ligas que rodam qualy de 3 partes no F1 26."
 }
