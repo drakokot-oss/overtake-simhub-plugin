@@ -506,19 +506,7 @@ function New-SessionPayload([int]$sessionType, [int]$trackId) {
     $p = New-Object byte[] 700
     $p[0] = 1; $p[1] = 30; $p[2] = 22
     $p[6] = $sessionType; $p[7] = $trackId
-    $p[124] = 0; $p[125] = 1
-    return $p
-}
-# Two named drivers at carIdx 0 and 1 (team/raceNumber set; slots 2..21 empty).
-function New-TwoDriverParticipants([string]$name0, [int]$team0, [int]$num0, [string]$name1, [int]$team1, [int]$num1) {
-    $p = New-Object byte[] 1256
-    $p[0] = 2
-    $p[1] = 0
-    $b0 = [System.Text.Encoding]::UTF8.GetBytes($name0); [System.Array]::Copy($b0, 0, $p, 8, $b0.Length)
-    $p[1 + 3] = $team0; $p[1 + 5] = $num0; $p[41] = 1; $p[44] = 1; $p[58] = 0
-    $b1 = [System.Text.Encoding]::UTF8.GetBytes($name1); [System.Array]::Copy($b1, 0, $p, 65, $b1.Length)
-    $p[58 + 3] = $team1; $p[58 + 5] = $num1; $p[98] = 1; $p[101] = 1
-    for ($c = 2; $c -lt 22; $c++) { $st = 1 + $c * 57; $p[$st + 3] = 255; $p[$st + 5] = 0 }
+    $p[124] = 0; $p[125] = 1   # [125] = NetworkGame = online
     return $p
 }
 function TagsContainValue($tags, [string]$val) {
@@ -526,21 +514,32 @@ function TagsContainValue($tags, [string]$val) {
     return $false
 }
 
-# Q1 (type 5) on track 7, then Q3 (type 7) same track, DIFFERENT sessionUid (F1 26 remap).
-$storeQ = [System.Activator]::CreateInstance($storeType)
-DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 5 7) 1001))
-DoIngest $storeQ (Dispatch (New-FakePacket 4 (New-TwoDriverParticipants "Quintino" 1 15 "Rival" 2 44) 1001))
-$q1 = GetSession $storeQ "1001"
-Assert "Q1 has Quintino" (TagsContainValue (Get-Field $q1 "TagsByCarIdx") "Quintino")
-DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 7 7) 2002))
-$q3 = GetSession $storeQ "2002"
-Assert "Q3 did NOT inherit named tag from Q1 (carIdx remap gate)" (-not (TagsContainValue (Get-Field $q3 "TagsByCarIdx") "Quintino"))
+# Seed the previous session's carIdx->tag map DIRECTLY (Get-Field returns the live
+# Dictionary), then start a new session and inspect what GetSessionKey carried over.
+# Isolates the carry-over GATE (Fix A) without depending on Participants byte layout.
 
-# Regression control: NON-qualy prev (Practice type 1) → named tags STILL carry over.
+# Scenario A — leaving a qualy PART (type 5) must NOT carry a named carIdx tag (F1 26 remap).
+$storeQ = [System.Activator]::CreateInstance($storeType)
+DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 5 7) 1001))  # Q1, track 7
+$q1 = GetSession $storeQ "1001"
+(Get-Field $q1 "TagsByCarIdx")[14] = "Quintino"   # named tag learned in Q1 at carIdx 14
+DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 7 7) 2002))  # Q3, same track, new UID
+$q3 = GetSession $storeQ "2002"
+Assert "Q3 did NOT inherit named tag from a qualy part (carIdx remap gate)" (-not (TagsContainValue (Get-Field $q3 "TagsByCarIdx") "Quintino"))
+
+# Scenario A2 — GENERIC placeholders still carry (so early packets keep resolving).
+(Get-Field $q1 "TagsByCarIdx")[9] = "Car_9"
+DoIngest $storeQ (Dispatch (New-FakePacket 1 (New-SessionPayload 7 7) 2003))
+$q3b = GetSession $storeQ "2003"
+Assert "generic placeholder still carries out of a qualy part" (TagsContainValue (Get-Field $q3b "TagsByCarIdx") "Car_9")
+
+# Scenario B (regression control) — leaving a NON-qualy session (Practice type 1) STILL
+# carries named tags (behavior unchanged for everything except qualy parts).
 $storeP = [System.Activator]::CreateInstance($storeType)
-DoIngest $storeP (Dispatch (New-FakePacket 1 (New-SessionPayload 1 7) 3001))
-DoIngest $storeP (Dispatch (New-FakePacket 4 (New-TwoDriverParticipants "Hamilton" 1 44 "Verstappen" 2 1) 3001))
-DoIngest $storeP (Dispatch (New-FakePacket 1 (New-SessionPayload 5 7) 3002))
+DoIngest $storeP (Dispatch (New-FakePacket 1 (New-SessionPayload 1 7) 3001))  # Practice, track 7
+$p1 = GetSession $storeP "3001"
+(Get-Field $p1 "TagsByCarIdx")[0] = "Hamilton"
+DoIngest $storeP (Dispatch (New-FakePacket 1 (New-SessionPayload 5 7) 3002))  # Q1, same track
 $q1b = GetSession $storeP "3002"
 Assert "Non-qualy prev still carries named tags (no regression)" (TagsContainValue (Get-Field $q1b "TagsByCarIdx") "Hamilton")
 
