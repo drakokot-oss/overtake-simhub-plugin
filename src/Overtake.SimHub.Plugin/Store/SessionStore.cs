@@ -394,30 +394,43 @@ namespace Overtake.SimHub.Plugin.Store
                     {
                         bool sameLobby = _lastTrackId.HasValue && prevSess.TrackId.HasValue
                             && prevSess.TrackId.Value == _lastTrackId.Value;
+                        // v2.0.2 — F1 26 REMAPS carIdx between the parts of a 3-part
+                        // qualifying (Q1/Q2/Q3 = sessionType 5/6/7). A named carIdx→tag
+                        // learned in one part is therefore NOT reliable for the next
+                        // session (the same slot may now be a different driver), and
+                        // carrying it forward mis-attributes lap history to the wrong
+                        // car (the "Car_9/Eduquepro get Quintino's laps" bug). So when
+                        // we're LEAVING a multi-part-qualy part, carry ONLY generic
+                        // placeholders (like the cross-lobby case) and let the new
+                        // part's Participants packet rebuild the real names from scratch.
+                        bool prevIsQualyPart = prevSess.SessionType.HasValue
+                            && prevSess.SessionType.Value >= 5 && prevSess.SessionType.Value <= 7;
+                        bool carryNamed = sameLobby && !prevIsQualyPart;
                         foreach (var kvp in prevSess.TagsByCarIdx)
                         {
-                            if (sameLobby)
+                            if (carryNamed)
                             {
                                 newSess.TagsByCarIdx[kvp.Key] = kvp.Value;
                             }
                             else
                             {
-                                // Different lobby: only carry generic placeholders.
-                                // Non-generic names belong to different players now.
+                                // Different lobby OR leaving a qualy part: only carry
+                                // generic placeholders — named tags belong to a carIdx
+                                // that may now hold a different player.
                                 if (IsGenericTag(kvp.Value))
                                     newSess.TagsByCarIdx[kvp.Key] = kvp.Value;
                             }
                         }
                         foreach (var kvp in prevSess.TeamByCarIdx)
                         {
-                            if (sameLobby)
+                            if (carryNamed)
                                 newSess.TeamByCarIdx[kvp.Key] = kvp.Value;
-                            // Don't carry team data across lobbies either:
-                            // different player may be at same carIdx with different team.
+                            // Don't carry team data across lobbies / qualy-part remaps:
+                            // a different player may be at the same carIdx with a different team.
                         }
                         if (prevSess.MaxNumActiveCars > newSess.MaxNumActiveCars)
                             newSess.MaxNumActiveCars = prevSess.MaxNumActiveCars;
-                        if (sameLobby)
+                        if (carryNamed)
                         {
                             foreach (var kvp in prevSess.TagReliability)
                                 newSess.TagReliability[kvp.Key] = kvp.Value;
@@ -2036,11 +2049,26 @@ namespace Overtake.SimHub.Plugin.Store
                 // Cross-session tag recovery (prefer non-generic tags) — also when slot only has Driver_X / Car_X.
                 if (weakTag)
                 {
+                    // v2.0.2 — the recovery below matches by carIdx across sessions. That
+                    // is INVALID between the parts of a 3-part qualifying: F1 26 remaps
+                    // carIdx between Q1/Q2/Q3 (5/6/7), so the same carIdx is a different
+                    // driver in another part. When THIS session is a qualy part, skip other
+                    // qualy parts (leave Qualy↔Race bridging, which is carIdx-comparable
+                    // enough and covered by tests, untouched).
+                    bool sessIsQualyPart = sess.SessionType.HasValue
+                        && sess.SessionType.Value >= 5 && sess.SessionType.Value <= 7;
                     string bestCross = null;
                     ParticipantEntry bestCrossTeam = null;
                     foreach (var otherKvp in Sessions)
                     {
                         if (otherKvp.Value == sess) continue;
+                        if (sessIsQualyPart)
+                        {
+                            var ov = otherKvp.Value;
+                            bool otherIsQualyPart = ov.SessionType.HasValue
+                                && ov.SessionType.Value >= 5 && ov.SessionType.Value <= 7;
+                            if (otherIsQualyPart) continue; // don't cross a qualy-part carIdx remap
+                        }
                         string crossTag;
                         if (otherKvp.Value.TagsByCarIdx.TryGetValue(carIdx, out crossTag)
                             && !string.IsNullOrEmpty(crossTag))
