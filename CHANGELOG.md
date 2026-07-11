@@ -19,6 +19,24 @@ All notable changes to the Overtake SimHub Plugin are documented here.
   `LiveSnapshotBuilder.cs` (ao vivo), ao lado dos sinais ja existentes (team id 220-230,
   Madring track 42) da v1.1.39.
 
+### Planejado (NAO implementado — fazer no proximo ciclo, com teste)
+- **Fantasma "Car_N" no qualy multipartes do F1 26.** O Q1→Q2→Q3 remapeia o `carIdx`
+  entre as partes. Quando chega telemetria num indice transitorio antes do pacote
+  Participants, nasce um placeholder `Car_N`; o slot definitivo fica nomeado. Como tem
+  `carIdx` diferente mas MESMO `raceNumber`, o `DeduplicateDrivers` (chave inclui carIdx)
+  nao junta, e o `RemovePhantomDuplicateSeats` so remove ghost genérico **0-lap** — mas
+  aqui o GENERICO carrega as voltas reais e o NOMEADO e a casca. Resultado: pole duplicada
+  (ex.: Catalunya T16 apareceu como "Gabriel Quintino" + "Car_9", ambos #15).
+  - **Fix planejado no plugin:** em `RemovePhantomDuplicateSeats`, quando um generico divide
+    o `raceNumber_teamId` com um NOMEADO, transferir a telemetria mais rica (voltas/best) do
+    generico pro nomeado ANTES de remover — em vez de so dropar 0-lap. CUIDADO: em lobbies
+    MyTeam o `raceNumber` colide entre pilotos diferentes (ver nota da linha ~696), entao
+    exigir que o grupo tenha EXATAMENTE 1 nomeado antes de fundir (paridade com o app).
+  - **Ja resolvido no front (nao urgente):** `f1-race-hub` `src/lib/merge-phantom-drivers.ts`
+    (`mergePhantomPlaceholders`) funde placeholder→nomeado por `(raceNumber, teamId)` com
+    exatamente-1-nomeado, no import (manual + publish do live). Cobre o problema hoje sem
+    release de plugin; este item no plugin e defesa-em-profundidade pro live nativo.
+
 ## [2.0.0] - 2026-07-08
 
 Primeira versao publica da geracao "ao vivo + F1 26". Consolida tudo de 1.1.47 a 1.1.56.
