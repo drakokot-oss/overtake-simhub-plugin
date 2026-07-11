@@ -2,40 +2,32 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
-## [2.0.1] - NAO LANCADO (aguarda o proximo update maior)
+## [2.0.2] - NAO LANCADO (aguarda revisao/aprovacao)
 
-> Codigo ja mergeado em `main` (AssemblyInfo 2.0.1.0), **sem release** — nao vale um
-> update forcado pra algo pequeno; entra junto no proximo update maior. Enquanto isso,
-> a MESMA deteccao roda no **front** (portal `f1-race-hub`, `src/lib/game-version.ts`
-> `detectGameVersion`), que le os mesmos sinais crus do `.otk` (teamId 220-230, track 42)
-> + a ancora de data (03/06/2026 = lancamento do DLC). Ou seja, ja resolvido no import
-> sem depender desta versao.
+> Junta duas correcoes de deteccao do F1 26 num unico release. `minSupportedVersion`
+> segue 1.1.47 (nada obriga atualizacao por isso). O front (`f1-race-hub`) ja resolve
+> ambos os casos em producao (detectGameVersion, composto de qualy, mergePhantomPlaceholders);
+> este release deixa o plugin coerente na fonte, especialmente pro live nativo.
 
-### Added
-- **3o sinal de conteudo F1 26 — tamanho do grid.** O F1 26 tem 22 carros (11 construtores,
-  Audi+Cadillac); o F1 25 tem 20. `>20` carros reais (`TeamId != 255`) numa sessao forca
-  `contentPack2026 = true`, mesmo quando os team ids 220-230 nao parseiam (captura em wire
-  format 2026 com bodies ilegiveis). Aplicado no `LeagueFinalizer.cs` (.otk) e
-  `LiveSnapshotBuilder.cs` (ao vivo), ao lado dos sinais ja existentes (team id 220-230,
-  Madring track 42) da v1.1.39.
+### Fixed
+- **Atribuicao de voltas no qualy 3-partes do F1 26 (carIdx remap).** O jogo remapeia o
+  `carIdx` entre Q1/Q2/Q3 (sessionType 5/6/7). O `SessionStore` (a) copiava o mapa
+  `TagsByCarIdx`/`TeamByCarIdx` da parte anterior e (b) recuperava tag cross-sessao por
+  carIdx no FinalClassification — ambos assumindo carIdx estavel. Com o remap, o historico
+  de voltas de um piloto era depositado em buckets alheios (ex.: Catalunya T16 — a pole do
+  Quintino apareceu duplicada em "Car_9" e "Eduquepro", voltas identicas, so `tsMs` diferente).
+  - **Fix A** (`GetSessionKey`): ao SAIR de uma parte de qualy, carregar so placeholders
+    genericos; os nomes sao reconstruidos pelo Participants da nova parte. Herança normal
+    preservada p/ transicoes nao-qualy.
+  - **Fix B** (`IngestFinalClassification`): a recuperacao cross-sessao por carIdx pula outras
+    partes de qualy quando a sessao atual e uma parte de qualy. Ponte Qualy↔Race intacta.
+  - Escopo: qualy classico 3-partes (5/6/7). Sprint Shootout (id ambiguo no F1 26) fica p/
+    follow-up. Novo teste sintetico em `Test-SessionStore.ps1` + controle de regressao.
 
-### Planejado (NAO implementado — fazer no proximo ciclo, com teste)
-- **Fantasma "Car_N" no qualy multipartes do F1 26.** O Q1→Q2→Q3 remapeia o `carIdx`
-  entre as partes. Quando chega telemetria num indice transitorio antes do pacote
-  Participants, nasce um placeholder `Car_N`; o slot definitivo fica nomeado. Como tem
-  `carIdx` diferente mas MESMO `raceNumber`, o `DeduplicateDrivers` (chave inclui carIdx)
-  nao junta, e o `RemovePhantomDuplicateSeats` so remove ghost genérico **0-lap** — mas
-  aqui o GENERICO carrega as voltas reais e o NOMEADO e a casca. Resultado: pole duplicada
-  (ex.: Catalunya T16 apareceu como "Gabriel Quintino" + "Car_9", ambos #15).
-  - **Fix planejado no plugin:** em `RemovePhantomDuplicateSeats`, quando um generico divide
-    o `raceNumber_teamId` com um NOMEADO, transferir a telemetria mais rica (voltas/best) do
-    generico pro nomeado ANTES de remover — em vez de so dropar 0-lap. CUIDADO: em lobbies
-    MyTeam o `raceNumber` colide entre pilotos diferentes (ver nota da linha ~696), entao
-    exigir que o grupo tenha EXATAMENTE 1 nomeado antes de fundir (paridade com o app).
-  - **Ja resolvido no front (nao urgente):** `f1-race-hub` `src/lib/merge-phantom-drivers.ts`
-    (`mergePhantomPlaceholders`) funde placeholder→nomeado por `(raceNumber, teamId)` com
-    exatamente-1-nomeado, no import (manual + publish do live). Cobre o problema hoje sem
-    release de plugin; este item no plugin e defesa-em-profundidade pro live nativo.
+- **3o sinal de conteudo F1 26 — tamanho do grid** (era o 2.0.1, ja em `main`). F1 26 tem 22
+  carros (11 construtores); F1 25 tem 20. `>20` carros reais (`TeamId != 255`) numa sessao
+  forca `contentPack2026 = true`, mesmo quando os team ids 220-230 nao parseiam. `LeagueFinalizer.cs`
+  + `LiveSnapshotBuilder.cs`, ao lado de team id 220-230 / Madring track 42 (v1.1.39).
 
 ## [2.0.0] - 2026-07-08
 
