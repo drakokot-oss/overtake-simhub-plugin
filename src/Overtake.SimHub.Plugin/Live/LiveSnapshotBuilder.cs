@@ -159,6 +159,17 @@ namespace Overtake.SimHub.Plugin.Live
 
             root["grid"] = grid;
 
+            // v2.1.0 — 3-part qualifying composite (Q3 -> 1..N, then Q2-eliminated, then
+            // Q1-eliminated) so the LIVE board shows the full field during a multi-part
+            // qualy, not just the current part (parity with the .otk composite). Only while
+            // ON a qualy part (5/6/7) and ≥2 parts exist; null otherwise (front falls back
+            // to the current-part board). Race/sprint/single-session are unaffected.
+            if (sessionTypeId >= 5 && sessionTypeId <= 7)
+            {
+                var composite = BuildQualifyingComposite(store);
+                if (composite != null) root["qualifyingComposite"] = composite;
+            }
+
             var events = new List<Dictionary<string, object>>();
             int from = Math.Max(0, sess.Events.Count - 25);
             for (int i = sess.Events.Count - 1; i >= from; i--)
@@ -166,6 +177,60 @@ namespace Overtake.SimHub.Plugin.Live
             root["events"] = events;
 
             return root;
+        }
+
+        /// <summary>
+        /// Builds the composite qualifying order across the 3 parts present in the store:
+        /// the deepest part (Q3=7) gives positions 1..N, then drivers eliminated in Q2 (6),
+        /// then Q1 (5) — each ordered by their best valid lap in the DEEPEST part they
+        /// reached (live for the in-progress part, final for completed parts). Returns null
+        /// unless ≥2 qualy parts exist (single-session qualy has nothing to compose).
+        /// Lightweight: only pos/tag/bestLapMs/part — the rich telemetry stays in `grid`.
+        /// </summary>
+        private static List<Dictionary<string, object>> BuildQualifyingComposite(SessionStore store)
+        {
+            // Collect qualy-part sessions, deepest first (Q3, Q2, Q1).
+            var parts = new List<SessionRun>();
+            for (int t = 7; t >= 5; t--)
+            {
+                foreach (var s in store.Sessions.Values)
+                    if (s != null && s.SessionType.HasValue && s.SessionType.Value == t)
+                        parts.Add(s);
+            }
+            if (parts.Count < 2) return null;
+
+            var seen = new HashSet<string>();
+            var outList = new List<Dictionary<string, object>>();
+            foreach (var s in parts)
+            {
+                // Drivers of this part, ordered by best valid lap (no-time last).
+                var drivers = new List<DriverRun>();
+                foreach (var kvp in s.Drivers)
+                {
+                    var d = kvp.Value;
+                    if (d == null || string.IsNullOrEmpty(d.Tag)) continue;
+                    if (LeagueFinalizer.IsPhantomForLive(d.Tag, d, s, store)) continue;
+                    drivers.Add(d);
+                }
+                drivers.Sort((a, b) =>
+                {
+                    int ba = BestLapMs(a); if (ba <= 0) ba = int.MaxValue;
+                    int bb = BestLapMs(b); if (bb <= 0) bb = int.MaxValue;
+                    return ba.CompareTo(bb);
+                });
+                foreach (var d in drivers)
+                {
+                    if (!seen.Add(d.Tag)) continue; // already placed from a deeper part
+                    outList.Add(new Dictionary<string, object>
+                    {
+                        { "pos", outList.Count + 1 },
+                        { "tag", d.Tag },
+                        { "bestLapMs", BestLapMs(d) },
+                        { "part", s.SessionType.Value }, // 7=Q3, 6=Q2, 5=Q1
+                    });
+                }
+            }
+            return outList;
         }
 
         private static SessionRun LatestSession(SessionStore store)
