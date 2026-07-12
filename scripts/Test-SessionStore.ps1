@@ -541,6 +541,70 @@ DoIngest $storeP (Dispatch (New-FakePacket 1 (New-SessionPayload 5 7) 3002))  # 
 $q1b = GetSession $storeP "3002"
 Assert "Non-qualy prev still carries named tags (no regression)" (TagsContainValue (Get-Field $q1b "TagsByCarIdx") "Hamilton")
 
+# ============================================================
+# GameLabelResolver (v2.1.1) — fonte única do rótulo de jogo (F1_25/F1_26/F1_<ano>),
+# compartilhada entre o .otk (LeagueFinalizer) e o snapshot ao vivo (LiveSnapshotBuilder).
+# ============================================================
+Write-Host "GameLabelResolver..." -ForegroundColor Cyan
+$sessionRunType = $asm.GetType("Overtake.SimHub.Plugin.Store.SessionRun")
+$participantType = $asm.GetType("Overtake.SimHub.Plugin.Packets.ParticipantEntry")
+$resolverType = $asm.GetType("Overtake.SimHub.Plugin.Store.GameLabelResolver")
+
+function New-SessionRun([int]$packetFormat, [int]$gameYear, $trackId, [int[]]$teamIds) {
+    $s = [System.Activator]::CreateInstance($sessionRunType)
+    $s.GetType().GetField("LastPacketFormat").SetValue($s, [uint16]$packetFormat)
+    $s.GetType().GetField("LastGameYear").SetValue($s, [byte]$gameYear)
+    if ($null -ne $trackId) { $s.GetType().GetField("TrackId").SetValue($s, [int]$trackId) }
+    $dict = Get-Field $s "TeamByCarIdx"
+    $i = 0
+    foreach ($tid in $teamIds) {
+        $pe = [System.Activator]::CreateInstance($participantType)
+        $pe.GetType().GetField("TeamId").SetValue($pe, [byte]$tid)
+        $dict[$i] = $pe
+        $i++
+    }
+    return $s
+}
+function Resolve-Info($sessions) {
+    $list = @($sessions)  # normaliza scalar/$null para array (o C# ignora elementos null)
+    $arr = [System.Array]::CreateInstance($sessionRunType, $list.Count)
+    for ($k = 0; $k -lt $list.Count; $k++) { $arr.SetValue($list[$k], $k) }
+    return $resolverType.GetMethod("Resolve").Invoke($null, [object[]]@($arr))
+}
+function Resolve-Label($sessions) { return (Resolve-Info $sessions).GameLabel }
+
+# 20 carros normais no wire 2025, sem sinais de conteúdo → F1_25.
+$normal25 = @(0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9)
+Assert "F1 25 puro (wire 2025, 20 carros, sem sinais) -> F1_25" `
+    ((Resolve-Label @((New-SessionRun 2025 25 $null $normal25))) -eq "F1_25")
+# Sinal team id 220-230 -> F1_26 mesmo no wire 2025.
+Assert "team id 220-230 -> F1_26" `
+    ((Resolve-Label @((New-SessionRun 2025 25 $null (220..229)))) -eq "F1_26")
+# Sinal Madring (track 42) -> F1_26.
+Assert "Madring track 42 -> F1_26" `
+    ((Resolve-Label @((New-SessionRun 2025 25 42 $normal25))) -eq "F1_26")
+# Sinal grid > 20 (22 carros com team ids normais) -> F1_26.
+$grid22 = @(1,2,3,4,5,6,7,8,9,10,1,2,3,4,5,6,7,8,9,10,1,2)
+Assert "grid > 20 -> F1_26" `
+    ((Resolve-Label @((New-SessionRun 2025 25 $null $grid22))) -eq "F1_26")
+# Packet format 2026 -> F1_26 (via GameNameFromPacketFormat).
+Assert "packet format 2026 -> F1_26" `
+    ((Resolve-Label @((New-SessionRun 2026 26 $null $normal25))) -eq "F1_26")
+# Conteúdo entre MÚLTIPLAS sessões: uma normal + uma com team 220 -> F1_26.
+Assert "conteúdo 2026 em qualquer sessão do conjunto -> F1_26" `
+    ((Resolve-Label @((New-SessionRun 2025 25 $null $normal25), (New-SessionRun 2025 25 $null (220..221)))) -eq "F1_26")
+# Sem sessões / nulo -> default F1_25.
+Assert "conjunto vazio -> F1_25" ((Resolve-Label @()) -eq "F1_25")
+Assert "null -> F1_25" (($resolverType.GetMethod("DetectGameLabel").Invoke($null, [object[]]@($null))) -eq "F1_25")
+# Campos granulares que o .otk emite continuam corretos.
+$infoContent = Resolve-Info @((New-SessionRun 2025 25 $null (220..229)))
+Assert "Resolve: ContentPack2026 true no caso de team 220-230" ($infoContent.ContentPack2026 -eq $true)
+Assert "Resolve: FormatLabel segue o wire (F1_25) mesmo com conteúdo 2026" ($infoContent.FormatLabel -eq "F1_25")
+Assert "Resolve: GameLabel prioriza conteúdo (F1_26)" ($infoContent.GameLabel -eq "F1_26")
+$info25 = Resolve-Info @((New-SessionRun 2025 25 $null $normal25))
+Assert "Resolve: ContentPack2026 false no F1 25 puro" ($info25.ContentPack2026 -eq $false)
+Assert "Resolve: NewestPacketFormat carrega o formato visto" ($info25.NewestPacketFormat -eq 2025)
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow
