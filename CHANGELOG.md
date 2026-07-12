@@ -2,6 +2,23 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.1.1] - 2026-07-12
+
+> Release de manutencao. Consolida a deteccao de jogo (F1 25/F1 26) numa fonte unica
+> compartilhada entre o `.otk` e o ao vivo. Sem mudanca visivel; sem mudanca de formato;
+> `minSupportedVersion` segue 1.1.47.
+
+### Changed
+- **Fonte unica `GameLabelResolver`** (`Store/GameLabelResolver.cs`). A deteccao do rotulo
+  de jogo estava DUPLICADA em `LiveSnapshotBuilder.GameLabel` e no bloco inline do
+  `LeagueFinalizer`, com cadeias de fallback ligeiramente diferentes (o live tinha um ramo
+  extra `LastGameYear>=26`) — drift latente: um sinal novo adicionado so a um lado
+  divergiria (foi o que aconteceu com o grid>20 no 2.0.1, copiado a mao nos dois).
+  Agora ambos chamam `Resolve(IEnumerable<SessionRun>)`; o finalizer mantem os campos
+  granulares que ja emitia na metadata (formatLabel/contentPack2026/gameYear/...).
+  Comportamento preservado (os 3 sinais de conteudo ja estavam em paridade); +13 asserts
+  em `Test-SessionStore.ps1`.
+
 ## [2.1.0] - 2026-07-12
 
 > Leva o composto de qualy (Q1/Q2/Q3 + Sprint Shootout) para a transmissao AO VIVO.

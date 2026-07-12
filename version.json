@@ -1,8 +1,8 @@
 {
-    "version":  "2.1.0",
+    "version":  "2.1.1",
     "minSupportedVersion":  "1.1.47",
     "released":  "2026-07-12",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.0/Overtake.SimHub.Plugin-v2.1.0-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.1.0 — grid completo no qualy ao vivo\r\n\r\nO board de Classificacao ao vivo (transmissao) agora mostra o GRID COMPLETO durante uma qualy de 3 partes (Q1/Q2/Q3) e o Sprint Shootout, e nao so os pilotos da parte atual.\r\n\r\n### Novidade\r\n- **qualifyingComposite no snapshot ao vivo.** Enquanto o jogo esta numa parte de qualy (Q3), o plugin passa a enviar o campo `qualifyingComposite` no snapshot: o campo inteiro ja ordenado (Q3 nas posicoes 1..N, depois os eliminados no Q2, depois no Q1), com a melhor volta de cada piloto na parte mais profunda que alcancou. O portal usa isso para exibir o grid completo ao vivo (sobreviventes com telemetria ao vivo; eliminados congelados com a volta e o badge da parte).\r\n\r\n### Observacao\r\nAditivo e sem mudanca no formato do .otk: transmissoes sem o portal atualizado simplesmente ignoram o campo novo. F1 25 e F1 26 iguais. `minSupportedVersion` segue 1.1.47 (nada obriga atualizacao). Corrida, pratica e qualy de sessao unica inalterados."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.1/Overtake.SimHub.Plugin-v2.1.1-Setup.exe",
+    "releaseNotes":  "## Overtake Telemetry 2.1.1 — deteccao de jogo consolidada (interno)\r\n\r\nRelease de manutencao, sem mudanca visivel de comportamento.\r\n\r\n### Interno\r\n- **Fonte unica de deteccao de jogo (F1 25/F1 26).** A logica que decide o rotulo do jogo (via team ids 220-230, pista Madring, tamanho de grid >20 e o packet format) foi unificada num so lugar (GameLabelResolver), usada tanto pela geracao do .otk quanto pela transmissao ao vivo. Antes eram duas copias com cadeias de fallback ligeiramente diferentes — risco de divergir quando um sinal novo fosse adicionado. Nenhuma mudanca de resultado nas capturas atuais.\r\n\r\n### Observacao\r\nSem mudanca no formato do .otk nem no snapshot ao vivo. F1 25 e F1 26 iguais. `minSupportedVersion` segue 1.1.47 (nada obriga atualizacao)."
 }
