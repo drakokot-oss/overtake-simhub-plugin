@@ -2,7 +2,24 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
-## [2.0.2] - NAO LANCADO (aguarda revisao/aprovacao)
+## [2.1.0] - 2026-07-12
+
+> Leva o composto de qualy (Q1/Q2/Q3 + Sprint Shootout) para a transmissao AO VIVO.
+> Aditivo e sem mudanca no formato do .otk; `minSupportedVersion` segue 1.1.47. Casa
+> com o front (`f1-race-hub` #34) que consome o campo novo e renderiza o grid completo.
+
+### Added
+- **`qualifyingComposite` no snapshot ao vivo** (`LiveSnapshotBuilder.BuildQualifyingComposite`).
+  Numa qualy multi-parte o snapshot ao vivo so carrega a parte ATUAL, entao ao entrar o Q3
+  o board mostrava apenas os sobreviventes — o campo eliminado sumia. Enquanto ON numa parte
+  de qualy (sessionType 5/6/7) e com ≥2 partes vistas, o plugin agora emite
+  `qualifyingComposite`: lista `[{pos, tag, bestLapMs, part}]` ordenada deepest-first
+  (Q3→1..N, depois Q2-eliminados, depois Q1-eliminados), dedupada por tag, com a melhor
+  volta valida de cada piloto na parte mais profunda que alcancou. Leve de proposito — a
+  telemetria rica continua no `grid`; o portal mescla os dois. Fantasmas do live filtrados
+  via `IsPhantomForLive`. Null quando nao aplicavel (front cai no board da parte atual).
+
+## [2.0.2] - 2026-07-11
 
 > Junta duas correcoes de deteccao do F1 26 num unico release. `minSupportedVersion`
 > segue 1.1.47 (nada obriga atualizacao por isso). O front (`f1-race-hub`) ja resolve

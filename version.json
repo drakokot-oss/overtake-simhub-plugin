@@ -1,8 +1,8 @@
 {
-    "version":  "2.0.2",
+    "version":  "2.1.0",
     "minSupportedVersion":  "1.1.47",
-    "released":  "2026-07-11",
+    "released":  "2026-07-12",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.0.2/Overtake.SimHub.Plugin-v2.0.2-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.0.2 — correcoes do F1 26\r\n\r\nCorrecoes de deteccao do F1 26, focadas no qualy de 3 partes.\r\n\r\n### Correcoes\r\n- **Qualy de 3 partes (Q1/Q2/Q3):** o F1 26 remapeia o carro entre as partes, o que podia duplicar um piloto no resultado (ex.: a pole aparecia duas vezes, uma como \"Car_9\") e embaralhar tempos de volta. Agora cada parte reconstroi a identidade dos carros do zero, sem herdar o mapa da parte anterior.\r\n- **Deteccao de F1 26 por tamanho de grid:** grid com mais de 20 carros (22 = 11 equipes) e reconhecido como F1 26 mesmo quando os IDs de equipe nao sao lidos.\r\n\r\n### Observacao\r\nApenas o F1 26 e afetado; o F1 25 nao muda. Nao ha mudanca no formato do .otk. Atualizacao recomendada para ligas que rodam qualy de 3 partes no F1 26."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.0/Overtake.SimHub.Plugin-v2.1.0-Setup.exe",
+    "releaseNotes":  "## Overtake Telemetry 2.1.0 — grid completo no qualy ao vivo\r\n\r\nO board de Classificacao ao vivo (transmissao) agora mostra o GRID COMPLETO durante uma qualy de 3 partes (Q1/Q2/Q3) e o Sprint Shootout, e nao so os pilotos da parte atual.\r\n\r\n### Novidade\r\n- **qualifyingComposite no snapshot ao vivo.** Enquanto o jogo esta numa parte de qualy (Q3), o plugin passa a enviar o campo `qualifyingComposite` no snapshot: o campo inteiro ja ordenado (Q3 nas posicoes 1..N, depois os eliminados no Q2, depois no Q1), com a melhor volta de cada piloto na parte mais profunda que alcancou. O portal usa isso para exibir o grid completo ao vivo (sobreviventes com telemetria ao vivo; eliminados congelados com a volta e o badge da parte).\r\n\r\n### Observacao\r\nAditivo e sem mudanca no formato do .otk: transmissoes sem o portal atualizado simplesmente ignoram o campo novo. F1 25 e F1 26 iguais. `minSupportedVersion` segue 1.1.47 (nada obriga atualizacao). Corrida, pratica e qualy de sessao unica inalterados."
 }
