@@ -569,7 +569,11 @@ function Resolve-Info($sessions) {
     $list = @($sessions)  # normaliza scalar/$null para array (o C# ignora elementos null)
     $arr = [System.Array]::CreateInstance($sessionRunType, $list.Count)
     for ($k = 0; $k -lt $list.Count; $k++) { $arr.SetValue($list[$k], $k) }
-    return $resolverType.GetMethod("Resolve").Invoke($null, [object[]]@($arr))
+    # object[] de 1 elemento cujo único item É o SessionRun[] — sem o unroll que
+    # [object[]]@($arr) faz (que passaria cada SessionRun como argumento separado).
+    $params = [System.Array]::CreateInstance([object], 1)
+    $params.SetValue($arr, 0)
+    return $resolverType.GetMethod("Resolve").Invoke($null, $params)
 }
 function Resolve-Label($sessions) { return (Resolve-Info $sessions).GameLabel }
 
