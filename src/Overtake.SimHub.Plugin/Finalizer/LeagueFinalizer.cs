@@ -1033,64 +1033,19 @@ namespace Overtake.SimHub.Plugin.Finalizer
 
             capture["sessionTypesInCapture"] = sessionTypeNames;
 
-            // v1.1.36 — Derive the "game" label from PacketHeader.PacketFormat
-            // (captured per packet in SessionStore). The newest non-zero format
-            // observed across all sessions wins. Falls back to "F1_25" when no
-            // packet header has been seen yet (matches prior behaviour and
-            // preserves backward compat for tests / capture-less exports).
-            ushort newestPacketFormat = 0;
-            byte newestGameYear = 0;
-            byte newestGameMajor = 0;
-            byte newestGameMinor = 0;
-            foreach (var s in store.Sessions.Values)
-            {
-                if (s.LastPacketFormat != 0 && s.LastPacketFormat >= newestPacketFormat)
-                {
-                    newestPacketFormat = s.LastPacketFormat;
-                    newestGameYear = s.LastGameYear;
-                    newestGameMajor = s.LastGameMajorVersion;
-                    newestGameMinor = s.LastGameMinorVersion;
-                }
-            }
-            // v1.1.39 — Detect F1 26 "2026 Season Pack" CONTENT independently of
-            // the wire format. The pack runs inside F1 25 and defaults to the 2025
-            // packet format, so packetFormat alone reports F1_25 even though the
-            // content is 2026. Signals: any teamId in the 220-230 grid, or the
-            // Madring track (id 42). These survive in 2025-format captures (where
-            // the body parses cleanly); in a 2026-format capture the bodies are
-            // garbage, but packetFormat itself is read correctly, so the format
-            // path still flips the label to F1_26.
-            //
-            // v2.0.1 — Third signal: GRID SIZE. The F1 26 grid is 22 cars (11
-            // constructors, Audi + Cadillac added); F1 25 tops out at 20 (10
-            // constructors). So >20 real cars (TeamId != 255) in a single session
-            // is 2026 content even if the 220-230 team ids happened not to parse.
-            bool contentPack2026 = false;
-            foreach (var s in store.Sessions.Values)
-            {
-                if (s.TrackId.HasValue && s.TrackId.Value == Packets.GameInfo.F1_26TrackIdMadring)
-                    contentPack2026 = true;
-                int realCars = 0;
-                foreach (var te in s.TeamByCarIdx.Values)
-                {
-                    if (te == null || te.TeamId == 255) continue; // 255 = empty/invalid slot
-                    realCars++;
-                    if (Packets.GameInfo.IsF1_26TeamId(te.TeamId))
-                        contentPack2026 = true;
-                }
-                if (realCars > 20) contentPack2026 = true; // 11-team (F1 26) grid
-                if (contentPack2026) break;
-            }
-
-            string formatLabel = (newestPacketFormat != 0)
-                ? Packets.GameInfo.GameNameFromPacketFormat(newestPacketFormat)
-                : "F1_25";
-            // Top-level game reflects CONTENT first: 2026-content signals (team
-            // 220-230 / track 42) force "F1_26" even on the 2025 wire format.
-            // Otherwise we trust the format-derived label, which already maps
-            // 2026 -> "F1_26" and any future/unknown format -> "F1_<fmt>"
-            // (so a real 2030 build still surfaces as "F1_2030", not "F1_26").
-            string gameLabel = contentPack2026 ? "F1_26" : formatLabel;
+            // v2.1.1 — deteccao de jogo consolidada em GameLabelResolver (fonte única
+            // compartilhada com o snapshot ao vivo, LiveSnapshotBuilder). O resolver faz:
+            // newest packet format vence (carrega year/major/minor); conteúdo F1 26 (team
+            // 220-230 / Madring 42 / grid >20) força "F1_26" mesmo no wire 2025; senão o
+            // formato (2026 -> F1_26, futuro -> F1_<fmt>), depois year >= 26, depois F1_25.
+            var gv = Store.GameLabelResolver.Resolve(store.Sessions.Values);
+            ushort newestPacketFormat = gv.NewestPacketFormat;
+            byte newestGameYear = gv.NewestGameYear;
+            byte newestGameMajor = gv.NewestGameMajor;
+            byte newestGameMinor = gv.NewestGameMinor;
+            bool contentPack2026 = gv.ContentPack2026;
+            string formatLabel = gv.FormatLabel;
+            string gameLabel = gv.GameLabel;
 
             // Phase 2 safety (v1.1.39): when the wire format is one the parsers do
             // not support, the parsed bodies are unreliable. Surface it loudly so

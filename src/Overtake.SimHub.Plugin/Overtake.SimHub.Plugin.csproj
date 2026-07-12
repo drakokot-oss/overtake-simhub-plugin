@@ -91,6 +91,7 @@
     <Compile Include="Packets\CarTelemetryData.cs" />
     <Compile Include="Parsers\PacketParser.cs" />
     <Compile Include="Store\DriverRun.cs" />
+    <Compile Include="Store\GameLabelResolver.cs" />
     <Compile Include="Store\SessionRun.cs" />
     <Compile Include="Store\SessionStore.cs" />
     <Compile Include="Finalizer\Lookups.cs" />
