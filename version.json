@@ -1,8 +1,8 @@
 {
-    "version":  "2.1.1",
+    "version":  "2.1.2",
     "minSupportedVersion":  "1.1.47",
-    "released":  "2026-07-12",
+    "released":  "2026-07-15",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.1/Overtake.SimHub.Plugin-v2.1.1-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.1.1 — deteccao de jogo consolidada (interno)\r\n\r\nRelease de manutencao, sem mudanca visivel de comportamento.\r\n\r\n### Interno\r\n- **Fonte unica de deteccao de jogo (F1 25/F1 26).** A logica que decide o rotulo do jogo (via team ids 220-230, pista Madring, tamanho de grid >20 e o packet format) foi unificada num so lugar (GameLabelResolver), usada tanto pela geracao do .otk quanto pela transmissao ao vivo. Antes eram duas copias com cadeias de fallback ligeiramente diferentes — risco de divergir quando um sinal novo fosse adicionado. Nenhuma mudanca de resultado nas capturas atuais.\r\n\r\n### Observacao\r\nSem mudanca no formato do .otk nem no snapshot ao vivo. F1 25 e F1 26 iguais. `minSupportedVersion` segue 1.1.47 (nada obriga atualizacao)."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.2/Overtake.SimHub.Plugin-v2.1.2-Setup.exe",
+    "releaseNotes":  "## Overtake Telemetry 2.1.2 — corrige punicao duplicada em queda/reconexao\r\n\r\nCorrige a punicao que aparecia DOBRADA (ex.: 3s virava 6s) quando quem transmite CAI do lobby e VOLTA (ou a tela de resultado recarrega). Nesse momento o jogo re-transmite o historico de eventos e a mesma punicao era gravada 2x/4x/6x no .otk.\r\n\r\n### Correcao\r\n- **Dedup de re-emissao.** O plugin passa a colapsar penalidades identicas (mesmo tipo, mesma volta, mesmos segundos) numa so — igual o resultado oficial do jogo (x1). Afeta numero de punicoes, segundos de punicao, o log de penalidades e o tempo total (que tambem vinha dobrado no replay).\r\n\r\n### Observacao\r\nSo corrige o caso de re-emissao (queda/reconexao). Corridas sem isso nao mudam. Sem mudanca no formato do .otk. `minSupportedVersion` segue 1.1.47 (nada obriga atualizacao, mas recomendado p/ ligas com quedas de lobby)."
 }

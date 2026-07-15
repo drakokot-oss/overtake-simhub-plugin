@@ -2,6 +2,26 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.1.2] - 2026-07-15
+
+> Corrige a **punição duplicada** (ex.: 3s → 6s) que aparecia quando quem transmite
+> **cai do lobby e volta** (ou a tela de resultado recarrega). O jogo re-transmite o
+> histórico de eventos num burst e a mesma `PENA` era gravada 2×/4×/6× no `.otk`.
+> `minSupportedVersion` segue 1.1.47.
+
+### Fixed
+- **Dedup de re-emissão do PENA** (`LeagueFinalizer`). Colapsa penalidades por identidade
+  lógica `(penaltyType, infringementType, lapNum, timeSec)` — `tsMs` excluído (os replays
+  só diferem no `tsMs`); mesma chave do `Live/LiveSnapshotBuilder.DedupPenaltyCount`. O
+  jogo dedup no resultado oficial (x1); o `.otk` passa a bater. Três pontos:
+  - **agregação**: `numPenalties`/`penaltiesTimeSec`/DT/SG/warnings contam 1×;
+  - **`penaltiesTimeline`**: 1 entrada por punição real (colisões não são dedupadas);
+  - **`totalTimeMs`**: subtrai o excesso duplicado SÓ quando o tempo embute o dobrado
+    (`ttm ≈ lapSum + rawPen`, tolerância 200ms) — o FC do jogo também vem dobrado no
+    replay; nunca toca um tempo já corrigido ou não-embutido.
+  Escopo: qualy/corrida/sprint. Único edge (aceito): 2 punições idênticas na mesma volta,
+  que o jogo também colapsa. CI verde (SessionStore 83, Finalizer 344, sem regressão).
+
 ## [2.1.1] - 2026-07-12
 
 > Release de manutencao. Consolida a deteccao de jogo (F1 25/F1 26) numa fonte unica
