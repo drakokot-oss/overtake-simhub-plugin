@@ -1616,7 +1616,18 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     int.TryParse(nlObj.ToString(), out driverNumLaps);
 
                 int nDt = 0, nSg = 0, nTimePen = 0, nWarn = 0, penTimeTotal = 0;
+                int dupExcessSec = 0; // segundos de TimePenalty colapsados (re-emissão) — p/ corrigir o totalTimeMs
                 bool phantomFiltered = false;
+                // v1.1.48 — collapse RE-EMITTED duplicates. On a lobby drop/rejoin (or the
+                // results screen reloading) the game re-broadcasts its whole event history in
+                // a burst; every PENA is appended again to PenaltySnapshots, so the same
+                // penalty lands 2x/4x/6x. The game's official result dedups (shows x1), so we
+                // collapse by LOGICAL identity (penaltyType + infringementType + lapNum +
+                // timeSec) — tsMs deliberately excluded, since replays differ only by tsMs.
+                // Two genuinely distinct penalties differ in lap/type/seconds; the sole
+                // (accepted, rare) edge is two identical penalties on the SAME lap, which the
+                // game also collapses. Same key as Live/LiveSnapshotBuilder.DedupPenaltyCount.
+                var seenPenKeys = new System.Collections.Generic.HashSet<string>();
                 foreach (var ps in penDr.PenaltySnapshots)
                 {
                     if (ps.EventCode == "COLL" || ps.EventCode == "DTSV" || ps.EventCode == "SGSV")
@@ -1630,6 +1641,18 @@ namespace Overtake.SimHub.Plugin.Finalizer
                         && ps.LapNum.HasValue && ps.LapNum.Value > driverNumLaps)
                     {
                         phantomFiltered = true;
+                        continue;
+                    }
+
+                    string penKey = string.Format("{0}|{1}|{2}|{3}",
+                        ps.PenaltyType.Value, inf,
+                        ps.LapNum.HasValue ? ps.LapNum.Value : -1,
+                        ps.TimeSec.HasValue ? ps.TimeSec.Value : -1);
+                    if (!seenPenKeys.Add(penKey))
+                    {
+                        phantomFiltered = true; // força reescrever penaltiesTimeSec com o valor colapsado
+                        if (ps.PenaltyType.Value == 4 && ps.TimeSec.HasValue && ps.TimeSec.Value != 255)
+                            dupExcessSec += ps.TimeSec.Value; // excesso a remover do totalTimeMs
                         continue;
                     }
 
@@ -1668,6 +1691,30 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     int.TryParse(existingObj.ToString(), out existingPenTime);
                 if (phantomFiltered || penTimeTotal > existingPenTime)
                     res["penaltiesTimeSec"] = penTimeTotal;
+
+                // v1.1.48 — the game's totalTimeMs (row.TotalRaceTime) ALSO bakes the DOUBLED
+                // penalty during the reconnect replay (observed: lapSum+6s for a real x1 +3s).
+                // When we collapsed TimePenalty duplicates, remove that excess from totalTimeMs
+                // too — but ONLY if it actually embeds the doubled amount (ttm ≈ lapSum + rawPen),
+                // so we never touch a value the league already fixed or a non-embedded total.
+                if (dupExcessSec > 0)
+                {
+                    object ttmObj;
+                    int ttm;
+                    if (res.TryGetValue("totalTimeMs", out ttmObj) && ttmObj != null
+                        && int.TryParse(ttmObj.ToString(), out ttm) && ttm > 0)
+                    {
+                        long lapSum = 0;
+                        foreach (var lp in penDr.Laps) if (lp.LapTimeMs > 0) lapSum += lp.LapTimeMs;
+                        long rawPenMs = (long)(penTimeTotal + dupExcessSec) * 1000;
+                        if (lapSum > 0 && Math.Abs(ttm - (lapSum + rawPenMs)) < 200)
+                        {
+                            int corrected = ttm - dupExcessSec * 1000;
+                            res["totalTimeMs"] = corrected;
+                            res["totalTime"] = MsToStr(corrected);
+                        }
+                    }
+                }
             }
 
             // Build drivers payload
@@ -1835,6 +1882,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Penalties vs collisions vs served markers
             var penTl = new List<object>();
             var collTl = new List<object>();
+            // v1.1.48 — same reconnect-replay dedup as the aggregation loop above: collapse
+            // re-emitted penalty entries by LOGICAL identity so the timeline shows one entry
+            // per real penalty (matching the game's official x1). Collisions are NOT deduped.
+            var seenTlKeys = new System.Collections.Generic.HashSet<string>();
             bool hasDtsvOrSgsv = false;
             foreach (var ps in dr.PenaltySnapshots)
             {
@@ -1895,6 +1946,16 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     string otherTag;
                     if (idxToTag.TryGetValue(ps.OtherVehicleIdx.Value, out otherTag))
                         entry["otherDriver"] = otherTag;
+                }
+                // Collapse re-emitted duplicates (penalty entries only; tsMs excluded from key).
+                if (ps.PenaltyType.HasValue)
+                {
+                    string tlKey = string.Format("{0}|{1}|{2}|{3}",
+                        ps.PenaltyType.Value,
+                        ps.InfringementType.HasValue ? ps.InfringementType.Value : -1,
+                        ps.LapNum.HasValue ? ps.LapNum.Value : -1,
+                        ps.TimeSec.HasValue ? ps.TimeSec.Value : -1);
+                    if (!seenTlKeys.Add(tlKey)) continue;
                 }
                 penTl.Add(entry);
             }
