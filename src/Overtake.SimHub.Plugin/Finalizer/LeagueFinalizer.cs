@@ -1618,7 +1618,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 int nDt = 0, nSg = 0, nTimePen = 0, nWarn = 0, penTimeTotal = 0;
                 int dupExcessSec = 0; // segundos de TimePenalty colapsados (re-emissão) — p/ corrigir o totalTimeMs
                 bool phantomFiltered = false;
-                // v1.1.48 — collapse RE-EMITTED duplicates. On a lobby drop/rejoin (or the
+                // v2.1.2 — collapse RE-EMITTED duplicates. On a lobby drop/rejoin (or the
                 // results screen reloading) the game re-broadcasts its whole event history in
                 // a burst; every PENA is appended again to PenaltySnapshots, so the same
                 // penalty lands 2x/4x/6x. The game's official result dedups (shows x1), so we
@@ -1692,7 +1692,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 if (phantomFiltered || penTimeTotal > existingPenTime)
                     res["penaltiesTimeSec"] = penTimeTotal;
 
-                // v1.1.48 — the game's totalTimeMs (row.TotalRaceTime) ALSO bakes the DOUBLED
+                // v2.1.2 — the game's totalTimeMs (row.TotalRaceTime) ALSO bakes the DOUBLED
                 // penalty during the reconnect replay (observed: lapSum+6s for a real x1 +3s).
                 // When we collapsed TimePenalty duplicates, remove that excess from totalTimeMs
                 // too — but ONLY if it actually embeds the doubled amount (ttm ≈ lapSum + rawPen),
@@ -1882,7 +1882,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
             // Penalties vs collisions vs served markers
             var penTl = new List<object>();
             var collTl = new List<object>();
-            // v1.1.48 — same reconnect-replay dedup as the aggregation loop above: collapse
+            // v2.1.2 — same reconnect-replay dedup as the aggregation loop above: collapse
             // re-emitted penalty entries by LOGICAL identity so the timeline shows one entry
             // per real penalty (matching the game's official x1). Collisions are NOT deduped.
             var seenTlKeys = new System.Collections.Generic.HashSet<string>();
