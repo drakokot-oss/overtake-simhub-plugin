@@ -335,11 +335,20 @@ namespace Overtake.SimHub.Plugin.Live
         {
             var list = new List<Dictionary<string, object>>();
             if (sess.WeatherForecast == null) return list;
-            int taken = 0;
+            // Cap PER sessao (nao mais 8 no total): o jogo lista as amostras da sessao
+            // atual e das seguintes concatenadas; capar no total truncava a Corrida.
+            // O portal agrupa/rotula por sessionType (Classificacao vs Corrida).
+            var perSession = new Dictionary<int, int>();
+            int total = 0;
             foreach (var f in sess.WeatherForecast)
             {
-                if (taken >= 8) break; // cap to keep the strip readable + payload small
-                object off, w, rain, tt, at;
+                if (total >= 40) break; // teto de seguranca do payload
+                object st, off, w, rain, tt, at;
+                f.TryGetValue("sessionType", out st);
+                int stId = st is int ? (int)st : 0;
+                int c; perSession.TryGetValue(stId, out c);
+                if (c >= 8) continue; // no maximo 8 amostras por sessao
+                perSession[stId] = c + 1;
                 f.TryGetValue("timeOffsetMin", out off);
                 f.TryGetValue("weather", out w);
                 f.TryGetValue("rainPercentage", out rain);
@@ -347,10 +356,10 @@ namespace Overtake.SimHub.Plugin.Live
                 f.TryGetValue("airTempC", out at);
                 list.Add(new Dictionary<string, object>
                 {
-                    { "offsetMin", off }, { "weather", w }, { "rainPct", rain },
+                    { "sessionType", st }, { "offsetMin", off }, { "weather", w }, { "rainPct", rain },
                     { "trackTempC", tt }, { "airTempC", at },
                 });
-                taken++;
+                total++;
             }
             return list;
         }

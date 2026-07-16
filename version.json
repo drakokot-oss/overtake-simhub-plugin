@@ -1,8 +1,8 @@
 {
-    "version":  "2.1.2",
+    "version":  "2.1.3",
     "minSupportedVersion":  "1.1.47",
     "released":  "2026-07-15",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.2/Overtake.SimHub.Plugin-v2.1.2-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.1.2 — corrige punicao duplicada em queda/reconexao\r\n\r\nCorrige a punicao que aparecia DOBRADA (ex.: 3s virava 6s) quando quem transmite CAI do lobby e VOLTA (ou a tela de resultado recarrega). Nesse momento o jogo re-transmite o historico de eventos e a mesma punicao era gravada 2x/4x/6x no .otk.\r\n\r\n### Correcao\r\n- **Dedup de re-emissao.** O plugin passa a colapsar penalidades identicas (mesmo tipo, mesma volta, mesmos segundos) numa so — igual o resultado oficial do jogo (x1). Afeta numero de punicoes, segundos de punicao, o log de penalidades e o tempo total (que tambem vinha dobrado no replay).\r\n\r\n### Observacao\r\nSo corrige o caso de re-emissao (queda/reconexao). Corridas sem isso nao mudam. Sem mudanca no formato do .otk. `minSupportedVersion` segue 1.1.47 (nada obriga atualizacao, mas recomendado p/ ligas com quedas de lobby)."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.3/Overtake.SimHub.Plugin-v2.1.3-Setup.exe",
+    "releaseNotes":  "## Overtake Telemetry 2.1.3 — previsao do tempo separada por sessao (Ao Vivo)\r\n\r\nNa transmissao Ao Vivo, a previsao do tempo agora marca a QUAL sessao cada amostra pertence. O jogo manda amostras de varias sessoes juntas (Classificacao + Corrida) e antes elas apareciam num bloco unico sem rotulo. Agora o portal separa e rotula (Classificacao vs Corrida).\r\n\r\n### Mudanca\r\n- Cada amostra de previsao passa a carregar o `sessionType`. O corte deixou de ser 8 amostras no total e passou a ser por sessao, para a Corrida nao ser truncada.\r\n\r\n### Observacao\r\nSo afeta a telemetria AO VIVO. O formato do .otk NAO muda e resultados de corrida nao sao afetados. `minSupportedVersion` segue 1.1.47 (atualizacao opcional, recomendada para quem transmite)."
 }

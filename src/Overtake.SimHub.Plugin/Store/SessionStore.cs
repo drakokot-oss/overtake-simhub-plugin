@@ -709,6 +709,9 @@ namespace Overtake.SimHub.Plugin.Store
                 {
                     fc.Add(new Dictionary<string, object>
                     {
+                        // Sessao a que ESTA amostra se refere (Q1-3/short-q/sprint/race...).
+                        // O portal agrupa a previsao por sessao (Classificacao vs Corrida).
+                        { "sessionType", (int)f.SessionType },
                         { "timeOffsetMin", (int)f.TimeOffsetMin },
                         { "weather", (int)f.Weather },
                         { "trackTempC", (int)f.TrackTempC },

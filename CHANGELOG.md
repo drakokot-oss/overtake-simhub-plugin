@@ -2,6 +2,23 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.1.3] - 2026-07-15
+
+> Telemetria **Ao Vivo**: cada amostra de previsão do tempo passa a carregar o
+> `sessionType`, para o portal **separar a previsão por sessão** (Classificação vs
+> Corrida) em vez de mostrar tudo num bloco único.
+
+### Changed
+- `SessionStore`: inclui `sessionType` em cada amostra de `weatherForecast` (o
+  UDP já traz — `WeatherForecastSample.SessionType`, byte 0 de cada amostra).
+- `LiveSnapshotBuilder.Forecast()`: repassa o `sessionType` e passa a capar **por
+  sessão** (máx. 8/sessão, teto de 40) em vez de 8 no total — antes a Corrida era
+  truncada quando a sessão atual (qualy) preenchia a cota.
+
+### Não muda
+- Formato do `.otk` inalterado; resultados de corrida não são afetados (mudança
+  só no snapshot ao vivo). `minSupportedVersion` segue `1.1.47`.
+
 ## [2.1.2] - 2026-07-15
 
 > Corrige a **punição duplicada** (ex.: 3s → 6s) que aparecia quando quem transmite
