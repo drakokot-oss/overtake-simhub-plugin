@@ -2,6 +2,20 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.1.4] - 2026-07-16
+
+> Adiciona o **GP do Azerbaijão (Baku City Circuit)** à lista de pistas — faltava,
+> então não aparecia na hora de criar/transmitir uma corrida em Baku.
+
+### Added
+- `Baku City Circuit` na lista canônica `LiveBroadcaster.CanonicalTracks` (na
+  posição de calendário, depois de Monza), alinhado com a lista do portal
+  (`tracksMatch`). A telemetria já reconhecia o `TrackId 20` (Baku) via
+  `Lookups.Tracks`; só faltava na lista de seleção.
+
+### Não muda
+- Formato do `.otk` inalterado; `minSupportedVersion` segue `1.1.47`.
+
 ## [2.1.3] - 2026-07-15
 
 > Telemetria **Ao Vivo**: cada amostra de previsão do tempo passa a carregar o
