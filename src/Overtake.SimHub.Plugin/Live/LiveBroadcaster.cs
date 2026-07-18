@@ -279,7 +279,7 @@ namespace Overtake.SimHub.Plugin.Live
             "Autodromo Enzo e Dino Ferrari", "Circuit de Monaco", "Circuit de Barcelona-Catalunya", "Madring (Madrid)",
             "Circuit Gilles Villeneuve", "Red Bull Ring", "Red Bull Ring Reverse", "Silverstone Circuit", "Silverstone Reverse",
             "Hungaroring", "Circuit de Spa-Francorchamps", "Circuit Zandvoort", "Zandvoort Reverse", "Autodromo Nazionale Monza",
-            "Marina Bay Street Circuit", "Lusail International Circuit", "Circuit of the Americas",
+            "Baku City Circuit", "Marina Bay Street Circuit", "Lusail International Circuit", "Circuit of the Americas",
             "Autodromo Hermanos Rodriguez", "Interlagos", "Las Vegas Strip Circuit", "Yas Marina Circuit"
         };
 

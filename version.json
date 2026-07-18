@@ -1,8 +1,8 @@
 {
-    "version":  "2.1.3",
+    "version":  "2.1.4",
     "minSupportedVersion":  "1.1.47",
-    "released":  "2026-07-15",
+    "released":  "2026-07-16",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.3/Overtake.SimHub.Plugin-v2.1.3-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.1.3 — previsao do tempo separada por sessao (Ao Vivo)\r\n\r\nNa transmissao Ao Vivo, a previsao do tempo agora marca a QUAL sessao cada amostra pertence. O jogo manda amostras de varias sessoes juntas (Classificacao + Corrida) e antes elas apareciam num bloco unico sem rotulo. Agora o portal separa e rotula (Classificacao vs Corrida).\r\n\r\n### Mudanca\r\n- Cada amostra de previsao passa a carregar o `sessionType`. O corte deixou de ser 8 amostras no total e passou a ser por sessao, para a Corrida nao ser truncada.\r\n\r\n### Observacao\r\nSo afeta a telemetria AO VIVO. O formato do .otk NAO muda e resultados de corrida nao sao afetados. `minSupportedVersion` segue 1.1.47 (atualizacao opcional, recomendada para quem transmite)."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.4/Overtake.SimHub.Plugin-v2.1.4-Setup.exe",
+    "releaseNotes":  "## Overtake Telemetry 2.1.4 — adiciona o Azerbaijao (Baku) na lista de pistas\r\n\r\nFaltava o GP do Azerbaijao (Baku City Circuit) na lista de pistas do plugin, entao nao aparecia na hora de criar/transmitir uma corrida em Baku. Agora esta na lista, alinhado com o portal.\r\n\r\n### Mudanca\r\n- `Baku City Circuit` adicionado a lista canonica de pistas (na posicao de calendario, depois de Monza). A telemetria ja reconhecia o TrackId 20 (Baku); faltava so na lista de selecao.\r\n\r\n### Observacao\r\nSo afeta a lista de pistas (transmissao ao vivo). O formato do .otk NAO muda. `minSupportedVersion` segue 1.1.47 (atualizacao opcional, recomendada para quem transmite Baku)."
 }
