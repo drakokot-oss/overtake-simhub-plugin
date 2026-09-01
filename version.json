@@ -1,8 +1,8 @@
 {
-    "version":  "2.1.4",
+    "version":  "2.1.5",
     "minSupportedVersion":  "1.1.47",
-    "released":  "2026-07-16",
+    "released":  "2026-08-31",
     "download":  "https://racehub.overtakef1.com/downloads",
-    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.4/Overtake.SimHub.Plugin-v2.1.4-Setup.exe",
-    "releaseNotes":  "## Overtake Telemetry 2.1.4 — adiciona o Azerbaijao (Baku) na lista de pistas\r\n\r\nFaltava o GP do Azerbaijao (Baku City Circuit) na lista de pistas do plugin, entao nao aparecia na hora de criar/transmitir uma corrida em Baku. Agora esta na lista, alinhado com o portal.\r\n\r\n### Mudanca\r\n- `Baku City Circuit` adicionado a lista canonica de pistas (na posicao de calendario, depois de Monza). A telemetria ja reconhecia o TrackId 20 (Baku); faltava so na lista de selecao.\r\n\r\n### Observacao\r\nSo afeta a lista de pistas (transmissao ao vivo). O formato do .otk NAO muda. `minSupportedVersion` segue 1.1.47 (atualizacao opcional, recomendada para quem transmite Baku)."
+    "installerUrl":  "https://github.com/drakokot-oss/overtake-simhub-plugin/releases/download/v2.1.5/Overtake.SimHub.Plugin-v2.1.5-Setup.exe",
+    "releaseNotes":  "## O mapa da pista agora abre pronto\r\n\r\nO Mapa da Pista ficava vazio durante a transmissao. O desenho do circuito so era montado enquanto aquela aba estava aberta, e quem narra passa a corrida na aba Transmissao. Agora o plugin monta o circuito o tempo todo, em segundo plano.\r\n\r\n### O que muda pra voce\r\n- Abriu a aba do mapa e o circuito ja esta desenhado, com os carros nos lugares certos.\r\n- Da segunda corrida em diante na mesma pista o mapa abre na hora, porque o desenho fica guardado.\r\n- Abrir a aba antes de o jogo comecar a enviar dados mostra um aviso de espera, em vez de uma tela preta.\r\n\r\n### Sem mudar nada na sua rotina\r\nSo a tela do mapa mudou. O arquivo da corrida e o resto da transmissao seguem iguais."
 }
