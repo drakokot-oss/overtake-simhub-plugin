@@ -2,6 +2,42 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.1.5] - 2026-08-31
+
+> Corrige o **Mapa da Pista** (aba Track Map da UI ao vivo), que ficava vazio durante
+> as transmissões: o traçado do circuito só era aprendido enquanto aquela aba estava
+> aberta, e quem narra passa a corrida na aba **Transmissão**.
+
+### Fixed
+- **Traçado acumulado em todo snapshot** (`race-ui.html`). `accumulateTrack()` era
+  chamado só de dentro de `renderTrackMap()`, que só roda quando `curView === "trackmap"`.
+  Com a aba fechada, a posição (`x`/`z`/`lapDist`) dos 22 carros chegava a cada tick e
+  era descartada. Extraído para `tmSync()`, agora chamado no `onState()` a cada snapshot,
+  independente da aba ativa; deduplicado por `state.tsMs` para o render forçado não
+  contar o mesmo tick duas vezes.
+- **Cache do traçado por pista volta a ser semeado.** `tmSaveCache()` só grava com mais
+  de 40 pontos acumulados — patamar inalcançável com a aba fechada, então
+  `otk_tm_<game>_<pista>` nunca era escrito no `localStorage` e nem a sessão seguinte
+  abria o mapa pronto.
+- **Guarda de `state` nulo** em `accumulateTrack()`/`renderTrackMap()`. O script roda em
+  `"use strict"` com `state = null` até o primeiro snapshot; clicar na aba antes disso
+  lançava `TypeError: ... reading 'grid'` (idem via `resize`, `change` do `select` e
+  seleção de piloto). A exceção estourava antes da linha que escreve o aviso, então o
+  canvas ficava preto sem nem o "Aguardando posicoes (pacote Motion do jogo)...".
+
+### Note
+- Medido em jsdom com o `race-ui.html` real e um snapshot real de transmissão (F1 26,
+  Baku, 22 carros). A/B no mesmo teste: abrir o mapa após 60 ticks na aba Transmissão
+  ia de **22 pontos / 15 segmentos** para **360 pontos / 359 segmentos**, e o cache por
+  pista passa de vazio para 363 pontos gravados.
+- Não é regressão de UDP: o snapshot já trazia `x`/`z`/`lapDist` de 22/22 carros, o
+  `slim` do broadcast preserva esses campos e o layout Motion 2026 (stride 54, yaw @42)
+  está correto desde a v2.0.0.
+
+### Não muda
+- Formato do `.otk` inalterado; mudança só na UI ao vivo. `minSupportedVersion` segue
+  `1.1.47`.
+
 ## [2.1.4] - 2026-07-16
 
 > Adiciona o **GP do Azerbaijão (Baku City Circuit)** à lista de pistas — faltava,

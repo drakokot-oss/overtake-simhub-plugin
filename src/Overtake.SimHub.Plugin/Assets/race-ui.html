@@ -451,6 +451,23 @@
       if(a.length>40) localStorage.setItem(tmKey(), JSON.stringify(a));
     }catch(e){}
   }
+  // Learn the circuit on EVERY snapshot, not only while the Track Map tab is open.
+  // The narrator broadcasts from the Transmissao tab, so tying accumulation to the
+  // render left the outline empty for the whole race: opening the map showed loose
+  // dots instead of a circuit, and the per-track cache never reached the 40 points
+  // it needs to be written, so the next session started from zero too.
+  var tmLastAccTs = -1;
+  function tmSync(){
+    if(!state) return;
+    var key=tmKey();
+    if(key!==tmTrackKey){ tmTrackKey=key; trackPts={}; tmLoadCache(); }
+    var ts=state.tsMs||0;
+    if(ts>0 && ts===tmLastAccTs) return; // one accumulation per snapshot
+    tmLastAccTs=ts;
+    accumulateTrack();
+    var now=Date.now();
+    if(now-tmLastSave>4000){ tmLastSave=now; tmSaveCache(); }
+  }
   // ---- Qualy result preservation ----
   // The live snapshot only ever reflects the CURRENT session, so once the race
   // starts the qualifying result is gone. We snapshot the grid while a quali/
@@ -592,6 +609,7 @@
     renderFeed();
     renderHighlights();
     updateTmSelect();
+    tmSync();
     if(curView==="trackmap") renderTrackMap(false);
     if(curView==="overlay") syncOverlayFrame();
     if(tmCar!=null && carMap[tmCar]) $("tmDetail").innerHTML = trackMapDetailHtml(carMap[tmCar]);
@@ -938,7 +956,7 @@
     if(tmCar!=null) sel.value=String(tmCar);
   }
   function accumulateTrack(){
-    var g=state.grid||[];
+    var g=(state&&state.grid)||[];
     g.forEach(function(d){
       if(d.x==null||d.z==null||d.lapDist==null) return;
       if(d.pitStatus) return;                          // skip pit-lane points (off the racing line)
@@ -955,12 +973,12 @@
     var now=Date.now();
     if(!force && (now-tmLastRender)<250) return; // max ~4 fps unless forced (click/resize/tab)
     tmLastRender=now;
-    // Track changed? reset and load the cached outline so the map is instant.
-    var key=tmKey();
-    if(key!==tmTrackKey){ tmTrackKey=key; trackPts={}; tmLoadCache(); }
-    accumulateTrack();
-    if(now-tmLastSave>4000){ tmLastSave=now; tmSaveCache(); }
-    var g=state.grid||[];
+    // Track change + accumulation live in tmSync (also driven by onState), so the
+    // outline keeps growing while the narrator is on another tab. Guarded for a
+    // null state: the tab can be clicked before the first snapshot arrives, and an
+    // exception here used to leave the canvas blank without even the wait message.
+    tmSync();
+    var g=(state&&state.grid)||[];
     var dpr=window.devicePixelRatio||1;
     var w=cv.clientWidth, h=cv.clientHeight;
     if(w<=0||h<=0) return;
