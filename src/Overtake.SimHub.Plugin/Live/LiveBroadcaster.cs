@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -68,7 +69,7 @@ namespace Overtake.SimHub.Plugin.Live
         private string RestEndpoint(string path) { return Origin() + "/rest/v1/" + path; }
 
         // Synchronous request. Returns response body; throws on HTTP error (caller maps it).
-        private string Send(string method, string url, string bodyJson, int timeoutMs)
+        private string Send(string method, string url, string bodyJson, int timeoutMs, bool gzip = false)
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = method;
@@ -81,6 +82,19 @@ namespace Overtake.SimHub.Plugin.Live
             {
                 req.ContentType = "application/json";
                 byte[] payload = Encoding.UTF8.GetBytes(bodyJson);
+                // gzip SO no snapshot ao vivo (ver PushSnapshot). As RPCs do PostgREST ficam
+                // cruas de proposito: quem descomprime e a nossa Edge Function, e o PostgREST
+                // nao promete aceitar corpo comprimido.
+                if (gzip)
+                {
+                    using (var mem = new MemoryStream())
+                    {
+                        using (var gz = new GZipStream(mem, CompressionMode.Compress, true))
+                            gz.Write(payload, 0, payload.Length);
+                        payload = mem.ToArray();
+                    }
+                    req.Headers["Content-Encoding"] = "gzip";
+                }
                 req.ContentLength = payload.Length;
                 using (var s = req.GetRequestStream()) s.Write(payload, 0, payload.Length);
             }
@@ -92,6 +106,9 @@ namespace Overtake.SimHub.Plugin.Live
 
         private string Post(string fn, string bodyJson, int timeoutMs)
         { return Send("POST", FnEndpoint(fn), bodyJson, timeoutMs); }
+
+        private string PostGzip(string fn, string bodyJson, int timeoutMs)
+        { return Send("POST", FnEndpoint(fn), bodyJson, timeoutMs, true); }
 
         // Minimal JSON string escaping (token/ids/names embedded by hand).
         private static string J(string s)
@@ -300,7 +317,10 @@ namespace Overtake.SimHub.Plugin.Live
             {
                 try
                 {
-                    Post("live-ingest", body, 8000);
+                    // ~89 KB de JSON a 1 Hz = 727 kbps sustentados de subida, na mesma maquina
+                    // que esta correndo. Comprimido cai ~5x. O servidor detecta pelo magic byte
+                    // e aceita os dois formatos, entao plugin antigo segue funcionando.
+                    PostGzip("live-ingest", body, 8000);
                     LastError = null;
                     LastPushMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     _consecutiveFails = 0;

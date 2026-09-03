@@ -37,7 +37,7 @@ The game must be configured to send UDP telemetry:
 3. Set **UDP Broadcast Mode** to **Off**
 4. Set **UDP IP Address** to `127.0.0.1`
 5. Set **UDP Port** to `20777` (must match the plugin's port setting)
-6. Set **UDP Send Rate** to `20Hz` or higher
+6. Set **UDP Send Rate** to `20Hz` — do NOT raise it: F1's own guidance is 20Hz for stability, higher rates can cause packet loss
 7. Set **UDP Format** to `2025`
 
 ## Usage
