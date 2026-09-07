@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -61,7 +61,7 @@ namespace Overtake.SimHub.Plugin.UI
             TxtLiveToken.Text = _settings.LiveBroadcastToken ?? "";
             CmbSessionType.Items.Clear();
             CmbSessionType.Items.Add(MakeItem("Corrida", "race"));
-            CmbSessionType.Items.Add(MakeItem("Classificacao", "qualy"));
+            CmbSessionType.Items.Add(MakeItem("Classificação", "qualy"));
             CmbSessionType.Items.Add(MakeItem("Sprint", "sprint"));
             CmbSessionType.SelectedIndex = 0;
             UpdateLiveStatus();
@@ -202,7 +202,7 @@ namespace Overtake.SimHub.Plugin.UI
                 "Use depois de ter guardado o export (.otk) e antes da proxima corrida.\n\n" +
                 "O listener UDP continua ativo (SimHub nao e afetado).\n\n" +
                 "Continuar?",
-                "Nova sessao — Overtake",
+                "Nova sessão — Overtake",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question);
             if (r != MessageBoxResult.Yes) return;
@@ -415,7 +415,7 @@ namespace Overtake.SimHub.Plugin.UI
                     ApplyBannerTheme(critical: true);
                     LblUpdateTitle.Text = "\u26A0 Formato UDP nao suportado";
                     LblUpdateWarning.Text =
-                        "O jogo esta enviando um formato UDP que ESTA versao nao "
+                        "O jogo esta enviando um formato UDP que ESTA versao não "
                         + "entende. O arquivo vai sair ILEGIVEL (nomes e equipes "
                         + "embaralhados). Atualize o plugin OU, como solucao "
                         + "imediata, mude a opcao \"UDP Format\" do jogo para 2025.";
@@ -653,10 +653,31 @@ namespace Overtake.SimHub.Plugin.UI
             CmbGrid.Items.Clear();
             CmbRace.Items.Clear();
             var lg = FindLeague(SelectedTag(CmbLeague));
+            AplicarRotulosDeContexto(lg);
             if (lg == null) return;
             foreach (var g in lg.Grids)
                 CmbGrid.Items.Add(MakeItem(g.GridName ?? g.GridId, g.GridId));
             if (CmbGrid.Items.Count > 0) CmbGrid.SelectedIndex = 0;
+        }
+
+        /// <summary>
+        /// Ajusta a tela ao tipo de token conectado.
+        ///
+        /// O painel foi escrito quando so existia transmissao de LIGA, e o Pit Wall veio depois.
+        /// Com token de equipe a tela mostrava "Liga: ELITE RACING TEAM" e "Grid / temporada: N/A" —
+        /// o piloto lia isso e concluia que estava no lugar errado, com um token que funcionava.
+        ///
+        /// Nada aqui muda o protocolo: os ids seguem opacos para o plugin. Ele so passou a ler o
+        /// `kind` que o live-start manda (aditivo) para ROTULAR, e a esconder a linha do grid
+        /// quando o unico grid e o sintetico — que e campo de uso interno, nao escolha do usuario.
+        /// </summary>
+        private void AplicarRotulosDeContexto(EligibleLeague lg)
+        {
+            bool equipe = lg != null && lg.IsTeam;
+            if (LblLeague != null) LblLeague.Text = equipe ? "Equipe" : "Liga";
+            if (PanelGrid != null)
+                PanelGrid.Visibility = (lg != null && lg.HasNoRealGrid)
+                    ? Visibility.Collapsed : Visibility.Visible;
         }
 
         private void CmbGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -830,7 +851,7 @@ namespace Overtake.SimHub.Plugin.UI
                 _plugin.LiveEnd();
                 Dispatcher.Invoke(() =>
                 {
-                    LblLiveStatus.Text = "Transmissao encerrada.";
+                    LblLiveStatus.Text = "Transmissão encerrada.";
                     LblLiveStatus.Foreground = TealBrush;
                     BtnEndLive.IsEnabled = false;
                     BtnGoLive.IsEnabled = true;
@@ -849,7 +870,7 @@ namespace Overtake.SimHub.Plugin.UI
                 string err = _plugin.LiveLastError;
                 if (!string.IsNullOrEmpty(err))
                 {
-                    LblLiveStatus.Text = "AO VIVO (ultimo aviso: " + err + ")";
+                    LblLiveStatus.Text = "AO VIVO (último aviso: " + err + ")";
                     LblLiveStatus.Foreground = YellowBrush;
                 }
                 else
@@ -863,7 +884,7 @@ namespace Overtake.SimHub.Plugin.UI
                 // Transição ao vivo → encerrado (manual OU auto-End). Antes, sem este else, o
                 // rótulo ficava preso em "AO VIVO" mesmo após encerrar. Só no tick da transição,
                 // para não sobrescrever mensagens transitórias (ex.: "Token salvo.").
-                LblLiveStatus.Text = "Transmissao encerrada.";
+                LblLiveStatus.Text = "Transmissão encerrada.";
                 LblLiveStatus.Foreground = DimBrush;
             }
             _wasLiveActive = active;
