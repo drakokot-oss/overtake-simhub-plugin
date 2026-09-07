@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$DllPath = "$PSScriptRoot\..\src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
 )
 $ErrorActionPreference = "Stop"
@@ -1261,7 +1261,11 @@ function Test-ErsTelemetry() {
     $oldHarv = Get-DictValue $ers "harvestedPctAvgPerLap"
     Assert "v1.1.35: legacy harvestedPctAvgPerLap removed" ($oldHarv -eq $null)
 
-    Assert "v1.1.34: deployModeLast == Overtake" ($modeLast -eq "Overtake")
+    # 07/09/2026: o modo 3 do ERS se chamava "Overtake" e as regras de 2026 renomearam para
+    # BOOST (a spec oficial do 2026 Season Pack ja escreve "3 = boost"). O portal aceita os DOIS
+    # no badge, porque corrida antiga guarda "Overtake" no json_data — mas o plugin passou a
+    # exportar so o nome novo, entao aqui a expectativa e "Boost".
+    Assert "modo 3 do ERS exportado como Boost (renomeado nas regras de 2026)" ($modeLast -eq "Boost")
     Assert "v1.1.34: samplesPaused == 1 (Hamilton paused once)" ([int]$samplesPaused -eq 1)
     Assert "v1.1.34: samplesCount >= 10" ([int]$samplesCount -ge 10)
 
@@ -2863,6 +2867,117 @@ function Test-CarStatus2026ErsOffsetShift() {
 
 Write-Host "=== Test 50: 2026 CarStatus ERS offset shift (deployed@54/paused@58) (v1.1.47) ===" -ForegroundColor Cyan
 [void](Test-CarStatus2026ErsOffsetShift)
+
+function Test-TyreSetsInOtk() {
+    # v2.2.0 -- packet 12 (Extended tyre set data) chega ao `.otk`, para a comparacao entre
+    # compostos existir tambem no resultado POS-corrida e nao so na transmissao ao vivo.
+    #
+    # A armadilha coberta aqui e a ORDEM DO FIO: `m_lifeSpan` (+5) vem ANTES de `m_usableLife`
+    # (+6). As duas sao contagens de voltas plausiveis, entao trocar as duas nao apareceria em
+    # tela nenhuma -- so gravaria numero errado para sempre. Por isso os dois valores alimentados
+    # aqui sao DIFERENTES e conferidos por posicao.
+    $st = [System.Activator]::CreateInstance($storeType)
+
+    $sp = New-Object byte[] 700
+    $sp[0] = 1; $sp[6] = 15; $sp[7] = 24    # Race, Abu Dhabi
+    $sp[124] = 0; $sp[125] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 1 $sp ([uint64]900)))))
+
+    $pp = New-Object byte[] 1256
+    $pp[0] = 2
+    # Slot vazio nao e slot valido: byte zerado significaria teamId 0 (Mercedes) com numero 0, e
+    # o store trataria os 20 slots restantes como carros de verdade. teamId 255 = ausente.
+    for ($zi = 0; $zi -lt 22; $zi++) { $pp[1 + $zi * 57 + 3] = 255 }
+    # Layout 2025: driverId@1, networkId@2, teamId@3, myTeam@4, raceNumber@5, nationality@6.
+    # networkId DISTINTO por piloto: e a chave que impede o store de trocar um nome de assento
+    # com o outro quando (numero, equipe) coincidem.
+    $pp[1 + 0] = 0; $pp[1 + 1] = 1; $pp[1 + 2] = 10; $pp[1 + 3] = 0; $pp[1 + 5] = 7; $pp[1 + 6] = 73
+    $n0 = [System.Text.Encoding]::UTF8.GetBytes("ERT Drako")
+    [System.Array]::Copy($n0, 0, $pp, (1 + 7), $n0.Length)
+    $pp[1 + 40] = 1; $pp[1 + 43] = 1
+    $s1 = 1 + 57
+    $pp[$s1 + 0] = 0; $pp[$s1 + 1] = 2; $pp[$s1 + 2] = 20; $pp[$s1 + 3] = 1; $pp[$s1 + 5] = 44; $pp[$s1 + 6] = 24
+    $n1 = [System.Text.Encoding]::UTF8.GetBytes("CDR Amorim")
+    [System.Array]::Copy($n1, 0, $pp, ($s1 + 7), $n1.Length)
+    $pp[$s1 + 40] = 1; $pp[$s1 + 43] = 1
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 4 $pp ([uint64]900)))))
+
+    # Packet 12: carIdx@0, 20 conjuntos stride 10 @1, fittedIdx@201. SO o carro 0 recebe --
+    # o carro 1 fica sem, para provar que dado ausente nao e inventado.
+    $ts = New-Object byte[] 202
+    $ts[0] = 0
+    # conjunto 0: macio, novo, montado
+    $o = 1
+    $ts[$o + 0] = 16; $ts[$o + 1] = 16; $ts[$o + 2] = 0; $ts[$o + 3] = 1
+    $ts[$o + 4] = 3;  $ts[$o + 5] = 25; $ts[$o + 6] = 26
+    [System.BitConverter]::GetBytes([int16]0).CopyTo($ts, $o + 7)
+    $ts[$o + 9] = 1
+    # conjunto 1: medio, usado, MAIS RAPIDO que o montado (delta negativo)
+    $o = 1 + 10
+    $ts[$o + 0] = 17; $ts[$o + 1] = 17; $ts[$o + 2] = 3; $ts[$o + 3] = 1
+    $ts[$o + 4] = 3;  $ts[$o + 5] = 21; $ts[$o + 6] = 26
+    [System.BitConverter]::GetBytes([int16]-3395).CopyTo($ts, $o + 7)
+    $ts[$o + 9] = 0
+    # conjunto 2: duro, gasto, indisponivel
+    $o = 1 + 20
+    $ts[$o + 0] = 18; $ts[$o + 1] = 18; $ts[$o + 2] = 97; $ts[$o + 3] = 0
+    $ts[$o + 4] = 3;  $ts[$o + 5] = 1;  $ts[$o + 6] = 30
+    [System.BitConverter]::GetBytes([int16]1200).CopyTo($ts, $o + 7)
+    $ts[$o + 9] = 0
+    $ts[201] = 0    # fittedIdx = conjunto 0
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 12 $ts ([uint64]900)))))
+
+    $fc = New-Object byte[] (1 + 22 * 46)
+    $fc[0] = 2
+    $fc[1] = 1; $fc[2] = 5; $fc[6] = 3
+    [System.BitConverter]::GetBytes([uint32]88000).CopyTo($fc, 1 + 7)
+    $offX = 1 + 46
+    $fc[$offX + 0] = 2; $fc[$offX + 1] = 5; $fc[$offX + 6] = 3
+    [System.BitConverter]::GetBytes([uint32]88500).CopyTo($fc, $offX + 7)
+    $ingestMethod.Invoke($st, @((Dispatch (New-FakePacket 8 $fc ([uint64]900)))))
+
+    $res = $finalizeMethod.Invoke($null, @($st))
+    $sessions = Get-DictValue $res "sessions"
+    Assert "v2.2.0: sessao emitida para o teste de conjuntos de pneu" ($sessions.Count -ge 1)
+    if ($sessions.Count -lt 1) { return }
+
+    # O bloco por piloto vive em `drivers[tag]` (saida de FinalizeDriver); `results[]` e a
+    # classificacao, montada separada e sem os blocos de telemetria.
+    $drvDict = Get-DictValue $sessions[0] "drivers"
+    Assert "v2.2.0: os dois carros sairam em drivers" ($drvDict.Count -eq 2)
+
+    $comSets = $drvDict["ERT Drako"]
+    Assert "v2.2.0: o carro que recebeu o packet 12 esta no export" ($comSets -ne $null)
+    # Ausencia e ausencia: sem packet 12 para o carro, nada de bloco vazio ou zerado.
+    Assert "v2.2.0: carro sem packet 12 nao ganha tyreSets inventado" `
+        ((Get-DictValue $drvDict["CDR Amorim"] "tyreSets") -eq $null)
+
+    $bloco = Get-DictValue $comSets "tyreSets"
+    Assert "v2.2.0: bloco tyreSets existe no .otk do carro que recebeu o packet 12" ($bloco -ne $null)
+    if ($bloco -eq $null) { return }
+
+    Assert "v2.2.0: fitted aponta o conjunto montado (0)" ((Get-DictValue $bloco "fitted") -eq 0)
+
+    $sets = Get-DictValue $bloco "sets"
+    Assert "v2.2.0: os 20 slots do packet 12 vao para o arquivo" ($sets.Count -eq 20)
+
+    $c0 = $sets[0]; $c1 = $sets[1]; $c2 = $sets[2]
+    Assert "v2.2.0: linha compacta tem 7 posicoes" ($c0.Length -eq 7)
+    Assert "v2.2.0: [0] actualCompound = 16 (macio)" ([int]$c0[0] -eq 16)
+    Assert "v2.2.0: [1] visualCompound = 16 (casa com a cor da torre)" ([int]$c0[1] -eq 16)
+    Assert "v2.2.0: [2] wear em % (3 no conjunto usado)" ([int]$c1[2] -eq 3)
+    Assert "v2.2.0: [3] available = 1 no disponivel" ([int]$c1[3] -eq 1)
+    Assert "v2.2.0: [3] available = 0 no gasto" ([int]$c2[3] -eq 0)
+    # A trava da armadilha: lifeSpan (21) ANTES de usableLife (26). Trocados, os dois numeros
+    # continuariam plausiveis -- e por isso que este assert precisa de valores distintos.
+    Assert "v2.2.0: [4] e lifeSpan (21 voltas restantes), NAO usableLife" ([int]$c1[4] -eq 21)
+    Assert "v2.2.0: [5] e usableLife (26 recomendadas), NAO lifeSpan" ([int]$c1[5] -eq 26)
+    Assert "v2.2.0: [6] lapDeltaMs preserva o negativo (-3395 = -3,395 s)" ([int]$c1[6] -eq -3395)
+    Assert "v2.2.0: [6] lapDeltaMs fica em ms, sem divisao no plugin" ([int]$c2[6] -eq 1200)
+}
+
+Write-Host "=== Test 51: conjuntos de pneu (packet 12) no .otk (v2.2.0) ===" -ForegroundColor Cyan
+[void](Test-TyreSetsInOtk)
 
 # ---- Summary ----
 Write-Host ""

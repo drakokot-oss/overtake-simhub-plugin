@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Overtake.SimHub.Plugin.Finalizer
 {
@@ -114,7 +114,10 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 85, "Mercedes (2020)" }, { 86, "Ferrari (2020)" }, { 87, "Red Bull (2020)" },
             { 88, "Williams (2020)" }, { 89, "Racing Point (2020)" }, { 90, "Renault (2020)" },
             { 91, "AlphaTauri (2020)" }, { 92, "Haas (2020)" }, { 93, "McLaren (2020)" },
-            { 94, "Alfa Romeo (2020)" }, { 104, "F1 Generic" },
+            { 94, "Alfa Romeo (2020)" },
+            // Apêndice oficial 07/09: estavam trocados — 104 é o MyTeam ("F1 Custom Team"),
+            // e 41 é o carro genérico. Ver a nota em MyTeamTeamIds.
+            { 41, "F1 Generic" }, { 104, "F1 Custom Team" },
             { 106, "Art Grand Prix (2023)" }, { 107, "Campos Racing" }, { 108, "Carlin" },
             { 109, "Charouz Racing" }, { 110, "DAMS" }, { 111, "Hitech" }, { 112, "MP Motorsport" },
             { 113, "Prema" }, { 114, "Trident (2023)" }, { 115, "Van Amersfoort" },
@@ -137,6 +140,35 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 226, "Visa Cash App Racing Bulls" }, { 227, "MoneyGram Haas F1 Team" },
             { 228, "McLaren Formula 1 Team" }, { 229, "Audi Revolut F1 Team" },
             { 230, "Cadillac Formula 1 Team" },
+
+            // ── Bloco 465-486 do APÊNDICE OFICIAL (Data Output from F1 25 2026 Season Pack) ──
+            //
+            // Conferido em 07/09/2026 no PDF da EA. Estava TODO descoberto: uma transmissão de
+            // F1 25 com o 2026 Season Pack mostrava `Team(476)` em cada carro. Virou urgente
+            // porque, depois do patch v1.25, instalação nova do F1 25 vem nesse modo por padrão.
+            //
+            // ATENÇÃO — 220-230 acima NÃO está no apêndice: veio de captura real do F1 26. Os
+            // dois blocos são a MESMA grade de 2026, e ficam os dois porque não temos captura do
+            // F1 25 Season Pack para saber qual ele emite. Mapear os dois não custa nada e cobre
+            // os dois casos.
+            //
+            // Os nomes de 476-486 são IDÊNTICOS aos de 220-230 de propósito: é a mesma equipe, e
+            // nome diferente fragmentaria a tabela de construtores em duas linhas.
+
+            // F2 2025 (spec: "Art GP '25" … "Invicta '25")
+            { 465, "Art Grand Prix" }, { 466, "Campos Racing" }, { 467, "Rodin Motorsport" },
+            { 468, "AIX Racing" }, { 469, "DAMS" }, { 470, "Hitech" },
+            { 471, "MP Motorsport" }, { 472, "Prema" }, { 473, "Trident" },
+            { 474, "Van Amersfoort Racing" }, { 475, "Invicta Racing" },
+
+            // F1 2026 — mesma ordem e mesmos nomes de 220-230
+            { 476, "Mercedes-AMG F1 Team" }, { 477, "Scuderia Ferrari HP" },
+            { 478, "Oracle Red Bull Racing" }, { 479, "Atlassian Williams F1 Team" },
+            { 480, "Aston Martin Aramco" }, { 481, "BWT Alpine F1 Team" },
+            { 482, "Visa Cash App Racing Bulls" }, { 483, "MoneyGram Haas F1 Team" },
+            { 484, "McLaren Formula 1 Team" }, { 485, "Audi Revolut F1 Team" },
+            { 486, "Cadillac Formula 1 Team" },
+
         };
 
         /// <summary>
@@ -150,6 +182,20 @@ namespace Overtake.SimHub.Plugin.Finalizer
         /// every car myTeam=false), so team-name resolution and full-My-Team-grid
         /// detection must fall back to the team id instead of trusting the flag.
         /// </summary>
+        /// <remarks>
+        /// DIVERGÊNCIA CONHECIDA (conferida no apêndice oficial em 07/09/2026): o id 41 é
+        /// documentado como <b>"F1 Generic"</b>, não como MyTeam — só o 104 ("F1 Custom Team")
+        /// é o MyTeam oficial, e o 232 não aparece no apêndice (veio de captura, como o
+        /// bloco 220-230).
+        ///
+        /// Mantido como está DE PROPÓSITO: o 41 entrou aqui por observação real, porque a flag
+        /// m_myTeam lia 0 no carro MyTeam do próprio jogador em capturas F1 26. Tirar agora
+        /// arriscaria regredir exatamente o caso que ele resolve, e um carro genérico rotulado
+        /// "MyTeam" incomoda menos que o MyTeam do piloto virar "F1 Generic".
+        ///
+        /// Para fechar isso falta uma captura de F1 25 + 2026 Season Pack com MyTeam, que diga
+        /// qual id o jogo realmente emite. Até lá, decisão consciente e não omissão.
+        /// </remarks>
         public static readonly HashSet<int> MyTeamTeamIds = new HashSet<int> { 41, 104, 232 };
 
         public static bool IsMyTeamTeamId(int teamId)
@@ -300,10 +346,24 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 0, "Lean" }, { 1, "Standard" }, { 2, "Rich" }, { 3, "Max" },
         };
 
-        /// <summary>CarStatus m_ersDeployMode (F1 25 UDP packet 7).</summary>
+        /// <summary>
+        /// CarStatus m_ersDeployMode. Vai para o `.otk` como `deployModeLast`, e o portal EXIBE
+        /// essa string crua ("modo final: Boost") no detalhe do piloto pos-corrida.
+        ///
+        /// O modo 3 se chamava "Overtake" e as regras de 2026 renomearam para BOOST — a spec
+        /// oficial do 2026 Season Pack ja escreve "3 = boost". Trocado aqui em 07/09/2026.
+        ///
+        /// ACOPLAMENTO: `deployModeBadgeClass` em src/components/race/DriverDetails.tsx casa a
+        /// string EXATA para escolher a cor do badge. Ele aceita "Boost" E "Overtake" desde
+        /// 07/09, porque corrida antiga guarda "Overtake" no json_data e tem que continuar
+        /// acendendo vermelho. O portal foi ANTES deste plugin, de proposito.
+        ///
+        /// Nao confundir com LiveSnapshotBuilder.ErsModeName, que e o caminho AO VIVO e usa os
+        /// nomes em portugues ("Nenhum/Medio/Volta Rapida/Boost") — aquele ja dizia Boost.
+        /// </summary>
         public static readonly Dictionary<int, string> ErsDeployModeMap = new Dictionary<int, string>
         {
-            { 0, "None" }, { 1, "Medium" }, { 2, "HotLap" }, { 3, "Overtake" },
+            { 0, "None" }, { 1, "Medium" }, { 2, "HotLap" }, { 3, "Boost" },
         };
 
         public static readonly Dictionary<int, string> ResultStatus = new Dictionary<int, string>

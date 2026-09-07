@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -12,7 +13,31 @@ namespace Overtake.SimHub.Plugin.Live
     public class EligibleRace { public string RaceId; public string Name; public string Track; public string Status; }
     public class ScheduledRace { public string Id; public string Name; public string Track; public string RaceDate; public string ScheduledTime; }
     public class EligibleGrid { public string GridId; public string GridName; public List<EligibleRace> Races = new List<EligibleRace>(); }
-    public class EligibleLeague { public string LeagueId; public string LeagueName; public List<EligibleGrid> Grids = new List<EligibleGrid>(); }
+    public class EligibleLeague
+    {
+        public string LeagueId;
+        public string LeagueName;
+        /// <summary>"league" ou "team" — vem do live-start (aditivo em 07/09). Vazio em
+        /// servidor antigo, e nesse caso trata-se como liga, que era o comportamento de sempre.</summary>
+        public string Kind;
+        public List<EligibleGrid> Grids = new List<EligibleGrid>();
+
+        public bool IsTeam { get { return Kind == "team"; } }
+
+        /// <summary>
+        /// True quando o unico grid e o SINTETICO (UUID todo-zeros) que o Pit Wall devolve para
+        /// preservar a forma da resposta. Nao ha temporada real para escolher, entao a linha do
+        /// grid nao deve nem aparecer — mostrar "N/A" era expor campo interno ao usuario.
+        /// </summary>
+        public bool HasNoRealGrid
+        {
+            get
+            {
+                return Grids.Count == 1 && Grids[0] != null
+                    && Grids[0].GridId == "00000000-0000-0000-0000-000000000000";
+            }
+        }
+    }
 
     /// <summary>
     /// Cloud live-broadcast client. Streams the (read-only) live snapshot to the
@@ -68,7 +93,7 @@ namespace Overtake.SimHub.Plugin.Live
         private string RestEndpoint(string path) { return Origin() + "/rest/v1/" + path; }
 
         // Synchronous request. Returns response body; throws on HTTP error (caller maps it).
-        private string Send(string method, string url, string bodyJson, int timeoutMs)
+        private string Send(string method, string url, string bodyJson, int timeoutMs, bool gzip = false)
         {
             var req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = method;
@@ -81,6 +106,19 @@ namespace Overtake.SimHub.Plugin.Live
             {
                 req.ContentType = "application/json";
                 byte[] payload = Encoding.UTF8.GetBytes(bodyJson);
+                // gzip SO no snapshot ao vivo (ver PushSnapshot). As RPCs do PostgREST ficam
+                // cruas de proposito: quem descomprime e a nossa Edge Function, e o PostgREST
+                // nao promete aceitar corpo comprimido.
+                if (gzip)
+                {
+                    using (var mem = new MemoryStream())
+                    {
+                        using (var gz = new GZipStream(mem, CompressionMode.Compress, true))
+                            gz.Write(payload, 0, payload.Length);
+                        payload = mem.ToArray();
+                    }
+                    req.Headers["Content-Encoding"] = "gzip";
+                }
                 req.ContentLength = payload.Length;
                 using (var s = req.GetRequestStream()) s.Write(payload, 0, payload.Length);
             }
@@ -92,6 +130,9 @@ namespace Overtake.SimHub.Plugin.Live
 
         private string Post(string fn, string bodyJson, int timeoutMs)
         { return Send("POST", FnEndpoint(fn), bodyJson, timeoutMs); }
+
+        private string PostGzip(string fn, string bodyJson, int timeoutMs)
+        { return Send("POST", FnEndpoint(fn), bodyJson, timeoutMs, true); }
 
         // Minimal JSON string escaping (token/ids/names embedded by hand).
         private static string J(string s)
@@ -134,7 +175,7 @@ namespace Overtake.SimHub.Plugin.Live
                 foreach (var le in eligible)
                 {
                     var lm = le as Dictionary<string, object>; if (lm == null) continue;
-                    var L = new EligibleLeague { LeagueId = S(lm, "leagueId"), LeagueName = S(lm, "leagueName") };
+                    var L = new EligibleLeague { LeagueId = S(lm, "leagueId"), LeagueName = S(lm, "leagueName"), Kind = S(lm, "kind") };
                     var grids = lm.ContainsKey("grids") ? lm["grids"] as object[] : null;
                     if (grids != null) foreach (var ge in grids)
                     {
@@ -300,7 +341,10 @@ namespace Overtake.SimHub.Plugin.Live
             {
                 try
                 {
-                    Post("live-ingest", body, 8000);
+                    // ~89 KB de JSON a 1 Hz = 727 kbps sustentados de subida, na mesma maquina
+                    // que esta correndo. Comprimido cai ~5x. O servidor detecta pelo magic byte
+                    // e aceita os dois formatos, entao plugin antigo segue funcionando.
+                    PostGzip("live-ingest", body, 8000);
                     LastError = null;
                     LastPushMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     _consecutiveFails = 0;

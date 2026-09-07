@@ -26,10 +26,17 @@ CLI plus the GitHub Actions workflows in `.github/workflows/`.
 - NEVER amend / force-push the tag once `release.yml` has started. If the
   release fails, fix forward (re-run via `workflow_dispatch` with the same
   tag) or bump to the next patch version.
-- ALWAYS use the inline author identity for git commits:
-  `GIT_AUTHOR_NAME="drakokot" GIT_AUTHOR_EMAIL="drakokot@gmail.com" GIT_COMMITTER_NAME="drakokot" GIT_COMMITTER_EMAIL="drakokot@gmail.com"`.
-  The repo has no local `git config user.*` set — without these env vars,
-  `git commit` aborts with "Author identity unknown".
+- ALWAYS set an inline author identity for git commits — the repo has no local
+  `git config user.*` set, so without env vars `git commit` aborts with
+  "Author identity unknown". **Use the noreply identity:**
+  `GIT_AUTHOR_NAME="Claude Code" GIT_AUTHOR_EMAIL="noreply@anthropic.com" GIT_COMMITTER_NAME="Claude Code" GIT_COMMITTER_EMAIL="noreply@anthropic.com"`.
+
+  ⚠️ **NÃO use `drakokot@gmail.com`** (era o que esta rule pedia até 07/09/2026). A
+  conta tem "Block command line pushes that expose my email" ligado, e o push é
+  **rejeitado** com `GH007: Your push would publish a private email address` — depois
+  do commit já estar feito, o que obriga a reescrever o commit com `--amend
+  --reset-author`. Aconteceu no bump da v2.2.0. Todos os commits das branches desta
+  release usam a identidade noreply e sobem sem problema.
 - NEVER touch `git config`. NEVER use `git push --force` against `main` or
   any released tag.
 

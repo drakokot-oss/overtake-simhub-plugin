@@ -149,6 +149,20 @@ namespace Overtake.SimHub.Plugin.Store
         public int LiveEngineTemp;
         // Telemetry trace by lap-distance bucket (~25 m) for the current and previous lap.
         // Value = [speedKmh, throttlePct, brakePct, gear]. Drives the Track Map charts.
+        /// <summary>
+        /// Conjuntos de pneu deste carro (packet 12). O jogo manda POR CARRO em rodizio, entao
+        /// isto acumula: fica com o ultimo estado conhecido de cada carro.
+        ///
+        /// `TyreSetsSig` e a assinatura do que foi enviado por ultimo. O dado e quase estatico
+        /// (so muda quando um conjunto e montado ou desgasta), e mandar 20 conjuntos x 24 carros
+        /// em todo tick jogaria fora a Fase 1 inteira, que existiu para cortar 35% do trafego.
+        /// Com a assinatura, o snapshot so carrega o bloco quando ele REALMENTE mudou.
+        /// </summary>
+        public Packets.TyreSetEntry[] TyreSets;
+        public int TyreSetsFittedIdx = -1;
+        public string TyreSetsSig;
+        public long TyreSetsSentAtMs;
+
         public int TraceLapNum = -1;
         public System.Collections.Generic.Dictionary<int, int[]> TraceCur = new System.Collections.Generic.Dictionary<int, int[]>();
         public System.Collections.Generic.Dictionary<int, int[]> TracePrev = new System.Collections.Generic.Dictionary<int, int[]>();
@@ -234,6 +248,10 @@ namespace Overtake.SimHub.Plugin.Store
             LiveLapDistanceM = 0f;
             LivePosValid = false;
             TraceLapNum = -1;
+            TyreSets = null;
+            TyreSetsFittedIdx = -1;
+            TyreSetsSig = null;
+            TyreSetsSentAtMs = 0;
             TraceCur.Clear();
             TracePrev.Clear();
             LiveTelemValid = false;

@@ -2282,6 +2282,7 @@ namespace Overtake.SimHub.Plugin.Finalizer
                 { "nationality", teamInfo != null ? (object)(int)teamInfo.Nationality : 0 },
                 { "laps", lapsOut },
                 { "tyreStints", tyreOut },
+                { "tyreSets", TyreSetsOut(dr) },
                 { "tyreWearPerLap", twOut },
                 { "damagePerLap", dmgOut },
                 { "wingRepairs", wingRepairs },
@@ -2944,6 +2945,43 @@ namespace Overtake.SimHub.Plugin.Finalizer
                     { "repaired", drop },
                 });
             }
+        }
+
+/// <summary>
+        /// Conjuntos de pneu no `.otk` (packet 12), para a comparacao entre compostos existir
+        /// tambem no resultado POS-corrida e nao so na transmissao ao vivo.
+        ///
+        /// Mesma forma compacta do snapshot ao vivo, e MESMA ORDEM DO FIO:
+        ///   [actual, visual, wear%, available, lifeSpan, usableLife, lapDeltaMs]
+        ///
+        /// Cuidado com lifeSpan (+5) x usableLife (+6): as duas sao contagens de voltas
+        /// plausiveis, entao trocar as duas nao apareceria — so gravaria numero errado.
+        ///
+        /// `lapDeltaMs` fica em MILISSEGUNDOS, como vem do jogo; a divisao por 1000 e do lado
+        /// de quem exibe. Guardar em segundos aqui perderia precisao no arquivo de arquivo.
+        ///
+        /// ADITIVO: o importador do portal ignora chave desconhecida, entao `minSupportedVersion`
+        /// nao muda e `.otk` de plugin antigo segue valido.
+        /// </summary>
+        private static object TyreSetsOut(DriverRun dr)
+        {
+            if (dr == null || dr.TyreSets == null) return null;
+            var linhas = new List<object>();
+            for (int i = 0; i < dr.TyreSets.Length; i++)
+            {
+                var t = dr.TyreSets[i];
+                if (t == null) continue;
+                linhas.Add(new object[] {
+                    t.ActualCompound, t.VisualCompound, t.Wear, t.Available ? 1 : 0,
+                    t.LifeSpan, t.UsableLife, (int)t.LapDeltaMs,
+                });
+            }
+            if (linhas.Count == 0) return null;
+            return new Dictionary<string, object>
+            {
+                { "fitted", dr.TyreSetsFittedIdx },
+                { "sets", linhas },
+            };
         }
 
         private static string ResolveTeamName(ParticipantEntry team)

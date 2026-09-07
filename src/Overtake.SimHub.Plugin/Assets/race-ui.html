@@ -115,19 +115,6 @@
   table.laptable td { padding:6px 10px; border-bottom:1px solid rgba(35,44,59,.5); font-size:12.5px; text-align:right; }
   table.laptable td:first-child { text-align:center; color:var(--txt-faint); font-weight:700; }
   .delta-up { color:var(--good); } .delta-down { color:var(--bad); }
-  .overlaywrap { display:flex; flex-direction:column; gap:14px; padding:14px 0; }
-  .ov-subtabs { display:flex; flex-wrap:wrap; gap:6px; }
-  .ov-subtabs button { background:var(--panel); border:1px solid var(--line); color:var(--txt-dim); border-radius:8px; padding:7px 12px; font-size:12px; font-weight:700; cursor:pointer; }
-  .ov-subtabs button.active { background:rgba(255,77,46,.18); border-color:rgba(255,77,46,.45); color:var(--accent-2); }
-  .ov-frame-wrap { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; min-height:420px; }
-  .ov-frame-wrap iframe { width:100%; height:480px; border:0; display:block; background:transparent; }
-  .overlay { width:440px; background:rgba(10,13,18,.86); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 18px 50px rgba(0,0,0,.5); }
-  .ovhead { display:flex; align-items:center; gap:8px; padding:8px 12px; background:rgba(255,77,46,.12); border-bottom:1px solid var(--line); font-size:12px; font-weight:800; }
-  .ovrow { display:grid; grid-template-columns:24px 4px 1fr 70px 30px; gap:8px; align-items:center; padding:7px 12px; border-bottom:1px solid rgba(35,44,59,.5); }
-  .ovrow:last-child { border-bottom:none; }
-  .ovrow .p { font-weight:800; text-align:center; }
-  .ovrow .nm { font-weight:700; font-size:13px; }
-  .ovrow .it { text-align:right; color:var(--txt-dim); font-variant-numeric:tabular-nums; font-size:12px; }
   .pb { color:var(--good); font-weight:700; }
   tr.elim td { background:rgba(255,84,112,.07); }
   tr.cut td { border-top:2px dashed rgba(255,84,112,.55); }
@@ -276,9 +263,6 @@
       <button class="tab active" data-view="broadcast">Transmissao</button>
       <button class="tab" data-view="qualy">Classificacao</button>
       <button class="tab" data-view="trackmap">Track Map</button>
-      <!-- Overlay tab hidden for now: focus on Transmissao / Classificacao / Track Map.
-           The overlay view + /overlays page stay in place for a later pass. -->
-      <button class="tab hide" data-view="overlay">Overlay</button>
     </div>
     <div class="spacer"></div>
     <div class="right">
@@ -354,19 +338,6 @@
   </div>
 
   <!-- OVERLAY -->
-  <div class="overlaywrap hide" id="view-overlay">
-    <div class="ov-subtabs" id="ovSubtabs"></div>
-    <div class="ov-frame-wrap">
-      <iframe id="ovFrame" title="Overlay preview"></iframe>
-    </div>
-    <div class="panel">
-      <h3>URLs para OBS (fundo transparente)</h3>
-      <div class="dbody">
-        <div style="color:var(--txt-dim);font-size:12px;margin-bottom:8px">Adicione cada URL como "Fonte de Navegador" no OBS. Largura/altura conforme o overlay.</div>
-        <div id="overlayLinks" class="kv"></div>
-      </div>
-    </div>
-  </div>
 
   <!-- TRACK MAP -->
   <div class="tmwrap tmv2 hide" id="view-trackmap">
@@ -495,7 +466,6 @@
   var tmLastRender = 0;      // throttle canvas redraws (ms)
   var tmCanvasW = 0, tmCanvasH = 0;
   var tmSelectSig = "";      // skip rebuilding <select> unless grid composition changed
-  var curOvView = "tower";   // active overlay sub-tab
   var RACE_GRACE_MS = 10*60*1000; // keep race data 10 min after it ends
   var raceEndedAt = 0;       // ms timestamp the race was detected as finished
 
@@ -611,7 +581,6 @@
     updateTmSelect();
     tmSync();
     if(curView==="trackmap") renderTrackMap(false);
-    if(curView==="overlay") syncOverlayFrame();
     if(tmCar!=null && carMap[tmCar]) $("tmDetail").innerHTML = trackMapDetailHtml(carMap[tmCar]);
     if(openDrawerCar!=null && carMap[openDrawerCar]) renderDrawer(carMap[openDrawerCar]);
     // Frozen final frame (session reset to lobby): relabel the badge so it's clear
@@ -632,7 +601,7 @@
     finalized = raceEndedAt>0 && (Date.now()-raceEndedAt) > RACE_GRACE_MS;
   }
   function applyFinalized(){
-    var views=["broadcast","qualy","trackmap","overlay"];
+    var views=["broadcast","qualy","trackmap"];
     // We never blank the screen anymore: the final standings + telemetry stay on
     // display (frozen last good frame). When the race is over we only relabel the
     // live badge as "Resultado final" so it's clear the data is no longer live.
@@ -937,7 +906,6 @@
       '<div class="kv"><div class="cell" style="grid-column:span 3"><div class="k">Pole atual</div><div class="v">'+msLap(pole)+'</div></div></div>';
   }
 
-  function renderOverlay(){ /* legacy mini-tower removed; overlays live in /overlays + Overlay tab */ }
 
   // ---- Track Map ----
   function tmSelectSignature(g){
@@ -1451,8 +1419,7 @@
   function activateView(view, fromAuto){
     curView=view;
     if(view==="trackmap"){ setTimeout(function(){ renderTrackMap(true); }, 30); }
-    if(view==="overlay") syncOverlayFrame();
-    ["broadcast","qualy","trackmap","overlay"].forEach(function(v){
+    ["broadcast","qualy","trackmap"].forEach(function(v){
       var el=$("view-"+v); if(el){ if(v===view) el.classList.remove("hide"); else el.classList.add("hide"); }
     });
     var tabs=$("tabs").querySelectorAll(".tab");
@@ -1499,39 +1466,6 @@
   // Finalize check keeps running even if packets stop arriving (game closed).
   setInterval(function(){ if(state){ maybeFinalize(); applyFinalized(); } }, 15000);
 
-  var OVERLAY_VIEWS=[
-    ["tower","Timing Tower"],["lower","Faixa inferior"],["battle","Briga H2H"],
-    ["driver","Card piloto"],["weather","Clima"],["gaps","Grafico gaps"]
-  ];
-  function overlayBase(){
-    return (location.origin && location.origin!=="null") ? location.origin : (location.protocol+"//"+location.host);
-  }
-  function overlayUrl(view){ return overlayBase()+"/overlays?view="+view; }
-  function syncOverlayFrame(){
-    var fr=$("ovFrame"); if(!fr) return;
-    var want=overlayUrl(curOvView);
-    if(fr.getAttribute("data-src")!==want){ fr.setAttribute("data-src",want); fr.src=want; }
-  }
-  (function initOverlayTab(){
-    var tabs=$("ovSubtabs"); if(!tabs) return;
-    tabs.innerHTML=OVERLAY_VIEWS.map(function(o){
-      return '<button type="button" data-ov="'+o[0]+'">'+o[1]+'</button>';
-    }).join("");
-    tabs.querySelectorAll("button").forEach(function(b){
-      b.addEventListener("click",function(){
-        curOvView=b.getAttribute("data-ov");
-        tabs.querySelectorAll("button").forEach(function(x){ x.classList.toggle("active", x===b); });
-        syncOverlayFrame();
-      });
-    });
-    var first=tabs.querySelector("button"); if(first){ first.classList.add("active"); }
-    var el=$("overlayLinks");
-    if(el) el.innerHTML=OVERLAY_VIEWS.map(function(o){
-      var url=overlayUrl(o[0]);
-      return '<div class="cell"><div class="k">'+o[1]+'</div>'+
-        '<div class="v" style="font-size:12px"><a href="'+url+'" target="_blank" style="color:var(--accent-2);text-decoration:none">'+url+'</a></div></div>';
-    }).join("");
-  })();
 
   activateView("broadcast");
   connect();

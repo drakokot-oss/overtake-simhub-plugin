@@ -2,6 +2,127 @@
 
 All notable changes to the Overtake SimHub Plugin are documented here.
 
+## [2.2.0] - 2026-09-07
+
+> Release de backlog: sete itens mapeados em 24/08 e reabertos em 07/09 depois do patch v1.25
+> do F1 25 (2026 Season Pack). O fio condutor é **não piorar o fluxo de corrida** — a taxa de
+> sucesso das transmissões é alta hoje, então cada mudança foi medida contra isso.
+
+### Added
+- **Conjuntos de pneu (packet 12 / `ePacketIdTyreSets`).** `Packets/TyreSetsData.cs`: 20
+  conjuntos, stride 10 B, pacote de 231 B, offsets conferidos campo a campo no apêndice oficial
+  (F1 25 UDP + F1 25 2026 Season Pack UDP). O pacote é **idêntico em 2025 e 2026** — sem leitura
+  format-aware, ao contrário de Participants / CarStatus / Motion.
+  - `SessionStore.IngestTyreSets` acumula **por `carIdx`**: o jogo manda um carro por pacote, em
+    rodízio, e guardar "o último recebido" mostraria os conjuntos do carro errado.
+  - `LiveSnapshotBuilder`: bloco `tyreSets` por carro, forma compacta
+    `[actual, visual, wear, available, lifeSpan, usableLife, lapDeltaMs]`, emitido **só quando
+    muda** + heartbeat de 10 s. Sem o heartbeat, uma mudança que caísse num tick que a nuvem
+    (throttlada a 1 Hz) não envia seria perdida para sempre daquele lado.
+  - `LeagueFinalizer.TyreSetsOut`: o mesmo bloco no `.otk`, em `drivers[tag].tyreSets`, na mesma
+    forma e na mesma ordem — uma forma só para conferir, em vez de duas que podem divergir.
+  - `recommendedSession` é lido mas **não** exportado: é palpite do jogo sobre qual sessão usar o
+    conjunto, não medição, e cada campo extra multiplica por 20 conjuntos × 24 carros.
+  - **`minSupportedVersion` fica em 1.1.47.** O item só ADICIONA chave, e o importador do portal
+    ignora chave desconhecida — `.otk` de plugin antigo segue válido.
+- **Equipes 465-486** em `Lookups.Teams`: 465-475 (F2 '25) e 476-486 (as 11 equipes de F1 2026).
+  A faixa estava toda descoberta; sem ela, F1 25 com o 2026 Season Pack mostrava `Team(476)` em
+  cada carro — e depois do patch v1.25 **instalação nova vem nesse modo por padrão**. Os nomes de
+  476-486 são IDÊNTICOS aos de 220-230 de propósito: é a mesma equipe, e nome diferente
+  fragmentaria a tabela de construtores em duas linhas.
+- **`docs/F1-26-UDP-OFFSET-MAP.md` seção 8** (resgatada do PR #19): em lobby My Team online,
+  `packetFormat 2026` no header **não** garante stride 2026 no corpo. Medido na captura de
+  Catalunya — Participants 57 (`name@7`) em vez de 60 (`name@10`), LobbyInfo 42 em vez de 43,
+  CarStatus 55 em vez de 59. É o caso que `ProbeBodyWireFormat` já tratava; o código estava aqui
+  e o "por quê" com as medições estava parado no PR.
+
+### Changed
+- **Cadência do snapshot pela demanda real** (`OvertakePlugin`). O snapshot era montado e
+  serializado (~100 KB) a 6,7 Hz mesmo quando o único consumidor era a nuvem, que lê a 1 Hz —
+  ~85% do trabalho jogado fora dentro do `DataUpdate`, a thread de dados do SimHub. Agora a
+  cadência é a do consumidor mais rápido que existe naquele momento
+  (`wsActive ? RaceUiPublishIntervalMs : LivePublishIntervalMs`).
+- **gzip no POST do `live-ingest`** (`LiveBroadcaster.Send(..., gzip: true)`). O snapshot cru é
+  ~89 KB em média (pico 129 KB) a 1 Hz = 727 kbps sustentados de subida, 327 MB/h. Medido em
+  snapshot real, gzip corta **5,1×** (103,8 → 20,4 KB). Link de subida saturado causa bufferbloat,
+  que atrasa TODO pacote — inclusive os do jogo, e os de todo o lobby se quem transmite for host.
+  Só o POST comprime; as RPCs do PostgREST seguem cruas.
+  - ⚠️ **ORDEM DE DEPLOY**: a Edge Function `live-ingest` tem que estar no ar ANTES desta versão.
+    Ela detecta gzip pelo magic byte (`1f 8b`) e aceita os dois formatos, então plugin antigo
+    continua funcionando; o inverso derruba a ingestão de quem atualizar primeiro. (Já deployada
+    em 07/09/2026.)
+- **Modo 3 do ERS passa a ser `Boost`** em `Lookups.ErsDeployModeMap` (era `Overtake`). As regras
+  de 2026 renomearam o modo, e a spec oficial do 2026 Season Pack já escreve `3 = boost`. O
+  caminho AO VIVO (`LiveSnapshotBuilder.ErsModeName`) já devolvia "Boost" — só o `.otk` estava
+  atrasado, e o portal EXIBE essa string crua no detalhe pós-corrida. O portal foi antes e aceita
+  os **dois** nomes, porque corrida antiga guarda "Overtake" no `json_data` e tem que continuar
+  acendendo vermelho.
+- **`IsF1_26TeamId` aceita as duas faixas** (220-230 e 476-486). Olhava só 220-230, embora exista
+  justamente para o Season Pack rodando dentro do F1 25.
+- **Painel de transmissão deixa de assumir que quem transmite é admin de liga**
+  (`UI/SettingsControl.xaml` + code-behind). O painel foi escrito quando só existia transmissão de
+  LIGA; o Pit Wall (equipe) veio depois. Com token de equipe a tela mentia de quatro formas, e
+  nenhuma bloqueava nada — só fazia o piloto desistir com um token que funcionava:
+  - o aviso do topo dizia "Exclusivo de ligas Elite ou Founder" → agora cobre os dois donos de
+    token e termina com "se você tem um token, ele funciona aqui";
+  - a instrução mandava gerar o token em "Perfil > Transmissão / SimHub", que só existe para liga
+    → agora cita os dois caminhos (equipe: Equipes > sua equipe > Telemetria);
+  - os rótulos mostravam "Liga: <nome da equipe>" e "Grid / temporada: N/A" → `LblLeague` troca
+    para "Equipe" e `PanelGrid` é escondido quando o único grid é o SINTÉTICO (UUID todo-zeros),
+    que é campo de uso interno e não escolha do usuário. Para isso o `live-start` passou a mandar
+    `kind: "league"|"team"` na listagem — ADITIVO, plugin antigo ignora;
+  - a interface estava em ASCII puro enquanto o portal inteiro é acentuado → 31 substituições,
+    aplicadas SÓ dentro de texto de interface (`Text=` / `Content=` / `Title=` / `ToolTip=` e
+    corpo de `<Run>` no XAML; literais de string no code-behind), com fronteira de palavra;
+    `x:Name` e handlers conferidos, seguem em ASCII.
+- **`Lookups.cs`, `GameInfo.cs`, `SettingsControl.xaml` e o code-behind passaram a UTF-8 COM BOM.**
+  Sem BOM o compilador pode assumir a codepage do sistema e virar mojibake. BOM verificado por
+  hexdump (`efbbbf`).
+- **Guia do send rate**: deixa de dizer "20Hz ou maior". A orientação do próprio F1 26 é 20 Hz
+  para estabilidade, avisando que taxas maiores podem causar perda de pacotes — estávamos
+  sugerindo o contrário do que o jogo recomenda.
+- **README**: aviso de que o F1 25 agora tem DOIS modos de UDP, e que instalação nova cai no do
+  2026 Season Pack (`packetFormat = 2026`).
+
+### Fixed
+- **`teamId` 41 e 104 estavam TROCADOS**: o dicionário chamava 104 de "F1 Generic", quando o
+  apêndice diz 104 = "F1 Custom Team" (o MyTeam) e 41 = "F1 Generic".
+  - `MyTeamTeamIds { 41, 104, 232 }` fica COMO ESTÁ, de propósito: o 41 entrou por observação real
+    (a flag `m_myTeam` lia 0 no carro MyTeam do próprio jogador em capturas F1 26), e tirar agora
+    arriscaria regredir o caso que ele resolve. Um carro genérico rotulado "MyTeam" incomoda menos
+    que o MyTeam do piloto virar "F1 Generic". Divergência documentada no código, com o que falta
+    para fechar: uma captura de F1 25 + Season Pack com MyTeam.
+
+### Removed
+- **Overlays.** `Assets/overlays.html`, a entrada do `.csproj`, a rota `/overlays`, o campo
+  `_overlaysHtml` e a const `OverlaysResource` do `RaceWebServer`; no `Assets/race-ui.html`, o
+  botão `data-view="overlay"` (que era `class="tab hide"` e que NENHUM código revelava), o
+  container `#view-overlay`, `OVERLAY_VIEWS`, `overlayBase`, `overlayUrl`, `syncOverlayFrame`,
+  `initOverlayTab`, `curOvView`, as duas chamadas condicionais, a entrada "overlay" nas duas
+  listas de views, o stub morto `renderOverlay()` e 13 linhas de CSS órfão. Ficam os "HTML
+  overlays" dos rótulos de eixo dos gráficos, que são outra coisa.
+- **O `RaceWebServer` NÃO foi removido** — revisão de escopo, e a razão importa mais que a
+  mudança. O item 4 do backlog era "descontinuar o servidor web local". Verificado antes de
+  remover: ele vem LIGADO por padrão (porta 8088), tem seção própria no painel e oferece
+  **"Permitir acesso na rede local (LAN / segundo PC / celular)"**. Transmitir de um SEGUNDO PC é
+  exatamente a mitigação do problema que a investigação das quedas apontou (CPU e upload
+  disputando com o jogo na mesma máquina). Remover tiraria a melhor saída de quem transmite, num
+  release cujo objetivo é não piorar o fluxo de corrida. Consequência: a cadência
+  `wsActive ? 150ms : 1000ms` continua correta e **não** tem ramo morto.
+
+### Tests
+- `Test-SessionStore.ps1`: **83 → 99** (+16). O packet 12 não tinha cobertura nenhuma. Travam a
+  ordem do fio (`lifeSpan` +5 antes de `usableLife` +6, com valores DISTINTOS — trocar as duas não
+  apareceria em tela, só gravaria número errado para sempre), o `int16` assinado do `lapDeltaMs`,
+  o acúmulo por `carIdx` e o pacote truncado não substituindo dado bom.
+- `Test-Finalizer.ps1`: **344 → 361** (+17), incluindo o bloco no `.otk` ponta a ponta desde os
+  bytes crus, e a expectativa do modo 3 do ERS atualizada para `Boost` (a suíte pegou a
+  renomeação — fez exatamente o trabalho dela).
+- Achado de fixture que vale para qualquer teste futuro do store: slot de participante zerado é um
+  carro **válido** para o store (`teamId 0` = Mercedes, número 0), e sem `networkId` distinto o
+  pipeline de confiabilidade re-assenta os nomes — o `carIdx 0` virava "SAINZ" (fallback de
+  `driverId 0`). Fixture correta = `networkId` distinto por piloto + `teamId=255` nos slots vazios.
+
 ## [2.1.5] - 2026-08-31
 
 > Corrige o **Mapa da Pista** (aba Track Map da UI ao vivo), que ficava vazio durante

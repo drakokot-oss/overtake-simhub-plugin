@@ -394,6 +394,7 @@ Objeto onde a **chave é a tag do piloto** (mesma de `results[].tag`). Cada valo
     "nationality": 9,
     "laps": [ ... ],
     "tyreStints": [ ... ],
+    "tyreSets": { ... },
     "tyreWearPerLap": [ ... ],
     "damagePerLap": [ ... ],
     "wingRepairs": [ ... ],
@@ -454,6 +455,40 @@ Objeto onde a **chave é a tag do piloto** (mesma de `results[].tag`). Cada valo
 ```
 
 > O último stint frequentemente vem com `endLap: 255` — significa "stint até o fim da sessão" (sentinel do UDP, não é uma volta real).
+
+### `drivers[tag].tyreSets`
+
+Conjuntos de pneu disponíveis (packet 12 do UDP). Ausente (`null`) quando o jogo não enviou o
+pacote na sessão — plugin antigo, sessão sem pneus alternativos, ou telemetria restrita.
+
+```json
+{
+  "fitted": 2,
+  "sets": [
+    [16, 16, 0, 1, 25, 26, 0],
+    [17, 17, 3, 1, 21, 22, -3395]
+  ]
+}
+```
+
+`fitted` é o índice, dentro de `sets`, do conjunto que estava **montado no carro**.
+
+Cada linha de `sets` é compacta e segue **a ordem do fio**:
+
+| pos | campo | significado |
+|-----|-------|-------------|
+| 0 | `actualCompound` | composto real (C1..C5, Inter, Wet) |
+| 1 | `visualCompound` | S/M/H — é o que casa com a cor da torre |
+| 2 | `wear` | desgaste, em % |
+| 3 | `available` | `1` = conjunto ainda disponível |
+| 4 | `lifeSpan` | voltas **restantes** neste conjunto |
+| 5 | `usableLife` | máximo recomendado para o composto |
+| 6 | `lapDeltaMs` | delta de volta vs. o conjunto montado, em **milissegundos** |
+
+> Cuidado com as posições 4 e 5: `lifeSpan` vem **antes** de `usableLife` no fio, e as duas são
+> contagens de voltas plausíveis — trocar as duas não quebra nada visivelmente, só mostra número
+> errado. `lapDeltaMs` pode ser negativo (conjunto mais rápido que o montado): `-3395` é −3,395 s;
+> a divisão por 1000 é de quem exibe.
 
 **Mapeamento de pneus visuais:**
 

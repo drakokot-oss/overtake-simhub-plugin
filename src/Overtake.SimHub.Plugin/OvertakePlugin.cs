@@ -212,7 +212,13 @@ namespace Overtake.SimHub.Plugin
             bool cloudActive = _live != null && _live.Active;
             if (!wsActive && !cloudActive) return;
             long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            if (nowMs - _lastRaceUiPublishMs < RaceUiPublishIntervalMs) return;
+            // A cadencia e a do consumidor MAIS RAPIDO que existe agora. Sem navegador na UI
+            // local, quem consome e a nuvem, a 1 Hz: montar e serializar ~100 KB a 6,7 Hz para
+            // enviar a 1 Hz jogava fora ~85% do trabalho, e esse trabalho roda no DataUpdate,
+            // a thread de dados do SimHub. Ha caso documentado no forum do SimHub de plugin
+            // pesado derrubando o fps de 58 para 25-30 — nao e lugar de gastar CPU a toa.
+            long intervaloMs = wsActive ? RaceUiPublishIntervalMs : LivePublishIntervalMs;
+            if (nowMs - _lastRaceUiPublishMs < intervaloMs) return;
             _lastRaceUiPublishMs = nowMs;
             try
             {
