@@ -650,6 +650,10 @@ namespace Overtake.SimHub.Plugin.Store
             // 10) CarDamage
             else if (pid == 10 && parsed.CarDamage != null)
                 IngestCarDamage(sid, parsed.CarDamage);
+
+            // 12) TyreSets — UM carro por pacote, em rodizio. Acumula por carIdx.
+            else if (pid == 12 && parsed.TyreSets != null && parsed.TyreSetsCarIdx >= 0)
+                IngestTyreSets(sid, parsed.TyreSetsCarIdx, parsed.TyreSets, parsed.TyreSetsFittedIdx);
         }
 
         private void IngestSession(SessionRun sess, SessionData s, long nowMs)
@@ -2474,6 +2478,19 @@ namespace Overtake.SimHub.Plugin.Store
                     d.LastCornerCuttingWarnings = ccWarn;
                 }
             }
+        }
+
+/// <summary>
+        /// Guarda os conjuntos de pneu de um carro. O jogo envia este pacote POR CARRO em
+        /// rodizio (um carro por pacote), entao nunca ha a grade inteira num tick — o estado
+        /// por carro fica acumulado no DriverRun.
+        /// </summary>
+        private void IngestTyreSets(string sid, int carIdx, Packets.TyreSetEntry[] sets, int fittedIdx)
+        {
+            var d = EnsureDriver(sid, carIdx);
+            if (d == null) return;
+            d.TyreSets = sets;
+            d.TyreSetsFittedIdx = fittedIdx;
         }
 
         private void IngestCarDamage(string sid, CarDamageEntry[] rows)

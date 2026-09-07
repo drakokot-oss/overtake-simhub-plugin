@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Overtake.SimHub.Plugin.Finalizer;
 using Overtake.SimHub.Plugin.Packets;
 using Overtake.SimHub.Plugin.Store;
@@ -120,6 +121,7 @@ namespace Overtake.SimHub.Plugin.Live
                     { "tyreTempsInner", TyreTemps(d, false) },
                     { "brakeTemps", BrakeTemps(d) },
                     { "engineTemp", d.LiveTelemValid ? (object)d.LiveEngineTemp : null },
+                    { "tyreSets", TyreSets(d) },
                     { "trace", TelemetryTrace(d) },
                     { "damage", Damage(d) },
                     { "stops", d.LastNumPitStops ?? d.PitStops.Count },
@@ -711,6 +713,64 @@ namespace Overtake.SimHub.Plugin.Live
                 case 8: return "W";
                 default: return "";
             }
+        }
+
+/// <summary>
+        /// Bloco de conjuntos de pneu, no formato compacto (array de arrays) para nao repetir
+        /// nome de campo 20 vezes por carro.
+        ///
+        ///   [actual, visual, wear%, available, lifeSpan, usableLife, lapDeltaMs]
+        ///
+        /// A ORDEM segue o FIO: lifeSpan (+5) vem antes de usableLife (+6). O rascunho do
+        /// backlog tinha as duas invertidas, e como as duas sao contagens de voltas plausiveis
+        /// a troca nao apareceria — so mostraria numero errado para sempre.
+        ///
+        /// SO ENVIA QUANDO MUDA, mais um heartbeat de 10s. O dado e quase estatico (muda ao
+        /// montar conjunto ou desgastar), e 20 conjuntos x 24 carros em todo tick jogaria fora a
+        /// Fase 1 inteira, que existiu para cortar 35% do trafego.
+        ///
+        /// O heartbeat NAO e zelo: o snapshot e construido UMA vez por tick e serve os dois
+        /// consumidores, mas a nuvem esta throttlada em 1 Hz enquanto o build roda a 6,7 Hz
+        /// quando ha navegador na UI local. Sem o heartbeat, uma mudanca emitida num build que
+        /// a nuvem nao envia seria perdida PARA SEMPRE naquele lado. Com ele, o pior caso e 10s
+        /// de atraso — e comprimido isso e alguns KB.
+        /// </summary>
+        private const long TyreSetsHeartbeatMs = 10000;
+
+        private static object TyreSets(DriverRun d)
+        {
+            if (d == null || d.TyreSets == null) return null;
+
+            var linhas = new List<object>();
+            var sb = new StringBuilder();
+            for (int i = 0; i < d.TyreSets.Length; i++)
+            {
+                var t = d.TyreSets[i];
+                if (t == null) continue;
+                linhas.Add(new object[] {
+                    t.ActualCompound, t.VisualCompound, t.Wear, t.Available ? 1 : 0,
+                    t.LifeSpan, t.UsableLife, (int)t.LapDeltaMs,
+                });
+                sb.Append(t.ActualCompound).Append(',').Append(t.Wear).Append(',')
+                  .Append(t.Available ? 1 : 0).Append(',').Append(t.LifeSpan).Append(',')
+                  .Append((int)t.LapDeltaMs).Append(';');
+            }
+            if (linhas.Count == 0) return null;
+
+            sb.Append('#').Append(d.TyreSetsFittedIdx);
+            string sig = sb.ToString();
+            long agora = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            bool mudou = sig != d.TyreSetsSig;
+            bool venceu = agora - d.TyreSetsSentAtMs >= TyreSetsHeartbeatMs;
+            if (!mudou && !venceu) return null;
+
+            d.TyreSetsSig = sig;
+            d.TyreSetsSentAtMs = agora;
+            return new Dictionary<string, object>
+            {
+                { "fitted", d.TyreSetsFittedIdx },
+                { "sets", linhas },
+            };
         }
 
         private static string ErsModeName(byte mode)

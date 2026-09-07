@@ -346,10 +346,24 @@ namespace Overtake.SimHub.Plugin.Finalizer
             { 0, "Lean" }, { 1, "Standard" }, { 2, "Rich" }, { 3, "Max" },
         };
 
-        /// <summary>CarStatus m_ersDeployMode (F1 25 UDP packet 7).</summary>
+        /// <summary>
+        /// CarStatus m_ersDeployMode. Vai para o `.otk` como `deployModeLast`, e o portal EXIBE
+        /// essa string crua ("modo final: Boost") no detalhe do piloto pos-corrida.
+        ///
+        /// O modo 3 se chamava "Overtake" e as regras de 2026 renomearam para BOOST — a spec
+        /// oficial do 2026 Season Pack ja escreve "3 = boost". Trocado aqui em 07/09/2026.
+        ///
+        /// ACOPLAMENTO: `deployModeBadgeClass` em src/components/race/DriverDetails.tsx casa a
+        /// string EXATA para escolher a cor do badge. Ele aceita "Boost" E "Overtake" desde
+        /// 07/09, porque corrida antiga guarda "Overtake" no json_data e tem que continuar
+        /// acendendo vermelho. O portal foi ANTES deste plugin, de proposito.
+        ///
+        /// Nao confundir com LiveSnapshotBuilder.ErsModeName, que e o caminho AO VIVO e usa os
+        /// nomes em portugues ("Nenhum/Medio/Volta Rapida/Boost") — aquele ja dizia Boost.
+        /// </summary>
         public static readonly Dictionary<int, string> ErsDeployModeMap = new Dictionary<int, string>
         {
-            { 0, "None" }, { 1, "Medium" }, { 2, "HotLap" }, { 3, "Overtake" },
+            { 0, "None" }, { 1, "Medium" }, { 2, "HotLap" }, { 3, "Boost" },
         };
 
         public static readonly Dictionary<int, string> ResultStatus = new Dictionary<int, string>

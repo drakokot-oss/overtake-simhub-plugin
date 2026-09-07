@@ -38,7 +38,19 @@ The game must be configured to send UDP telemetry:
 4. Set **UDP IP Address** to `127.0.0.1`
 5. Set **UDP Port** to `20777` (must match the plugin's port setting)
 6. Set **UDP Send Rate** to `20Hz` — do NOT raise it: F1's own guidance is 20Hz for stability, higher rates can cause packet loss
-7. Set **UDP Format** to `2025`
+7. Set **UDP Format** to the one native to your game — the plugin reads the format from the
+   packet header itself and understands both **2025** and **2026**, so leave it alone
+
+### Heads-up: F1 25 now has TWO UDP modes
+
+Since the **2026 Season Pack** (patch v1.25, 7 Sep 2026), F1 25 ships two UDP modes in the
+settings menu, and a **fresh install defaults to the Season Pack one**, which emits
+`packetFormat = 2026` — the same wire format as F1 26 (24 cars, quantised g-force, `uint16`
+team/driver ids, bigger Session packet).
+
+**Both work.** You do not need to switch anything: the plugin routes by the format in the header.
+If a broadcaster asks whether they are misconfigured because their F1 25 says 2026, the answer is
+no — that is the Season Pack, and it is supported.
 
 ## Usage
 

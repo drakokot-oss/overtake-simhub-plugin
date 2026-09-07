@@ -20,6 +20,10 @@ namespace Overtake.SimHub.Plugin.Parsers
         public CarTelemetryEntry[] CarTelemetry;
         public CarDamageEntry[] CarDamage;
         public SessionHistoryData SessionHistory;
+        /// <summary>Conjuntos de pneu de UM carro (packet 12 vem por carro, em rodizio).</summary>
+        public TyreSetEntry[] TyreSets;
+        public int TyreSetsCarIdx = -1;
+        public int TyreSetsFittedIdx = -1;
 
         /// <summary>
         /// Raw packet bytes, preserved so the store can sample them when the UDP
@@ -86,6 +90,15 @@ namespace Overtake.SimHub.Plugin.Parsers
                     break;
                 case 11:
                     result.SessionHistory = SessionHistoryData.Parse(data);
+                    break;
+                case 12:
+                    {
+                        // Um carro por pacote — quem consome acumula por carIdx.
+                        int ci, fi;
+                        result.TyreSets = TyreSetsData.Parse(data, out ci, out fi);
+                        result.TyreSetsCarIdx = ci;
+                        result.TyreSetsFittedIdx = fi;
+                    }
                     break;
                 default:
                     return result;
