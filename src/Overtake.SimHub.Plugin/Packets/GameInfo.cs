@@ -1,4 +1,4 @@
-namespace Overtake.SimHub.Plugin.Packets
+﻿namespace Overtake.SimHub.Plugin.Packets
 {
     /// <summary>
     /// Central constants and helpers for game-version awareness.
@@ -142,18 +142,31 @@ namespace Overtake.SimHub.Plugin.Packets
         }
 
         /// <summary>
-        /// True when a team id belongs to the F1 26 "2026 Season Pack" grid
-        /// (220-230). Used to detect 2026 content even when the wire format is
-        /// still 2025. Kept here (not in Finalizer.Lookups) so packet-layer code
-        /// can use it without referencing the Finalizer namespace.
+        /// True when a team id belongs to the 2026 F1 grid. Usado para detectar CONTEUDO 2026
+        /// mesmo quando o formato de fio ainda e 2025 — que e exatamente o caso do Season Pack
+        /// rodando dentro do F1 25. Fica aqui (e nao em Finalizer.Lookups) para o codigo da
+        /// camada de pacote usar sem referenciar o namespace Finalizer.
+        ///
+        /// DUAS faixas, e a razao importa:
+        ///   220-230  observado em captura REAL do F1 26. Nao existe no apendice oficial.
+        ///   476-486  do APENDICE OFICIAL do F1 25 2026 Season Pack (conferido no PDF da EA em
+        ///            07/09/2026): 476 Mercedes '26 ... 486 Cadillac '26.
+        ///
+        /// Aceitar as duas cobre os dois casos sem custo. Enquanto nao houver captura de F1 25 +
+        /// Season Pack nao sabemos qual delas ele emite de fato, e chutar uma so arriscava perder
+        /// o sinal justamente no cenario que este metodo existe para pegar.
         /// </summary>
         public const int F1_26TeamIdMin = 220;
         public const int F1_26TeamIdMax = 230;
+        /// <summary>Faixa do apendice oficial (F1 25 2026 Season Pack): 476 Mercedes '26 .. 486 Cadillac '26.</summary>
+        public const int F1_26TeamIdSpecMin = 476;
+        public const int F1_26TeamIdSpecMax = 486;
         public const int F1_26TrackIdMadring = 42;
 
         public static bool IsF1_26TeamId(int teamId)
         {
-            return teamId >= F1_26TeamIdMin && teamId <= F1_26TeamIdMax;
+            return (teamId >= F1_26TeamIdMin && teamId <= F1_26TeamIdMax)
+                || (teamId >= F1_26TeamIdSpecMin && teamId <= F1_26TeamIdSpecMax);
         }
 
         // ----------------------------------------------------------------------
