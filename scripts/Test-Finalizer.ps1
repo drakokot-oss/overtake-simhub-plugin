@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$DllPath = "$PSScriptRoot\..\src\Overtake.SimHub.Plugin\bin\Release\Overtake.SimHub.Plugin.dll"
 )
 $ErrorActionPreference = "Stop"
@@ -1261,7 +1261,11 @@ function Test-ErsTelemetry() {
     $oldHarv = Get-DictValue $ers "harvestedPctAvgPerLap"
     Assert "v1.1.35: legacy harvestedPctAvgPerLap removed" ($oldHarv -eq $null)
 
-    Assert "v1.1.34: deployModeLast == Overtake" ($modeLast -eq "Overtake")
+    # 07/09/2026: o modo 3 do ERS se chamava "Overtake" e as regras de 2026 renomearam para
+    # BOOST (a spec oficial do 2026 Season Pack ja escreve "3 = boost"). O portal aceita os DOIS
+    # no badge, porque corrida antiga guarda "Overtake" no json_data — mas o plugin passou a
+    # exportar so o nome novo, entao aqui a expectativa e "Boost".
+    Assert "modo 3 do ERS exportado como Boost (renomeado nas regras de 2026)" ($modeLast -eq "Boost")
     Assert "v1.1.34: samplesPaused == 1 (Hamilton paused once)" ([int]$samplesPaused -eq 1)
     Assert "v1.1.34: samplesCount >= 10" ([int]$samplesCount -ge 10)
 
