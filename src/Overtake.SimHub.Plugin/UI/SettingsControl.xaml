@@ -1,4 +1,4 @@
-<UserControl x:Class="Overtake.SimHub.Plugin.UI.SettingsControl"
+﻿<UserControl x:Class="Overtake.SimHub.Plugin.UI.SettingsControl"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:styles="clr-namespace:SimHub.Plugins.Styles;assembly=SimHub.Plugins"
@@ -61,7 +61,7 @@
                                        RequestNavigate="Hyperlink_RequestNavigate">
                                 racehub.overtakef1.com
                             </Hyperlink>
-                            <Run Text="  |  Envie seu JSON e receba resultados, classificacao e estatisticas na hora." />
+                            <Run Text="  |  Envie seu JSON e receba resultados, classificação e estatisticas na hora." />
                         </TextBlock>
                     </StackPanel>
 
@@ -129,7 +129,7 @@
                 <UniformGrid Rows="1" Columns="4">
                     <Button x:Name="BtnTabStatus" Content="Status" Style="{StaticResource TabButton}" Margin="2" Tag="status" Click="BtnTab_Click" />
                     <Button x:Name="BtnTabLive" Content="Transmitir" Style="{StaticResource TabButton}" Margin="2" Tag="live" Click="BtnTab_Click" />
-                    <Button x:Name="BtnTabConfig" Content="Configuracao" Style="{StaticResource TabButton}" Margin="2" Tag="config" Click="BtnTab_Click" />
+                    <Button x:Name="BtnTabConfig" Content="Configuração" Style="{StaticResource TabButton}" Margin="2" Tag="config" Click="BtnTab_Click" />
                     <Button x:Name="BtnTabHelp" Content="Ajuda" Style="{StaticResource TabButton}" Margin="2" Tag="help" Click="BtnTab_Click" />
                 </UniformGrid>
             </Border>
@@ -203,12 +203,12 @@
                                    Margin="0,0,0,5" TextWrapping="Wrap" FontStyle="Italic" />
 
                         <StackPanel Orientation="Horizontal" Margin="0,3">
-                            <TextBlock Text="Ultimo export: " Foreground="#7B8CA3" />
+                            <TextBlock Text="Último export: " Foreground="#7B8CA3" />
                             <TextBlock x:Name="LblLastExport" Text="nenhum ainda" Foreground="#7B8CA3" />
                         </StackPanel>
 
                         <CheckBox x:Name="ChkAutoExport"
-                                  Content="Exportar JSON automaticamente ao terminar a sessao"
+                                  Content="Exportar JSON automaticamente ao terminar a sessão"
                                   Margin="0,8,0,0"
                                   Checked="ChkAutoExport_Changed"
                                   Unchecked="ChkAutoExport_Changed" />
@@ -221,8 +221,8 @@
                                     Click="BtnNewSession_Click" />
                         </StackPanel>
                         <TextBlock Foreground="#7B8CA3" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap">
-                            <Run FontWeight="SemiBold" Foreground="#FFD54F">Apos exportar</Run>
-                            <Run>e antes da proxima corrida ou lobby, clique em Nova Sessao para apagar telemetria em memoria. O UDP continua ativo; evita misturar duas corridas no mesmo ficheiro.</Run>
+                            <Run FontWeight="SemiBold" Foreground="#FFD54F">Após exportar</Run>
+                            <Run>e antes da proxima corrida ou lobby, clique em Nova Sessão para apagar telemetria em memoria. O UDP continua ativo; evita misturar duas corridas no mesmo ficheiro.</Run>
                         </TextBlock>
 
                         <TextBlock Foreground="#7B8CA3" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap">
@@ -232,7 +232,7 @@
                                        RequestNavigate="Hyperlink_RequestNavigate">
                                 racehub.overtakef1.com
                             </Hyperlink>
-                            <Run>para receber resultados, classificacao e estatisticas na hora.</Run>
+                            <Run>para receber resultados, classificação e estatisticas na hora.</Run>
                         </TextBlock>
                     </StackPanel>
                 </styles:SHSection>
@@ -241,22 +241,25 @@
 
             <!-- ================= ABA: TRANSMITIR ================= -->
             <StackPanel x:Name="PanelTabLive" Visibility="Collapsed">
-                <styles:SHSection Title="Transmissao ao vivo (overtakef1)">
+                <styles:SHSection Title="Transmissão ao vivo (overtakef1)">
                     <StackPanel Margin="10">
                         <Border Background="#2A2210" CornerRadius="6" Padding="12,10" Margin="0,0,0,12" BorderBrush="#5C4A10" BorderThickness="1">
                             <TextBlock TextWrapping="Wrap" FontSize="11">
-                                <Run FontWeight="Bold" Foreground="#FFD54F">&#x2605;  Exclusivo de ligas Elite ou Founder.</Run>
+                                <Run FontWeight="Bold" Foreground="#FFD54F">&#x2605;  Para ligas Elite/Founder e para equipes com Pit Wall.</Run>
                                 <LineBreak />
-                                <Run Foreground="#B9A66A">A geracao do token e a transmissao ao vivo estao disponiveis apenas para admins de ligas Elite/Founder.</Run>
+                                <Run Foreground="#B9A66A">Admin de liga Elite ou Founder gera o token no site; piloto de equipe com o Pit Wall ativo gera na página da equipe. Se você tem um token, ele funciona aqui.</Run>
                             </TextBlock>
                         </Border>
 
                         <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,10">
                             <Run FontWeight="Bold" Foreground="#2EC4B6">Leve a corrida ao vivo para o portal overtakef1.</Run>
-                            <Run>Gere o token em Perfil &gt; Transmissao / SimHub no site, cole abaixo, conecte, escolha a liga/grid/corrida e clique IR AO AR. Nao afeta o arquivo .otk.</Run>
+                            <Run>Cole o token abaixo, conecte, escolha onde transmitir e clique IR AO AR. Não afeta o arquivo .otk.</Run>
+                            <LineBreak />
+                            <Run FontWeight="Bold">Onde gerar o token:</Run>
+                            <Run>liga em Perfil &gt; Transmissão / SimHub; equipe em Equipes &gt; sua equipe &gt; Telemetria.</Run>
                         </TextBlock>
 
-                        <TextBlock Text="1 &#xB7; Token de transmissao" FontWeight="Bold" Foreground="#2EC4B6" Margin="0,0,0,4" />
+                        <TextBlock Text="1 &#xB7; Token de transmissão" FontWeight="Bold" Foreground="#2EC4B6" Margin="0,0,0,4" />
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                             <TextBox x:Name="TxtLiveToken"
                                      Width="320"
@@ -274,13 +277,21 @@
                         </StackPanel>
 
                         <TextBlock Text="2 &#xB7; Onde transmitir" FontWeight="Bold" Foreground="#2EC4B6" Margin="0,12,0,4" />
-                        <TextBlock Text="Liga" FontWeight="Bold" Margin="0,0,0,3" />
+                        <!-- O rotulo troca para "Equipe" quando o token e de equipe (kind=team
+                             na resposta do live-start). Antes dizia sempre "Liga", e um piloto de
+                             equipe lia "Liga: ELITE RACING TEAM" e concluia que estava no lugar
+                             errado. Ver AplicarRotulosDeContexto no code-behind. -->
+                        <TextBlock x:Name="LblLeague" Text="Liga" FontWeight="Bold" Margin="0,0,0,3" />
                         <ComboBox x:Name="CmbLeague" Margin="0,0,0,8"
                                   SelectionChanged="CmbLeague_SelectionChanged" />
 
-                        <TextBlock Text="Grid / temporada" FontWeight="Bold" Margin="0,0,0,3" />
-                        <ComboBox x:Name="CmbGrid" Margin="0,0,0,8"
-                                  SelectionChanged="CmbGrid_SelectionChanged" />
+                        <!-- Escondido quando o unico grid e o sintetico (UUID todo-zeros): mostrar
+                             "Grid / temporada: N/A" era expor campo de uso interno ao usuario. -->
+                        <StackPanel x:Name="PanelGrid">
+                            <TextBlock Text="Grid / temporada" FontWeight="Bold" Margin="0,0,0,3" />
+                            <ComboBox x:Name="CmbGrid" Margin="0,0,0,8"
+                                      SelectionChanged="CmbGrid_SelectionChanged" />
+                        </StackPanel>
 
                         <StackPanel x:Name="PanelExistingRace">
                             <TextBlock Text="Corrida agendada" FontWeight="Bold" Margin="0,0,0,3" />
@@ -310,7 +321,7 @@
                             </StackPanel>
                         </StackPanel>
 
-                        <TextBlock Text="Tipo de sessao" FontWeight="Bold" Margin="0,0,0,3" />
+                        <TextBlock Text="Tipo de sessão" FontWeight="Bold" Margin="0,0,0,3" />
                         <ComboBox x:Name="CmbSessionType" Margin="0,0,0,12" />
 
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
@@ -355,7 +366,7 @@
                                     Content="APLICAR"
                                     Padding="15,5"
                                     Click="BtnApplyPort_Click" />
-                            <TextBlock Text="Deve bater com a porta de telemetria do jogo (padrao: 20778)"
+                            <TextBlock Text="Deve bater com a porta de telemetria do jogo (padrão: 20778)"
                                        Foreground="#7B8CA3" FontSize="11"
                                        VerticalAlignment="Center" Margin="10,0,0,0" />
                         </StackPanel>
@@ -379,7 +390,7 @@
                     <StackPanel Margin="10">
                         <TextBlock TextWrapping="Wrap" Foreground="#7B8CA3" FontSize="12" Margin="0,0,0,8">
                             <Run FontWeight="Bold" Foreground="#2EC4B6">Overlay da corrida em tempo real (OBS).</Run>
-                            <Run>Pagina local que mostra a corrida ao vivo (classificacao, pneus, ERS, combustivel, danos, punicoes). Independente da transmissao para o portal.</Run>
+                            <Run>Página local que mostra a corrida ao vivo (classificação, pneus, ERS, combustivel, danos, punicoes). Independente da transmissão para o portal.</Run>
                         </TextBlock>
 
                         <CheckBox x:Name="ChkRaceUi"
@@ -398,7 +409,7 @@
                                     Content="APLICAR"
                                     Padding="15,5"
                                     Click="BtnApplyRaceUi_Click" />
-                            <TextBlock Text="Padrao: 8088"
+                            <TextBlock Text="Padrão: 8088"
                                        Foreground="#7B8CA3" FontSize="11"
                                        VerticalAlignment="Center" Margin="10,0,0,0" />
                         </StackPanel>
@@ -429,10 +440,10 @@
             <!-- ================= ABA: AJUDA ================= -->
             <StackPanel x:Name="PanelTabHelp" Visibility="Collapsed">
 
-                <styles:SHSection Title="Guia de configuracao (PC)">
+                <styles:SHSection Title="Guia de configuração (PC)">
                     <StackPanel Margin="10">
                         <TextBlock TextWrapping="Wrap" Foreground="#CCC" FontSize="12">
-                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 1 - Configuracao no jogo (F1 25/26):</Run>
+                            <Run FontWeight="Bold" Foreground="#2EC4B6">PASSO 1 - Configuração no jogo (F1 25/26):</Run>
                             <LineBreak />
                             <Run>Ajustes > Telemetria > Telemetria UDP = Ligado</Run>
                             <LineBreak />
@@ -444,7 +455,7 @@
                             <LineBreak />
                             <Run FontWeight="Bold" Foreground="#FFD54F">Defina a Porta UDP = 20777</Run>
                             <LineBreak />
-                            <Run Foreground="#7B8CA3">(O SimHub detecta 20778 do jogo. Voce PRECISA mudar de volta para 20777.)</Run>
+                            <Run Foreground="#7B8CA3">(O SimHub detecta 20778 do jogo. Você PRECISA mudar de volta para 20777.)</Run>
                             <LineBreak /><LineBreak />
                             <Run FontWeight="Bold" Foreground="#2EC4B6">Como funciona:</Run>
                             <LineBreak />
@@ -486,7 +497,7 @@
                             <LineBreak />
                             <Run Foreground="#7B8CA3">- Firewall do Windows deve permitir UDP na porta 20778</Run>
                             <LineBreak />
-                            <Run Foreground="#7B8CA3">- SimHub rodando no PC durante a sessao</Run>
+                            <Run Foreground="#7B8CA3">- SimHub rodando no PC durante a sessão</Run>
                         </TextBlock>
                     </StackPanel>
                 </styles:SHSection>
@@ -497,7 +508,7 @@
                             <Run FontWeight="Bold" Foreground="#2EC4B6">Overtake Race Hub</Run>
                             <Run> &#x2014; A plataforma completa de gestao de ligas de F1.</Run>
                             <LineBreak />
-                            <Run>Classificacao automatica, estatisticas, relatorios de incidentes e mais.</Run>
+                            <Run>Classificação automatica, estatisticas, relatorios de incidentes e mais.</Run>
                         </TextBlock>
 
                         <TextBlock Margin="0,10,0,0" FontSize="11">
@@ -530,7 +541,7 @@
                                 </TextBlock>
                                 <TextBlock Foreground="#7B8CA3" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0">
                                     <Run FontWeight="Bold" Foreground="#E0E0E0">Uso de internet: quase zero.</Run>
-                                    <Run> A unica requisicao e uma verificacao (~200 bytes) ao abrir o SimHub, para avisar de novas versoes. (A transmissao ao vivo, quando ativada, envia os dados ao portal.)</Run>
+                                    <Run> A unica requisicao e uma verificacao (~200 bytes) ao abrir o SimHub, para avisar de novas versoes. (A transmissão ao vivo, quando ativada, envia os dados ao portal.)</Run>
                                 </TextBlock>
                             </StackPanel>
                         </Border>

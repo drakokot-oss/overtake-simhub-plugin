@@ -13,7 +13,31 @@ namespace Overtake.SimHub.Plugin.Live
     public class EligibleRace { public string RaceId; public string Name; public string Track; public string Status; }
     public class ScheduledRace { public string Id; public string Name; public string Track; public string RaceDate; public string ScheduledTime; }
     public class EligibleGrid { public string GridId; public string GridName; public List<EligibleRace> Races = new List<EligibleRace>(); }
-    public class EligibleLeague { public string LeagueId; public string LeagueName; public List<EligibleGrid> Grids = new List<EligibleGrid>(); }
+    public class EligibleLeague
+    {
+        public string LeagueId;
+        public string LeagueName;
+        /// <summary>"league" ou "team" — vem do live-start (aditivo em 07/09). Vazio em
+        /// servidor antigo, e nesse caso trata-se como liga, que era o comportamento de sempre.</summary>
+        public string Kind;
+        public List<EligibleGrid> Grids = new List<EligibleGrid>();
+
+        public bool IsTeam { get { return Kind == "team"; } }
+
+        /// <summary>
+        /// True quando o unico grid e o SINTETICO (UUID todo-zeros) que o Pit Wall devolve para
+        /// preservar a forma da resposta. Nao ha temporada real para escolher, entao a linha do
+        /// grid nao deve nem aparecer — mostrar "N/A" era expor campo interno ao usuario.
+        /// </summary>
+        public bool HasNoRealGrid
+        {
+            get
+            {
+                return Grids.Count == 1 && Grids[0] != null
+                    && Grids[0].GridId == "00000000-0000-0000-0000-000000000000";
+            }
+        }
+    }
 
     /// <summary>
     /// Cloud live-broadcast client. Streams the (read-only) live snapshot to the
@@ -151,7 +175,7 @@ namespace Overtake.SimHub.Plugin.Live
                 foreach (var le in eligible)
                 {
                     var lm = le as Dictionary<string, object>; if (lm == null) continue;
-                    var L = new EligibleLeague { LeagueId = S(lm, "leagueId"), LeagueName = S(lm, "leagueName") };
+                    var L = new EligibleLeague { LeagueId = S(lm, "leagueId"), LeagueName = S(lm, "leagueName"), Kind = S(lm, "kind") };
                     var grids = lm.ContainsKey("grids") ? lm["grids"] as object[] : null;
                     if (grids != null) foreach (var ge in grids)
                     {
