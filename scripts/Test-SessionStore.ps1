@@ -609,6 +609,87 @@ $info25 = Resolve-Info @((New-SessionRun 2025 25 $null $normal25))
 Assert "Resolve: ContentPack2026 false no F1 25 puro" ($info25.ContentPack2026 -eq $false)
 Assert "Resolve: NewestPacketFormat carrega o formato visto" ($info25.NewestPacketFormat -eq 2025)
 
+# ---- Test: packet 12 (conjuntos de pneu) acumula POR CARRO ----
+# O jogo manda este pacote em rodizio, UM carro por pacote. Se o store guardasse "o ultimo
+# recebido" em vez de guardar por carIdx, a torre mostraria os conjuntos do carro errado -- e
+# pior, pareceria funcionar, porque sempre haveria dado plausivel na tela.
+Write-Host "=== Test: conjuntos de pneu (packet 12) por carIdx ===" -ForegroundColor Cyan
+$storeTs = [System.Activator]::CreateInstance($storeType)
+
+$spTs = New-Object byte[] 700
+$spTs[0] = 1; $spTs[6] = 15; $spTs[7] = 24
+$spTs[124] = 0; $spTs[125] = 1
+DoIngest $storeTs (Dispatch (New-FakePacket 1 $spTs ([uint64]777)))
+
+$ppTs = New-Object byte[] 1256
+$ppTs[0] = 2
+# Slot vazio nao e slot valido: zerado viraria teamId 0 (Mercedes) com numero 0.
+for ($zi = 0; $zi -lt 22; $zi++) { $ppTs[1 + $zi * 57 + 3] = 255 }
+# Layout 2025: driverId@1, networkId@2, teamId@3, myTeam@4, raceNumber@5, nationality@6.
+$ppTs[1 + 1] = 1; $ppTs[1 + 2] = 10; $ppTs[1 + 3] = 0; $ppTs[1 + 5] = 7; $ppTs[1 + 40] = 1; $ppTs[1 + 43] = 1
+$nmA = [System.Text.Encoding]::UTF8.GetBytes("PILOTO_A")
+[System.Array]::Copy($nmA, 0, $ppTs, (1 + 7), $nmA.Length)
+$sTs = 1 + 57
+$ppTs[$sTs + 1] = 2; $ppTs[$sTs + 2] = 20; $ppTs[$sTs + 3] = 1; $ppTs[$sTs + 5] = 44; $ppTs[$sTs + 40] = 1; $ppTs[$sTs + 43] = 1
+$nmB = [System.Text.Encoding]::UTF8.GetBytes("PILOTO_B")
+[System.Array]::Copy($nmB, 0, $ppTs, ($sTs + 7), $nmB.Length)
+DoIngest $storeTs (Dispatch (New-FakePacket 4 $ppTs ([uint64]777)))
+
+function New-TyreSetsPayload([int]$carIdx, [byte]$actual, [byte]$wear, [byte]$lifeSpan, [byte]$usableLife, [int16]$deltaMs, [byte]$fittedIdx) {
+    $body = New-Object byte[] 202
+    $body[0] = [byte]$carIdx
+    $body[1 + 0] = $actual; $body[1 + 1] = $actual; $body[1 + 2] = $wear; $body[1 + 3] = 1
+    $body[1 + 4] = 3; $body[1 + 5] = $lifeSpan; $body[1 + 6] = $usableLife
+    [System.BitConverter]::GetBytes($deltaMs).CopyTo($body, 1 + 7)
+    $body[1 + 9] = 1
+    $body[201] = $fittedIdx
+    return ,$body
+}
+
+# Carro 0 primeiro, carro 1 depois -- ordem do rodizio real.
+DoIngest $storeTs (Dispatch (New-FakePacket 12 (New-TyreSetsPayload 0 16 0 25 26 ([int16]0) 0) ([uint64]777)))
+DoIngest $storeTs (Dispatch (New-FakePacket 12 (New-TyreSetsPayload 1 18 41 9 30 ([int16]-1250) 3) ([uint64]777)))
+
+$sessTs = GetSession $storeTs "777"
+Assert "packet 12: sessao existe" ($sessTs -ne $null)
+$drvsTs = Get-Field $sessTs "Drivers"
+$drvA = $null; $drvB = $null
+foreach ($kv in $drvsTs.GetEnumerator()) {
+    if ((Get-Field $kv.Value "CarIdx") -eq 0) { $drvA = $kv.Value }
+    if ((Get-Field $kv.Value "CarIdx") -eq 1) { $drvB = $kv.Value }
+}
+Assert "packet 12: os dois carros existem no store" (($drvA -ne $null) -and ($drvB -ne $null))
+
+$setsA = Get-Field $drvA "TyreSets"
+$setsB = Get-Field $drvB "TyreSets"
+Assert "packet 12: carro 0 tem conjuntos" ($setsA -ne $null)
+Assert "packet 12: carro 1 tem conjuntos (o segundo nao apagou o primeiro)" ($setsB -ne $null)
+Assert "packet 12: 20 slots por carro (cs_maxNumTyreSets)" ($setsA.Length -eq 20)
+
+# A separacao por carro: composto, desgaste e fitted nao podem ter vazado de um para o outro.
+Assert "packet 12: composto do carro 0 preservado (16)" ((Get-Field $setsA[0] "ActualCompound") -eq 16)
+Assert "packet 12: composto do carro 1 e o dele (18), nao o do carro 0" ((Get-Field $setsB[0] "ActualCompound") -eq 18)
+Assert "packet 12: desgaste do carro 0 preservado (0%)" ((Get-Field $setsA[0] "Wear") -eq 0)
+Assert "packet 12: desgaste do carro 1 e o dele (41%)" ((Get-Field $setsB[0] "Wear") -eq 41)
+Assert "packet 12: fittedIdx do carro 0 = 0" ((Get-Field $drvA "TyreSetsFittedIdx") -eq 0)
+Assert "packet 12: fittedIdx do carro 1 = 3, nao herdou o 0" ((Get-Field $drvB "TyreSetsFittedIdx") -eq 3)
+
+# Armadilha do fio: lifeSpan (+5) vem ANTES de usableLife (+6). Valores distintos de proposito.
+Assert "packet 12: LifeSpan le +5 (25 restantes no carro 0)" ((Get-Field $setsA[0] "LifeSpan") -eq 25)
+Assert "packet 12: UsableLife le +6 (26 recomendadas no carro 0)" ((Get-Field $setsA[0] "UsableLife") -eq 26)
+Assert "packet 12: LifeSpan/UsableLife nao trocados no carro 1 (9 / 30)" `
+    (((Get-Field $setsB[0] "LifeSpan") -eq 9) -and ((Get-Field $setsB[0] "UsableLife") -eq 30))
+
+# int16 assinado: conjunto mais rapido que o montado tem delta NEGATIVO.
+Assert "packet 12: lapDelta negativo sobrevive como int16 (-1250 ms)" ((Get-Field $setsB[0] "LapDeltaMs") -eq -1250)
+
+# Pacote truncado: melhor ausente do que meio lido -- meio conjunto viraria desgaste plausivel.
+$curto = New-Object byte[] 120
+$curto[0] = 0
+DoIngest $storeTs (Dispatch (New-FakePacket 12 $curto ([uint64]777)))
+Assert "packet 12: pacote curto nao substitui o dado bom do carro 0" `
+    (((Get-Field $drvA "TyreSets") -ne $null) -and ((Get-Field (Get-Field $drvA "TyreSets")[0] "ActualCompound") -eq 16))
+
 # ---- Summary ----
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Yellow
